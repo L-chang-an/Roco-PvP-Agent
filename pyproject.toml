@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rock-pvp-agent"
+version = "0.1.0"
+description = "Rock PVP Agent — 人机协作从零重建的自对战 LLM agent（chat mode 起步）"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "langchain-core>=0.3.29",
+  "langchain-openai>=0.2.14",
+  "pydantic>=2.10.0",
+  "rich>=13.9.4",
+  "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+ui = ["fastapi>=0.115.0", "uvicorn>=0.30.0"]
+dev = ["pytest", "pytest-asyncio", "respx"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rock_pvp_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
