@@ -7,7 +7,7 @@ import argparse
 
 from rich.console import Console
 
-from .agent import ChatAgent
+from .agent import ChatAgent, ChatReply
 from .config import get_settings
 
 console = Console()
@@ -24,8 +24,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.serve:
-        console.print("[yellow]--serve 将在 M3 实现，敬请期待[/yellow]")
-        return 0
+        try:
+            from .ui.__main__ import run_ui
+        except ImportError:
+            console.print("[red]Web UI 依赖未安装，请先运行：uv sync --all-extras[/red]")
+            return 1
+        return run_ui()
 
     agent = ChatAgent(get_settings())
     if args.query:
@@ -58,12 +62,15 @@ def _repl(agent: ChatAgent, debug: bool) -> int:
     return 0
 
 
-def _print_reply(reply, debug: bool) -> None:
+def _print_reply(reply: ChatReply, debug: bool) -> None:
     if debug:
         for step in reply.thinking:
             console.print(f"[dim]💭 {step}[/dim]")
         for tc in reply.tool_calls:
             console.print(f"[dim]🔧 {tc['name']}({tc['args']}) -> {tc['result']}[/dim]")
+        if reply.usage.get("total_tokens"):
+            u = reply.usage
+            console.print(f"[dim]⚡ tokens: 输入 {u['input_tokens']} / 输出 {u['output_tokens']} / 总计 {u['total_tokens']}[/dim]")
     if reply.offline:
         console.print("[yellow]（离线模式）[/yellow]")
     console.print(f"[bold]{reply.reply}[/bold]")

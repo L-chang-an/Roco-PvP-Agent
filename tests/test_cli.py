@@ -50,10 +50,16 @@ def test_version_flag(monkeypatch, capsys):
     assert "0.1.0" in capsys.readouterr().out
 
 
-def test_serve_is_placeholder(monkeypatch, capsys):
+def test_serve_calls_run_ui(monkeypatch, capsys):
+    """--serve 委托给 ui.__main__.run_ui（M3 起不再是占位）。"""
+    called = []
+    monkeypatch.setattr(
+        "rock_pvp_agent.ui.__main__.run_ui",
+        lambda: called.append(True) or 0,
+    )
     code = _run_main(monkeypatch, ["--serve"])
     assert code == 0
-    assert "M3" in capsys.readouterr().out
+    assert called == [True]
 
 
 def test_single_query_offline(monkeypatch, agent_settings, capsys):

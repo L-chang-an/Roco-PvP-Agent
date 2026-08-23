@@ -35,29 +35,47 @@ EVENT_DONE = "done"
 def _content_text(response) -> str:
     """从响应中提取纯文本 content。
 
-    兼容字符串与 Anthropic 风格的块列表（text / tool_use 块），tool_use 块不算思考文本。
+    兼容字符串与 Anthropic 风格的块列表（text / tool_use / thinking 块）：
+    - text 块取 text 字段；
+    - thinking 块取 thinking 字段（思维链）；
+    - tool_use 块不算思考文本。
     """
     content = getattr(response, "content", "")
     if isinstance(content, list):
         parts = []
         for block in content:
             if isinstance(block, dict):
-                if block.get("type") == "text":
+                btype = block.get("type")
+                if btype == "text":
                     parts.append(str(block.get("text", "")))
+                elif btype in ("thinking", "reasoning_content", "redacted_thinking"):
+                    parts.append(str(block.get("thinking") or block.get("text") or ""))
             else:
                 parts.append(str(block))
         return "\n".join(part for part in parts if part)
     return str(content or "")
 
 
+def _reasoning_text(response) -> str:
+    """提取网关返回的 thinking 链文本（OpenAI 兼容的 reasoning_content 字段）。"""
+    kwargs = getattr(response, "additional_kwargs", None) or {}
+    rc = kwargs.get("reasoning_content")
+    if isinstance(rc, str) and rc.strip():
+        return rc
+    return ""
+
+
 @dataclass
 class ChatReply:
     reply: str
-    tool_calls: list[dict] = field(default_factory=list)
+    tool_calls: list[dict[str, object]] = field(default_factory=list)
     thinking: list[str] = field(default_factory=list)
     history: list[BaseMessage] = field(default_factory=list)
     offline: bool = False
     rounds: int = 0
+    usage: dict[str, int] = field(
+        default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    )
 
 
 class ChatAgent:
@@ -132,15 +150,23 @@ class ChatAgent:
 
         tool_log: list[dict] = []
         thinking: list[str] = []
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         reply_text = EMPTY_REPLY
         rounds = 0
 
         for rounds in range(1, self._max_llm_rounds + 1):
             response = llm.invoke(working)
             working.append(response)
+            self._accumulate_usage(usage, response)
 
             content = _content_text(response)
             calls = getattr(response, "tool_calls", None) or []
+            reasoning = _reasoning_text(response)
+
+            # 思维链文本：reasoning_content 无条件捕获为思考；content 仅在有工具调用时算思考
+            if reasoning:
+                thinking.append(reasoning)
+                self._emit(event_sink, {"event": EVENT_THINKING, "text": reasoning})
 
             # 兜底：模型未守协议，返回无工具调用 → 以 content 为终稿（空则 EMPTY_REPLY）
             if not calls:
@@ -189,9 +215,19 @@ class ChatAgent:
             thinking=thinking,
             history=working[1:],
             rounds=rounds,
+            usage=usage,
         )
         self._emit_reply_events(event_sink, reply_obj)
         return reply_obj
+
+    @staticmethod
+    def _accumulate_usage(usage: dict, response) -> None:
+        """把一次 LLM 响应的 usage_metadata 累加进统计（网关不给 usage 时保持 0）。"""
+        meta = getattr(response, "usage_metadata", None) or {}
+        for key in ("input_tokens", "output_tokens", "total_tokens"):
+            val = meta.get(key)
+            if isinstance(val, int):
+                usage[key] += val
 
     def _invoke_tool(self, tools_map: dict, call: dict) -> str:
         """执行单个工具调用；任何异常都吞成错误字符串（宁失败不抛）。"""
@@ -214,5 +250,13 @@ class ChatAgent:
     def _emit_reply_events(self, event_sink: Optional[Callable[[dict], None]], reply_obj: ChatReply) -> None:
         if event_sink is None:
             return
-        event_sink({"event": EVENT_REPLY, "text": reply_obj.reply, "offline": reply_obj.offline, "rounds": reply_obj.rounds})
+        event_sink(
+            {
+                "event": EVENT_REPLY,
+                "text": reply_obj.reply,
+                "offline": reply_obj.offline,
+                "rounds": reply_obj.rounds,
+                "usage": reply_obj.usage,
+            }
+        )
         event_sink({"event": EVENT_DONE})

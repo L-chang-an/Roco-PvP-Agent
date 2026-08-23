@@ -4,10 +4,47 @@
 """
 
 import threading
+from typing import Any
 
+from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 
 from .config import Settings
+
+
+class ReasoningChatOpenAI(ChatOpenAI):
+    """透传网关的 reasoning_content（思维链）到 additional_kwargs。
+
+    langchain 通用 ChatOpenAI 会丢弃 `reasoning_content`（见其文档字符串），
+    导致模型中间推理文本不可见。子类在消息转换后把该字段捞回，
+    agent 侧再从 additional_kwargs 提取为 thinking 事件。
+    """
+
+    def _create_chat_result(
+        self, response: Any, generation_info: dict[str, Any] | None = None
+    ) -> ChatResult:
+        result = super()._create_chat_result(response, generation_info)
+        if isinstance(response, dict):
+            choices = response.get("choices") or []
+        else:
+            choices = getattr(response, "choices", None) or []
+        for idx, gen in enumerate(result.generations):
+            if idx >= len(choices):
+                break
+            choice = choices[idx]
+            msg = (
+                choice.get("message", {})
+                if isinstance(choice, dict)
+                else getattr(choice, "message", {})
+            )
+            rc = (
+                msg.get("reasoning_content")
+                if isinstance(msg, dict)
+                else getattr(msg, "reasoning_content", None)
+            )
+            if rc:
+                gen.message.additional_kwargs["reasoning_content"] = rc
+        return result
 
 
 def normalize_base_url(url: str) -> str:
@@ -54,6 +91,6 @@ def build_chat_llm(settings: Settings, tools, *, llm=None):
         if base_url:
             kwargs["base_url"] = base_url
 
-        instance = ChatOpenAI(**kwargs).bind_tools(list(tools))
+        instance = ReasoningChatOpenAI(**kwargs).bind_tools(list(tools))
         _CACHE[key] = instance
         return instance

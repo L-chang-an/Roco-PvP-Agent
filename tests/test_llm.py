@@ -58,9 +58,40 @@ class _FakeChatOpenAI:
 
 
 def _monkeypatch_chat(monkeypatch):
+    """build_chat_llm 用 ReasoningChatOpenAI（ChatOpenAI 子类），monkeypatch 它。"""
     from rock_pvp_agent import llm as llm_module
 
-    monkeypatch.setattr(llm_module, "ChatOpenAI", _FakeChatOpenAI)
+    monkeypatch.setattr(llm_module, "ReasoningChatOpenAI", _FakeChatOpenAI)
+
+
+# ---------- reasoning_content（思维链）透传 ----------
+
+def test_reasoning_content_survives_conversion():
+    """真实 ReasonChatOpenAI 把网关的 reasoning_content 捞进 additional_kwargs。"""
+    from rock_pvp_agent.llm import ReasoningChatOpenAI
+
+    llm = ReasoningChatOpenAI(api_key="sk-test", base_url="http://test.invalid", model="m")
+    resp = {
+        "id": "x",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "先心算一下，再用工具验证",
+                    "tool_calls": [],
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    result = llm._create_chat_result(resp)
+    assert result.generations[0].message.additional_kwargs["reasoning_content"] == "先心算一下，再用工具验证"
 
 
 def test_cache_reuses_instance_for_same_config(agent_settings, monkeypatch):

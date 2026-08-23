@@ -166,6 +166,111 @@ def test_no_event_sink_is_safe(agent_settings):
     assert reply.reply == "ok"
 
 
+# ---------- token 统计 ----------
+
+def test_usage_accumulated_across_rounds(agent_settings):
+    """多轮 LLM 调用的 usage_metadata 累加进 ChatReply.usage。"""
+    llm = ScriptedLLM([
+        AIMessage(
+            content="",
+            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            usage_metadata={"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+        ),
+        AIMessage(
+            content="",
+            tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")],
+            usage_metadata={"input_tokens": 5, "output_tokens": 15, "total_tokens": 20},
+        ),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("1+1?")
+    assert reply.usage == {"input_tokens": 15, "output_tokens": 35, "total_tokens": 50}
+
+
+def test_usage_zero_when_gateway_missing_usage(agent_settings):
+    """网关不给 usage → 统计保持 0（不崩）。"""
+    llm = ScriptedLLM([AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "ok"})])])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
+def test_offline_usage_zero(agent_settings):
+    reply = ChatAgent(agent_settings).chat("hi")
+    assert reply.usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
+def test_reply_event_carries_usage(agent_settings):
+    events: list[dict] = []
+    llm = ScriptedLLM([
+        AIMessage(
+            content="",
+            tool_calls=[tool_call("final_answer", {"text": "ok"}, "c1")],
+            usage_metadata={"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+        ),
+    ])
+    ChatAgent(agent_settings, llm=llm).chat("hi", event_sink=events.append)
+    reply_event = next(e for e in events if e["event"] == "reply")
+    assert reply_event["usage"] == {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+
+
+# ---------- 思维链（reasoning_content） ----------
+
+def test_reasoning_content_becomes_thinking(agent_settings):
+    """网关的 reasoning_content 捕获为思考文本，并发出 thinking 事件。"""
+    events: list[dict] = []
+    llm = ScriptedLLM([
+        AIMessage(
+            content="",
+            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            additional_kwargs={"reasoning_content": "先心算，再用工具验证"},
+        ),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("1+1?", event_sink=events.append)
+    assert reply.thinking == ["先心算，再用工具验证"]
+    assert [e["event"] for e in events] == ["thinking", "tool", "reply", "done"]
+
+
+def test_reasoning_without_tools_still_shown(agent_settings):
+    """即使直接给终稿（无工具调用），reasoning 也进 thinking。"""
+    llm = ScriptedLLM([
+        AIMessage(content="答案是 2", additional_kwargs={"reasoning_content": "1+1=2"}),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.reply == "答案是 2"
+    assert reply.thinking == ["1+1=2"]
+
+
+def test_content_and_reasoning_both_thinking(agent_settings):
+    """同时有 reasoning 与伴随工具调用的 content → 都进 thinking。"""
+    llm = ScriptedLLM([
+        AIMessage(
+            content="我先算一下",
+            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            additional_kwargs={"reasoning_content": "推理：直接算"},
+        ),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.thinking == ["推理：直接算", "我先算一下"]
+
+
+def test_thinking_block_extracted_from_anthropic_style(agent_settings):
+    """Anthropic 风格 thinking 块也被提取为思考文本。"""
+    llm = ScriptedLLM([
+        AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "内部推理"},
+                {"type": "text", "text": "我算一下"},
+                {"type": "tool_use", "id": "c1", "name": "calculator", "input": {"expression": "1+1"}},
+            ],
+            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+        ),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.thinking == ["内部推理\n我算一下"]
+
+
 # ---------- 历史：无状态 + 可重放 ----------
 
 def test_history_threading(agent_settings):
