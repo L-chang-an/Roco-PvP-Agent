@@ -17,7 +17,6 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["fastapi>=0.115.0", "uvicorn>=0.30.0"]
-dev = ["pytest", "pytest-asyncio", "respx"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rock_pvp_agent"]
@@ -25,3 +24,11 @@ packages = ["src/rock_pvp_agent"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "respx",
+    "pytest-cov>=7.1.0",
+]

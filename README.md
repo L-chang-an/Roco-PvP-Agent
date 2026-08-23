@@ -12,7 +12,9 @@
 
 ```bash
 uv sync
-uv sync --extra ui --extra dev
+uv sync --extra ui
 cp .env.example .env   # 填写 LLM_API_KEY / LLM_BASE_URL
 uv run python -m rock_pvp_agent --version
 ```
+
+> 注：dev 依赖（pytest 等）在 `[dependency-groups] dev`，`uv sync` 默认安装。

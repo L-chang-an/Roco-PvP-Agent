@@ -142,9 +142,9 @@ class ChatAgent:
             content = _content_text(response)
             calls = getattr(response, "tool_calls", None) or []
 
-            # 兜底：模型未守协议，无工具调用却直接吐文本 → 当终稿
-            if content and not calls:
-                reply_text = content
+            # 兜底：模型未守协议，返回无工具调用 → 以 content 为终稿（空则 EMPTY_REPLY）
+            if not calls:
+                reply_text = content or EMPTY_REPLY
                 break
 
             # 思考文本：伴随工具调用的中间输出，记为思考

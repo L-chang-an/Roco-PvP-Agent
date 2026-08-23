@@ -1,12 +1,16 @@
-"""M1 冒烟：离线路径 + 在线工具循环（fake LLM）+ 事件序列契约。"""
+"""ChatAgent 行为测试（fake LLM 鸭子类型，零网络）。
+
+覆盖：离线降级 / 显式终稿 / 工具循环 / 轮次兜底 / 错误吞掉 / 事件契约 / 历史可重放 / 边界情况。
+"""
 
 from langchain_core.messages import AIMessage
 
-from rock_pvp_agent.agent import ChatAgent
-from rock_pvp_agent.config import Settings
+from rock_pvp_agent.agent import ChatAgent, EMPTY_REPLY, OFFLINE_HINT
 
 from fakes import AlwaysToolLLM, ScriptedLLM, tool_call
 
+
+# ---------- 离线路径 ----------
 
 def test_offline_reply_without_api_key(agent_settings):
     agent = ChatAgent(agent_settings)
@@ -16,6 +20,19 @@ def test_offline_reply_without_api_key(agent_settings):
     assert "你好" in reply.reply
     assert len(reply.history) == 2  # Human + AI
 
+
+def test_offline_reply_includes_hint(agent_settings):
+    reply = ChatAgent(agent_settings).chat("hi")
+    assert OFFLINE_HINT in reply.reply
+
+
+def test_offline_never_touches_llm(agent_settings):
+    """离线路径不构造/调用 LLM。"""
+    reply = ChatAgent(agent_settings).chat("hi")
+    assert reply.rounds == 0
+
+
+# ---------- 在线：显式终稿 ----------
 
 def test_online_final_answer_via_terminal_tool(agent_settings):
     llm = ScriptedLLM([
@@ -27,6 +44,21 @@ def test_online_final_answer_via_terminal_tool(agent_settings):
     assert reply.offline is False
     assert reply.rounds == 1
 
+
+def test_online_fallback_content_without_tool_call(agent_settings):
+    """模型未守协议直接吐文本（无 tool_calls）→ 当终稿（兜底）。"""
+    llm = ScriptedLLM([AIMessage(content="直接回答你")])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.reply == "直接回答你"
+
+
+def test_online_empty_content_and_no_tool_call(agent_settings):
+    llm = ScriptedLLM([AIMessage(content="")])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert reply.reply == EMPTY_REPLY
+
+
+# ---------- 在线：工具循环 ----------
 
 def test_online_tool_round_then_final(agent_settings):
     llm = ScriptedLLM([
@@ -40,6 +72,21 @@ def test_online_tool_round_then_final(agent_settings):
     assert len(reply.tool_calls) == 1
     assert reply.tool_calls[0]["name"] == "calculator"
     assert reply.thinking == ["我先算一下"]
+
+
+def test_online_multiple_tools_in_one_round(agent_settings):
+    """一次回复多个 tool_calls → 顺序逐个执行。"""
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[
+            tool_call("calculator", {"expression": "1+1"}, "call-a"),
+            tool_call("calculator", {"expression": "2*3"}, "call-b"),
+        ]),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2 和 6"}, "call-c")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("算两个")
+    assert len(reply.tool_calls) == 2
+    assert [tc["result"] for tc in reply.tool_calls] == ["2", "6"]
+    assert reply.rounds == 2
 
 
 def test_online_fallback_when_no_final_answer(agent_settings):
@@ -58,11 +105,40 @@ def test_tool_error_is_swallowed(agent_settings):
         AIMessage(content="", tool_calls=[tool_call("calculator", {"expression": "1/0"}, "call-1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "计算失败"}, "call-2")]),
     ])
-    agent = ChatAgent(agent_settings, llm=llm)
-    reply = agent.chat("1/0")
+    reply = ChatAgent(agent_settings, llm=llm).chat("1/0")
     assert reply.reply == "计算失败"
-    assert "计算失败" in reply.tool_calls[0]["result"]
+    assert "失败" in reply.tool_calls[0]["result"]
 
+
+def test_unknown_tool_is_reported_not_crash(agent_settings):
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[tool_call("nonexistent_tool", {})]),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "继续"}, "call-2")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi")
+    assert "未知工具" in reply.tool_calls[0]["result"]
+    assert reply.reply == "继续"
+
+
+# ---------- 思考文本 ----------
+
+def test_thinking_extracted_from_anthropic_blocks(agent_settings):
+    """content 为 Anthropic 风格块列表 → 只提取 text 块为思考。"""
+    llm = ScriptedLLM([
+        AIMessage(
+            content=[
+                {"type": "text", "text": "先算一下"},
+                {"type": "tool_use", "id": "c1", "name": "calculator", "input": {"expression": "1+1"}},
+            ],
+            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+        ),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
+    ])
+    reply = ChatAgent(agent_settings, llm=llm).chat("1+1?")
+    assert reply.thinking == ["先算一下"]
+
+
+# ---------- 事件契约 ----------
 
 def test_event_sequence_contract(agent_settings):
     events: list[dict] = []
@@ -77,6 +153,20 @@ def test_event_sequence_contract(agent_settings):
     assert events[1]["name"] == "calculator"
     assert events[2]["text"] == "2"
 
+
+def test_offline_event_sequence(agent_settings):
+    events: list[dict] = []
+    ChatAgent(agent_settings).chat("hi", event_sink=events.append)
+    assert [e["event"] for e in events] == ["reply", "done"]
+
+
+def test_no_event_sink_is_safe(agent_settings):
+    llm = ScriptedLLM([AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "ok"})])])
+    reply = ChatAgent(agent_settings, llm=llm).chat("hi", event_sink=None)
+    assert reply.reply == "ok"
+
+
+# ---------- 历史：无状态 + 可重放 ----------
 
 def test_history_threading(agent_settings):
     """无状态：history 由调用方传回，上下文连续。"""
@@ -98,9 +188,7 @@ def test_final_answer_appends_tool_result(agent_settings):
     llm = ScriptedLLM([
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "你好"}, "c1")]),
     ])
-    agent = ChatAgent(agent_settings, llm=llm)
-    reply = agent.chat("你好")
-    # 最后一条必须是 ToolMessage，不能是带 tool_calls 的 AIMessage
+    reply = ChatAgent(agent_settings, llm=llm).chat("你好")
     assert reply.history[-1].type == "tool"
     assert reply.history[-1].tool_call_id == "c1"
 
@@ -113,8 +201,15 @@ def test_mixed_tools_and_terminal_are_all_fulfilled(agent_settings):
             tool_call("final_answer", {"text": "结果是 2"}, "call-b"),
         ]),
     ])
-    agent = ChatAgent(agent_settings, llm=llm)
-    reply = agent.chat("1+1=?")
+    reply = ChatAgent(agent_settings, llm=llm).chat("1+1=?")
     assert reply.reply == "结果是 2"
-    # 最后两条都是 ToolMessage，覆盖两个 tool_use
     assert [m.type for m in reply.history[-2:]] == ["tool", "tool"]
+
+
+def test_fallback_history_replay_safe(agent_settings):
+    """轮次耗尽后历史也合法（最后一条带 tool_calls 的 AI 消息必须被回填）。"""
+    llm = AlwaysToolLLM()
+    agent = ChatAgent(agent_settings, llm=llm, max_llm_rounds=1)
+    reply = agent.chat("hi")
+    # 最后一条不能是带 tool_calls 的 AIMessage
+    assert reply.history[-1].type == "tool"
