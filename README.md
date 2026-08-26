@@ -8,6 +8,7 @@
 
 - **CLI 对话**：单发 `-q` + 交互 REPL，`--debug` 打印思考/工具/token 明细
 - **Web UI**：SSE 流式对话，原生 JS 前端（零构建、内网可用），会话历史/重置
+- **组队页**：`/team` 精灵搜索选将 + 可学技能池（非全局）+ 血脉/个体值/性格配置 + 校验 + 队伍持久化（为 battle 模式打基础）
 - **工具循环（ReAct）**：`calculator`（ast 白名单安全求值）+ `final_answer`（显式终稿协议）
 - **思考过程可见**：模型链式思考（`reasoning_content`）与工具调用收进可折叠卡片，默认隐藏
 - **token 统计**：整轮对话输入/输出/总计 token 用量
@@ -21,8 +22,10 @@
 │                                                                               │
 │  python -m rock_pvp_agent            Web UI (uvicorn 127.0.0.1:8001)          │
 │   ├─ -q 单发 / REPL                   ├─ GET  /              (index.html)     │
-│   └─ --debug 思考/工具/token           ├─ GET  /api/chat/stream  (SSE)         │
+│   └─ --debug 思考/工具/token           ├─ GET  /team           (team.html)     │
+│                                       ├─ GET  /api/chat/stream  (SSE)         │
 │                                       ├─ POST /api/chat          (同步兜底)     │
+│                                       ├─ GET  /api/team/*        (组队 REST)  │
 │                                       ├─ GET  /api/chat/history / reset       │
 │                                       └─ GET  /api/config        (无 key)      │
 └──────────────────────────────┬────────────────────────────────────────────────┘
@@ -86,8 +89,10 @@ uv run python -m rock_pvp_agent -q "请计算 3.5 * 4 再 + 2 的结果"
 # 交互 REPL（exit / quit / q 退出）
 uv run python -m rock_pvp_agent --debug
 
-# Web UI → 浏览器打开 http://127.0.0.1:8001
+# Web UI → 浏览器打开 http://127.0.0.1:8001（聊天 `/`，组队 `/team`）
 uv run python -m rock_pvp_agent --serve
+# 或直接起 UI 包（等效，`python -m ui`）
+uv run python -m ui
 ```
 
 ## 命令速查
@@ -97,6 +102,7 @@ uv run python -m rock_pvp_agent --serve
 | `uv run python -m rock_pvp_agent -q "你好"` | 单发提问 |
 | `uv run python -m rock_pvp_agent --debug` | REPL + 打印思考/工具/token |
 | `uv run python -m rock_pvp_agent --serve` | 启动 Web UI（`ROCK_UI_HOST`/`ROCK_UI_PORT` 可覆盖，默认 `127.0.0.1:8001`） |
+| `uv run python -m ui` | 直接启动 UI 包（聊天 + 组队） |
 | `uv run python -m rock_pvp_agent --version` | 打印版本 |
 | `uv run pytest -q` | 跑全部测试 |
 | `uv run pytest --cov=rock_pvp_agent -q` | 跑测试 + 覆盖率 |
@@ -112,6 +118,20 @@ uv run python -m rock_pvp_agent --serve
 - **离线降级**：无 key 时仍可聊，回复带"离线模式"提示
 - **网络兜底**：SSE 断流自动回退同步 POST
 
+### 组队页（/team，2026-08-25）
+
+- **精灵搜索**：按 名称/编号/系别 客户端过滤；BOSS 形态禁选；同家族冲突标黄拦截
+- **队伍规模**：管理员规则 3–6（`battle_config`），切换即重排槽位
+- **技能池**：选中精灵后显示**该精灵的可学池**（默认∪技能石∪传说∪血脉技能，非全局池），
+  可搜索技能名；**未实装效果**的技能置灰「未实装」不可选 → 保存的队伍永远能开战
+- **血脉 / 个体值 / 性格**：血脉（18 系，决定可携带的血脉技能）、IV（0–10，最多 3 维）、
+  性格（31 种），属性预览逐字节复刻 `calc_combat_stats`
+- **校验**：`POST /api/team/validate` 一次报全部错误（规模/技能/血脉/家族/首领/IV）
+- **持久化**：保存到绝对路径或 `teams/` 下相对路径（`.json`、原子写、路径逃逸拦截），
+  可列表加载/删除；加载后自动重校验（历史队伍可能因技能白名单变化失效）
+- **为 battle 打基础**：保存前强制通过 `validate_team(picks, [], rules, VALID)`——
+  存下的队伍即合法对战队伍，后续 battle 模式直接吃这份 roster
+
 ## 测试
 
 ```bash
@@ -124,18 +144,21 @@ uv run pytest tests/test_agent.py -k history -v
 ## 项目结构
 
 ```
-src/rock_pvp_agent/
-├─ __main__.py     CLI 入口（-q / REPL / --serve / --debug）
-├─ config.py       Settings + 环境变量加载（单例）
-├─ prompts.py      CHAT_SYSTEM_PROMPT（显式终稿协议）
-├─ llm.py          build_chat_llm 工厂 + ReasoningChatOpenAI（捞回 thinking）+ 缓存
-├─ tools.py        calculator + final_answer（实例级闭包工具）
-├─ agent.py        ChatAgent 无状态核心 + 事件发射 + 离线降级
-└─ ui/
-   ├─ __main__.py  run_ui()（uvicorn 启动）
-   ├─ server.py    create_chat_app 应用工厂 + REST/SSE 路由
-   ├─ context.py   ChatContext 会话管理（LRU 上限 64，线程安全）
-   └─ static/      index.html / chat.js / app.js（零依赖 Markdown 渲染）/ style.css
+src/
+├─ rock_pvp_agent/     LLM agent 核心包
+│  ├─ __main__.py     CLI 入口（-q / REPL / --serve / --debug）
+│  ├─ config.py       Settings + 环境变量加载（单例）
+│  ├─ prompts.py      CHAT_SYSTEM_PROMPT（显式终稿协议）
+│  ├─ llm.py          build_chat_llm 工厂 + ReasoningChatOpenAI（捞回 thinking）+ 缓存
+│  ├─ tools.py        calculator + final_answer（实例级闭包工具）
+│  ├─ agent.py        ChatAgent 无状态核心 + 事件发射 + 离线降级
+├─ environment/       对战引擎（E0a–E3：数据/组队/规则/效果，独立包）
+└─ ui/                Web UI（2026-08-25 从 rock_pvp_agent 提级，顶层包）
+   ├─ __main__.py     run_ui()（uvicorn 启动）
+   ├─ server.py       create_chat_app 应用工厂 + REST/SSE 路由
+   ├─ context.py      ChatContext 会话管理（LRU 上限 64，线程安全）
+   ├─ routes_team.py  组队 REST（/api/team/*：精灵/技能池/校验/保存/加载）
+   └─ static/         index.html / team.html / chat.js / team.js / app.js / style.css
 
 docs/                协作协议 + 扩展手册 + checkpoints 检查点
 mydocs/rebuild-plan.md  项目宪法（完整重建路线图，gitignored 本地专用）
