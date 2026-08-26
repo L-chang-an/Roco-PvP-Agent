@@ -174,6 +174,10 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     def battle_page() -> FileResponse:
         return FileResponse(STATIC_DIR / "battle.html")
 
+    @app.get("/spectate")
+    def spectate_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "spectate.html")
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     # ---------- 组队模式（精灵搜索 + 校验 + 队伍持久化，见 routes_team.py） ----------

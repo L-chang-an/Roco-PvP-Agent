@@ -755,7 +755,7 @@ footer button:disabled {
 #battle-meta { flex: 1; }
 #phase-badge { color: var(--accent); }
 
-#battle-banner {
+#battle-banner, #spectate-banner {
   background: var(--panel);
   border: 1px solid #6fbf73;
   border-radius: 8px;
@@ -767,13 +767,15 @@ footer button:disabled {
   align-items: center;
 }
 
-#battle-field {
+#spectate-meta { font-size: 13px; color: var(--accent); }
+
+#battle-field, #spectate-field {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin: 10px 0;
 }
-@media (max-width: 1000px) { #battle-field { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { #battle-field, #spectate-field { grid-template-columns: 1fr; } }
 
 .team-panel {
   background: var(--panel);

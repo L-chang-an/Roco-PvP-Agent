@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from environment.battle_config import DEFAULT_LIVES, MIN_TEAM_SIZE, build_battle_rules
@@ -286,6 +287,28 @@ def replay_battle(body: PathBody) -> dict:
         return replay_record({**data, "team_a": roster_a, "team_b": roster_b})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/stream")
+def spectate_stream(seed: int = 7, a: str = "llm", b: str = "llm",
+                    team_size: int = 3, lives: int = 2, max_turns: int | None = None) -> StreamingResponse:
+    """观战流（E7）：两个 LLM 自博弈的 SSE 流，观战者**全局视角**。
+
+    帧协议：`meta → state → turn* → done`（见 `run_spectate`）。两个 LLM 玩家仍走迷雾口径
+    （`drive_turn` 只喂 `view()` + 过滤事件）——只有流本身是全局的。配置错误 → `error` 帧。
+    """
+    from rock_pvp_agent.battle.selfplay import run_spectate
+    from rock_pvp_agent.config import get_settings
+
+    def _gen():
+        try:
+            for frame in run_spectate(seed=seed, a_kind=a, b_kind=b, team_size=team_size,
+                                      lives=lives, max_turns=max_turns, settings=get_settings()):
+                yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
+        except ValueError as exc:
+            yield f"data: {json.dumps({'event': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @router.get("/{battle_id}")

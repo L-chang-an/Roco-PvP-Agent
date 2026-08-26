@@ -15,15 +15,18 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
+from typing import Iterator
 
 from environment.battle_config import build_battle_rules
 from environment.dataset import DataSource
-from environment.match import run_match
+from environment.match import drive_turn, run_match
+from environment.models import SIDES
 from environment.players import RandomPlayer
 from environment.presets import p1_preset
 from environment.replay import replay_record
 from environment.session import BattleSession
 from environment.teambuilder import build_roster
+from environment.view import observe
 
 from rock_pvp_agent.battle.player import FakeLLMPlayer, LLMPlayer
 from rock_pvp_agent.battle.store import TrajectoryStore
@@ -127,3 +130,81 @@ def run_selfplay(*, seed: int, team_size: int = 3, lives: int = 2, max_turns: in
         "replay_ok": check["all_match"],
         "record": record,
     }
+
+
+# ---------------------------------------------------------------------------
+# E7：观战流（人类以全局视角观看，两个 LLM 玩家仍迷雾）
+# ---------------------------------------------------------------------------
+
+
+def _global_view(session) -> dict:
+    """观战者全局（上帝）视角：双方都全量——绝对血量 / 全部技能（含 desc）/ 性格 / 血脉 / IV / 增减益。
+
+    复用公开 `view.observe(state, side, "partial")["me"]`（己方全量口径）取双方，观战者无所遮蔽。
+    **与给 LLM 玩家的迷雾 view() 是两套口径**：玩家经 `drive_turn` 只拿各自 `session.view(s)` 白名单。
+    """
+    state = session.state
+    return {
+        "turn": state.turn,
+        "winner": state.winner,
+        "done": state.done,
+        "rules": _rules_dict(state.rules),
+        "a": observe(state, "a", "partial")["me"],
+        "b": observe(state, "b", "partial")["me"],
+    }
+
+
+def run_spectate(*, seed: int, a_kind: str = "llm", b_kind: str = "llm",
+                 team_size: int = 3, lives: int = 2, max_turns: int | None = None,
+                 settings=None, players: dict | None = None,
+                 roster_a: list | None = None, roster_b: list | None = None,
+                 battle_id: str | None = None) -> Iterator[dict]:
+    """观战流生成器（E7）：逐回合驱动一局双玩家对战，产出**全局视角**帧。
+
+    - 两个 LLM 玩家与普通对局一样走 `drive_turn`（迷雾口径：观测 view()、事件 filter_events_for）——
+      观战流不会让 LLM 多看到任何东西。
+    - 帧协议：`meta`（配置+双方精灵名+实际 kind）→ `state`（turn 0 全局快照）→ `turn*`（
+      全局快照 + 双方 decisions + **全量事件**）→ `done`（winner / 回合数）。
+    - `players=` / `roster_a/b=` 为测试注入缝。
+    """
+    rules = build_battle_rules(team_size=team_size, lives=lives)
+    if max_turns is not None:
+        rules = dataclasses.replace(rules, max_turns=max_turns)
+    if roster_a is None or roster_b is None:
+        picks_a, picks_b = p1_preset(team_size)
+        roster_a = build_roster(picks_a, DataSource.VALID, rules)
+        roster_b = build_roster(picks_b, DataSource.VALID, rules)
+    bid = battle_id or f"spectate-{seed}"
+    session = BattleSession.start(roster_a, roster_b, seed=seed, rules=rules, battle_id=bid)
+    if players is None:
+        settings = settings or get_settings()
+        players = {
+            "a": build_player("a", a_kind, seed=seed + 1, settings=settings),
+            "b": build_player("b", b_kind, seed=seed + 2, settings=settings),
+        }
+    for s in SIDES:
+        players[s].on_match_start(session.view(s))
+
+    yield {
+        "event": "meta",
+        "battle_id": bid,
+        "seed": seed,
+        "rules": _rules_dict(rules),
+        "players": {"a": players["a"].kind, "b": players["b"].kind},
+        "team_a": [u["name"] for u in roster_a],
+        "team_b": [u["name"] for u in roster_b],
+    }
+    yield {"event": "state", "turn": 0, "state": _global_view(session)}
+
+    turn_no = 0
+    while not session.state.done:
+        out = drive_turn(session, players)
+        turn_no = out.turn
+        yield {
+            "event": "turn",
+            "turn": turn_no,
+            "state": _global_view(session),
+            "decisions": {"a": asdict(out.decisions["a"]), "b": asdict(out.decisions["b"])},
+            "events": out.events,          # 全量事件（含绝对血量等——观战者上帝视角）
+        }
+    yield {"event": "done", "winner": session.state.winner, "turn": turn_no}

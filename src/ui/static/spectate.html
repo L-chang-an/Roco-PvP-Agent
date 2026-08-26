@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- ============================================================
+  观战页（/spectate）— 服务端直出静态页（见 ui/server.py 的 GET /spectate）。
+  职责：人类以**全局视角**观看两个 LLM 之间的对战过程。
+    - header：标题 + 顶部导航（聊天/组队/对战/观战）
+    - 配置条：a/b 玩家 kind、规模、命数、seed → EventSource 连 /api/battle/stream
+    - 战场两栏：a / b **全量**卡片（绝对血量、全部技能悬停描述、增减益、性格、血脉、IV）——上帝视角
+    - 事件日志：逐回合全量事件（含绝对数值）
+  帧协议：meta → state → turn* → done（见 rock_pvp_agent/battle/selfplay.py 的 run_spectate）。
+  关键：**两个 LLM 玩家仍按迷雾对战**（引擎 drive_turn 只喂 view() + 过滤事件）；观战流的
+  全局视角只属于观众。前端只渲染收到的字段，不自行推断。
+  脚本顺序：app.js（DOM 助手 escapeHtml）→ spectate.js（观战逻辑）。
+============================================================ -->
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>观战 · Rock PVP Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>👀 双 LLM 观战 <small class="muted">全局视角</small></h1>
+    <nav class="top-nav" aria-label="页面导航">
+      <a class="top-link" href="/">💬 聊天</a>
+      <a class="top-link" href="/team">🧩 组队</a>
+      <a class="top-link" href="/battle">⚔️ 对战</a>
+      <a class="top-link active" href="/spectate">👀 观战</a>
+    </nav>
+  </header>
+
+  <main id="spectate-app">
+    <!-- ── 配置条 ── -->
+    <section id="spectate-config" class="panel">
+      <div class="cfg-row">
+        <label>a 玩家</label>
+        <select id="kind-a" title="llm=真实 LLM（无 key 自动降级假LLM）；fake_llm=假 LLM；random=随机">
+          <option value="llm">llm</option>
+          <option value="fake_llm">fake_llm</option>
+          <option value="random">random</option>
+        </select>
+        <label>b 玩家</label>
+        <select id="kind-b" title="同上">
+          <option value="llm">llm</option>
+          <option value="fake_llm">fake_llm</option>
+          <option value="random">random</option>
+        </select>
+        <label>规模</label>
+        <select id="team-size" title="每方可携带精灵数 3–6">
+          <option value="3" selected>3v3</option>
+          <option value="4">4v4</option>
+          <option value="5">5v5</option>
+          <option value="6">6v6</option>
+        </select>
+        <label>命数</label>
+        <select id="lives" title="每方命数 1..规模−1">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+        </select>
+        <label>seed</label>
+        <input id="seed" type="number" value="7" title="同种子同轨迹，可复现" />
+        <button id="start-btn" class="primary">开始观战</button>
+      </div>
+      <div class="muted dim" id="spectate-status">
+        全局视角：双方血量 / 全部技能 / 事件全见；两个 LLM 玩家仍按**迷雾**（己方全见、敌方只见白名单）对战。
+      </div>
+      <div id="spectate-meta"></div>
+    </section>
+
+    <!-- ── 结果横幅 ── -->
+    <section id="spectate-banner" class="hidden"></section>
+
+    <!-- ── 战场两栏（全量） ── -->
+    <div id="spectate-field">
+      <div class="team-panel" id="team-panel-a">
+        <h3>a 方 <small class="muted" id="meta-a"></small></h3>
+        <div class="side-info" id="side-info-a"></div>
+        <div id="units-a"></div>
+      </div>
+      <div class="team-panel" id="team-panel-b">
+        <h3>b 方 <small class="muted" id="meta-b"></small></h3>
+        <div class="side-info" id="side-info-b"></div>
+        <div id="units-b"></div>
+      </div>
+    </div>
+
+    <!-- ── 事件日志（全量） ── -->
+    <div id="spectate-log" class="battle-log"></div>
+  </main>
+
+  <div id="notice" class="notice" role="status"></div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/spectate.js"></script>
+</body>
+</html>
