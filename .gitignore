@@ -29,7 +29,7 @@ runs/
 .vscode/
 
 # Docs
-mydocs/
-docs/
-tests/
-scripts/
+# mydocs/
+# docs/
+# tests/
+# scripts/

@@ -1,0 +1,1007 @@
+{
+  "batch": "P1",
+  "说明": "纯伤害 / 纯防御 / 纯六维状态（引擎现状即可表达，效果表从手写转派生）",
+  "count": 125,
+  "skills": [
+    {
+      "name": "一拳",
+      "type": "武",
+      "kind": "物攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "丰饶",
+      "type": "草",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 3,
+      "desc": "自己获得物攻和魔攻+140%。"
+    },
+    {
+      "name": "乘风",
+      "type": "翼",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 2,
+      "desc": "自己获得速度+120。"
+    },
+    {
+      "name": "交叉闪电",
+      "type": "电",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "仙人掌刺击",
+      "type": "草",
+      "kind": "物攻",
+      "power": 150,
+      "energy_cost": 6,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "俯冲猛击",
+      "type": "翼",
+      "kind": "物攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "光刃",
+      "type": "光",
+      "kind": "物攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "光球",
+      "type": "光",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "冰爪",
+      "type": "冰",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "冰锥",
+      "type": "冰",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "冷风",
+      "type": "冰",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "力量增效",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "自己获得物攻+100%。"
+    },
+    {
+      "name": "加固",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 2,
+      "desc": "自己获得物防+140%。"
+    },
+    {
+      "name": "压扁",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 155,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "双星",
+      "type": "幻",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "可爱",
+      "type": "萌",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "叶绿光束",
+      "type": "草",
+      "kind": "魔攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "咆哮",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "敌方获得物攻-60%和速度-60。"
+    },
+    {
+      "name": "噬心",
+      "type": "虫",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "回旋风暴",
+      "type": "翼",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "地震",
+      "type": "地",
+      "kind": "物攻",
+      "power": 190,
+      "energy_cost": 10,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "大爆炸",
+      "type": "幻",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "导电撞击",
+      "type": "电",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "尾后针",
+      "type": "虫",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "幻象",
+      "type": "幽",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "幽灵爆发",
+      "type": "幽",
+      "kind": "魔攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "影袭",
+      "type": "武",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "念力膨胀",
+      "type": "幻",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "怒火",
+      "type": "火",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "自己获得双攻+120%和双防-40%。"
+    },
+    {
+      "name": "恐吓",
+      "type": "幽",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "恶能量",
+      "type": "恶",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "打鼾",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 165,
+      "energy_cost": 6,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "扫尾",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 90,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "扬沙",
+      "type": "地",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "折线冲击",
+      "type": "光",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "拆卸",
+      "type": "机械",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "拍击",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 65,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "掠夺",
+      "type": "恶",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "撞鬼",
+      "type": "幽",
+      "kind": "物攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "星云漩涡",
+      "type": "幻",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "星星撞击",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 90,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "栽赃",
+      "type": "恶",
+      "kind": "魔攻",
+      "power": 150,
+      "energy_cost": 6,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "棘突",
+      "type": "草",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "毒沼",
+      "type": "毒",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "毒泡泡",
+      "type": "毒",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "毒誓",
+      "type": "毒",
+      "kind": "物攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "气泡",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "气波",
+      "type": "武",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "水光冲击",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "水幕冲击",
+      "type": "水",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "水弹",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "水弹枪",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "泡沫",
+      "type": "水",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "泥巴喷射",
+      "type": "地",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "泥浆",
+      "type": "地",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "润泽",
+      "type": "水",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 7,
+      "desc": "自己获得魔攻+190%。"
+    },
+    {
+      "name": "湮灭",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 155,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "溃烂触碰",
+      "type": "毒",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "潮涌",
+      "type": "水",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "激流",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "火云车",
+      "type": "火",
+      "kind": "物攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "火焰冲锋",
+      "type": "火",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "火焰切割",
+      "type": "火",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "火焰箭",
+      "type": "火",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "火爪",
+      "type": "火",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "灵媒",
+      "type": "幽",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "灼伤",
+      "type": "火",
+      "kind": "物攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "炎息",
+      "type": "火",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "炎枪",
+      "type": "火",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "热气",
+      "type": "火",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "热砂",
+      "type": "地",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "爆米花爆破",
+      "type": "萌",
+      "kind": "物攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "爆裂飞弹",
+      "type": "火",
+      "kind": "魔攻",
+      "power": 160,
+      "energy_cost": 7,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "猛烈撞击",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 65,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "球状闪电",
+      "type": "电",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "电流",
+      "type": "电",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "瘴气喷射",
+      "type": "毒",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "石肤术",
+      "type": "地",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 3,
+      "desc": "自己获得物防+160%和魔防-60%。"
+    },
+    {
+      "name": "碰爪",
+      "type": "萌",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "磁干扰",
+      "type": "电",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "离子火花",
+      "type": "电",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "粒子对撞",
+      "type": "幻",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "肥皂泡",
+      "type": "水",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "脉冲光线",
+      "type": "光",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "花香",
+      "type": "草",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "荆棘爪",
+      "type": "草",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "落星",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 45,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "虫蛊",
+      "type": "虫",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "虹光冲击",
+      "type": "光",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "蛰针",
+      "type": "虫",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "角击",
+      "type": "龙",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "触电",
+      "type": "电",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "许愿星",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 110,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "诋毁",
+      "type": "恶",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "诡刺",
+      "type": "幽",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "贯手",
+      "type": "武",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "践踏",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 130,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "跺地",
+      "type": "地",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "迫害",
+      "type": "恶",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "透射",
+      "type": "光",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "金属噪音",
+      "type": "机械",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "钧势",
+      "type": "地",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 3,
+      "desc": "自己获得物防+140%和速度-30。"
+    },
+    {
+      "name": "锐利眼神",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 2,
+      "desc": "敌方获得物防和魔防-120%。"
+    },
+    {
+      "name": "闪光",
+      "type": "光",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "闪光冲击",
+      "type": "光",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "防御",
+      "type": "普通",
+      "kind": "防御",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "减伤70%，应对攻击。"
+    },
+    {
+      "name": "陨石",
+      "type": "地",
+      "kind": "魔攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "隼鳞",
+      "type": "龙",
+      "kind": "物攻",
+      "power": 140,
+      "energy_cost": 5,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "雪球",
+      "type": "冰",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "敌方获得速度-90。"
+    },
+    {
+      "name": "霜冻",
+      "type": "冰",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 1,
+      "desc": "敌方获得魔防-100%。"
+    },
+    {
+      "name": "鞭打",
+      "type": "萌",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "音爆",
+      "type": "普通",
+      "kind": "魔攻",
+      "power": 130,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "顶端优势",
+      "type": "草",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "风矢",
+      "type": "翼",
+      "kind": "物攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "飞叶",
+      "type": "草",
+      "kind": "物攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "飞吻",
+      "type": "萌",
+      "kind": "魔攻",
+      "power": 80,
+      "energy_cost": 2,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "飞踢",
+      "type": "普通",
+      "kind": "物攻",
+      "power": 110,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "魅惑",
+      "type": "萌",
+      "kind": "魔攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "魔法增效",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 0,
+      "desc": "自己获得魔攻+70%。"
+    },
+    {
+      "name": "鸣叫",
+      "type": "翼",
+      "kind": "魔攻",
+      "power": 40,
+      "energy_cost": 0,
+      "desc": "对敌方精灵造成魔法伤害。"
+    },
+    {
+      "name": "鹰爪",
+      "type": "翼",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "鼓劲",
+      "type": "普通",
+      "kind": "状态",
+      "power": 0,
+      "energy_cost": 3,
+      "desc": "自己获得魔防+170%。"
+    },
+    {
+      "name": "龙吼",
+      "type": "龙",
+      "kind": "物攻",
+      "power": 60,
+      "energy_cost": 1,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "龙炮",
+      "type": "龙",
+      "kind": "物攻",
+      "power": 100,
+      "energy_cost": 3,
+      "desc": "对敌方精灵造成物理伤害。"
+    },
+    {
+      "name": "龙爪",
+      "type": "龙",
+      "kind": "物攻",
+      "power": 120,
+      "energy_cost": 4,
+      "desc": "对敌方精灵造成物理伤害。"
+    }
+  ]
+}

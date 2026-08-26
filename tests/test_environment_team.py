@@ -53,20 +53,20 @@ def test_one_skill_valid() -> None:
     assert validate_team(picks, []) == []
 
 
-def test_three_skills_valid() -> None:
-    """最多 3 个技能：三个技能合法（都在可学池内）。"""
+def test_four_skills_valid() -> None:
+    """E3：技能槽位升到 4——四个技能合法（都在可学池内）。"""
     picks = _valid_picks()
-    picks[0] = TeamPick("迪莫", ["抓挠1", "撞击", "防御"])
+    picks[0] = TeamPick("迪莫", ["抓挠1", "撞击", "防御", "加物攻"])
     assert validate_team(picks, []) == []
 
 
-@pytest.mark.parametrize("skills", [[], ["抓挠1", "撞击", "防御", "加物攻"]])
+@pytest.mark.parametrize("skills", [[], ["抓挠1", "撞击", "防御", "加物攻", "加速度"]])
 def test_skill_count_out_of_range(skills: list[str]) -> None:
-    """0 个或 4 个技能都越界（允许 1–3 个）。"""
+    """0 个或 5 个技能都越界（允许 1–4 个，E3）。"""
     picks = _valid_picks()
     picks[0] = _pick("迪莫", skills)
     errs = validate_team(picks, [])
-    assert any("技能数必须为 1–3 个" in e for e in errs)
+    assert any("技能数必须为 1–4 个" in e for e in errs)
 
 
 def test_unknown_skill_name() -> None:
@@ -180,7 +180,7 @@ def test_build_roster_shape() -> None:
     roster = build_roster(_valid_picks())
     assert len(roster) == 3
     entry = roster[0]
-    assert set(entry) == {"name", "types", "stats", "skills", "nature", "bloodline", "iv"}
+    assert set(entry) == {"name", "types", "stats", "skills", "nature", "bloodline", "iv", "trait"}
     assert entry["name"] == "迪莫"
     assert entry["types"] == ["光"]
     assert entry["skills"] == ["抓挠1", "加物攻"]
@@ -190,25 +190,27 @@ def test_build_roster_shape() -> None:
     assert entry["nature"] == "坦率"
     assert entry["bloodline"] == ""
     assert entry["iv"] == {}
+    assert entry["trait"] == "最好的伙伴"      # E0 迪莫数据自带特性（未注册时在战斗里是惰性的）
 
 
 def test_build_roster_applies_iv_and_nature() -> None:
-    """个体值与性格独立作用于公式：
-    atk = (1.1×(80+10×3)+50)×1.2+50 = 255.2 → 255。"""
+    """个体值与性格独立作用于公式（先取整 raw 再乘性格，负责人 2026-08-25 口径）：
+    atk = int(int(1.1×(80+30)+50)×1.2)+50 = int(171×1.2)+50 = 255。"""
     picks = _valid_picks()
     picks[0] = _pick("迪莫", iv={"atk": 10}, nature="加攻击减速度")
     entry = build_roster(picks)[0]
     assert entry["stats"]["atk"] == 255
-    assert entry["stats"]["speed"] == 186  # (1.1×92+50)×0.9+50 = 186.08 → 186
+    assert entry["stats"]["speed"] == 185  # int(int(1.1×92+50)×0.9)+50 = int(151×0.9)+50 = 185
 
 
-def test_build_roster_bloodline_archived_but_not_types() -> None:
-    """血脉进 roster 存档字段，但 E0 不改 types（克制表在 E2 才存在）。"""
+def test_build_roster_bloodline_does_not_change_types() -> None:
+    """血脉系别不改写精灵系别（负责人 2026-08-25 澄清）：types 恒为自身系别，
+    血脉只决定可携带的血脉技能系别（规则 2）。"""
     picks = _valid_picks()
     picks[0] = TeamPick("迪莫", ["抓挠2", "加速度"], bloodline="火")
     entry = build_roster(picks)[0]
     assert entry["bloodline"] == "火"
-    assert entry["types"] == ["光"]
+    assert entry["types"] == ["光"]   # 迪莫自身系别，不被血脉改写
 
 
 def test_build_roster_raises_on_invalid() -> None:

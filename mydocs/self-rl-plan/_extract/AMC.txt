@@ -1,0 +1,2470 @@
+
+
+===== [AMC] PAGE 1/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Dae Yon Hwang1 Raunaq Suri 1 Valentin Villecroze1 Anthony L. Caterini 1
+Jesse C. Cresswell 1 No¨el Vouitsis1 Brendan Leigh Ross 1
+Abstract
+LLM agents operate in two distinct regimes: open-
+weight agents amenable to reinforcement learn-
+ing (RL) and black-box agents whose behaviour
+must be controlled purely at test time. Although
+black-box agents are often backed by state-of-the-
+art proprietary LLMs, API-only access precludes
+parameter-level optimization, rendering most RL
+methods inapplicable. To address this limita-
+tion, we turn to a known equivalence between
+RL and Bayesian inference. We propose Agen-
+tic Monte Carlo (AMC) to directly sample from
+the optimal policy of a black-box agent rather
+than training it through RL. The optimal policy
+is a posterior over trajectories whose prior we
+define as the fixed black-box LLM agent. We
+employ Sequential Monte Carlo to sample from
+this posterior by learning a value function to steer
+the agent while leaving the underlying black-box
+model unchanged. We validate AMC on three
+diverse environments from the AgentGym bench-
+mark, demonstrating significant improvements
+over prompting baselines and even outperform-
+ing Group Relative Policy Optimization (GRPO)
+as we scale the test-time compute of our method.
+AMC demonstrates the feasibility of performing
+principled RL-style optimization of black-box
+LLM agents.1
+1. Introduction
+Large Language Models (LLMs) have evolved from pas-
+sive text generators to active autonomous agents capable
+of multi-step reasoning and environment interaction (Yao
+et al., 2023; Schick et al., 2023). To operationalize these
+1Layer 6 AI, Toronto, Canada. Correspondence to: Dae Yon
+Hwang <daeyon@layer6.ai>, Brendan Leigh Ross <brendan
+@layer6.ai>.
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).
+1Code is available at https://github.com/
+layer6ai-labs/Agentic-Monte-Carlo
+Figure 1.Comparison between AMC and other agentic paradigms.
+AMC facilitates task-specificity for black-box LLM policies using
+a learned lightweight value function. On the other hand, training a
+white-box model with RL imposes constraints on the choice and
+scale of the base policy.
+agents, Reinforcement Learning (RL) (Sutton et al., 1998;
+Christiano et al., 2017; Ziegler et al., 2019) has become
+the dominant training paradigm through methods like Prox-
+imal Policy Optimization (PPO) (Schulman et al., 2017;
+Ouyang et al., 2022) and, more recently, Group Relative
+Policy Optimization (GRPO) (Shao et al., 2024). These
+algorithms have proven highly effective for open-weight
+models, enabling abilities ranging from complex mathemat-
+ical reasoning to software engineering (Wang et al., 2025;
+Pennino et al., 2025). However, these approaches rely on
+a fundamental assumption: white-box access to model pa-
+rameters to compute policy gradients. This requirement
+presents a fundamental barrier for the most capable state-of-
+the-art models—such as GPT-5 (OpenAI, 2025b), Gemini 3
+(Google, 2025), and Claude 4.6 (Anthropic, 2026)—which
+are predominantly available only as black-box APIs. Conse-
+quently, researchers seeking to optimize agents backed by
+these proprietary models are often restricted to prompt en-
+gineering or fine-tuning open-weight surrogates, neither of
+which performs RL-based optimization of the target black-
+box model.
+To bridge this gap, we revisit the known duality between
+RL and Bayesian inference (Levine, 2018; Korbak et al.,
+2022). This framework treats the goal of maximizing re-
+wards using RL as equivalent to probabilistic inference
+of the agent’s optimal policy. Here, the optimal policy
+is defined as a Bayesian posterior distribution over agent
+trajectories. Specifically, this posterior is proportional to
+1
+arXiv:2606.05296v1  [cs.LG]  3 Jun 2026
+
+===== [AMC] PAGE 2/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+a prior distribution—given by the pre-trained black-box
+model—multiplied by a likelihood term representing the
+probability of achieving high rewards (i.e., of being opti-
+mal). This formulation is particularly attractive for black-
+box agents because it reframes the learning problem: instead
+of updating the parameters of the prior (which we cannot ac-
+cess), we can simply sample from the posterior distribution
+to recover optimal behaviour. However, exact sampling from
+this optimal posterior is impossible for black-box agents,
+whose full log-probabilities are generally unavailable, and
+intractable even for white-box agents because of the high-
+dimensional action space and long time horizons inherent
+in agentic environments.
+In this work, we propose Agentic Monte Carlo (AMC), a
+novel framework that makes this sampling tractable by lever-
+aging Sequential Monte Carlo (SMC) methods—a form of
+importance sampling applied to sequential data (Doucet
+et al., 2001). At each step of the agent’s trajectory, AMC
+samples actions directly from the black-box prior and re-
+weights them based on expected rewards. To predict ex-
+pected rewards, we train a separate value function to effec-
+tively steer the agent toward optimality without ever mod-
+ifying the underlying black-box language model. As we
+highlight in Figure 1, AMC provides a useful interpolation
+between prompting a static black-box agent and fine-tuning
+a smaller white-box one.
+We validate AMC using the AgentGym benchmark (Xi
+et al., 2025a), evaluating performance in three diverse envi-
+ronments: WebShop (e-commerce), SciWorld (scientific ex-
+periments), and TextCraft (Minecraft-style crafting). Our ex-
+periments demonstrate that AMC consistently outperforms
+prompting baselines and, as we scale the test-time com-
+pute of our method, even outperforms GRPO baselines that
+require full parameter access.
+Our key contributions are as follows:
+1. We formulate the problem of RL for black-box agents
+through the lens of Bayesian inference, defining the
+optimal policy as a Bayesian posterior over trajectories
+that combines the black-box prior with a likelihood
+term that encodes optimal agent behaviour.
+2. We propose Agentic Monte Carlo, an algorithm that
+uses SMC with sequential importance resampling to
+sample from this optimal policy. We derive a weight
+update rule that leverages a learned value function to
+guide the black-box agent’s behaviour toward optimal-
+ity.
+3. We empirically validate the effectiveness of our ap-
+proach compared to both prompting and RL baselines,
+demonstrating that rigorous RL concepts can be ap-
+plied to closed-source agents without gradient access.
+s(1)
+0 s(2)
+0 s(3)
+0
+1
+N
+1
+N
+1
+N
+s(i)
+1 ∼π(s 1 |s (i)
+0 )
+s(1)
+1 s(2)
+1 s(3)
+1w(1)
+1
+Vθ(·)
+w(2)
+1
+Vθ(·)
+w(3)
+1
+Vθ(·)
+s(i)
+2 ∼π(s 2 |s (i)
+1 )
+s(1)
+2 s(2)
+2 s(3)
+2w(1)
+2
+Vθ(·)
+w(2)
+2
+Vθ(·) w(3)
+2
+Vθ(·)
+s(i)
+3 ∼π(s 3 |s (i)
+2 )
+s(1)
+3
+s(2)
+3
+s(3)
+3w(1)
+3
+Vθ(·)
+w(2)
+3
+Vθ(·) w(3)
+3
+Vθ(·)
+Resampling Step w(2)
+3 > w(3)
+3 > w(1)
+3
+s(1)
+3 s(2)
+3 s(3)
+3
+1
+N
+1
+N
+1
+N
+Figure 2.Visual representation of AMC forN= 3 trajectories. Im-
+portance weights w(i)
+t are determined using the value function Vθ,
+where lower-weighted trajectories (e.g., s(1)) are more likely to be
+pruned than higher-weighted ones (s(2), s(3)) during resampling.
+These results position AMC with black-box models
+as a viable alternative to gradient-based RL in GPU-
+constrained settings.
+2. Agentic Monte Carlo
+This section builds up to our method, starting from prelim-
+inaries around reinforcement learning. In Section 2.1, we
+introduce the reinforcement learning setting and formulate it
+as a Bayesian inference problem. We outline how sequential
+Monte Carlo (SMC) can be used as a tool to solve this prob-
+lem in Section 2.2. Then, in Section 2.3 and Section 2.4,
+we describe Agentic Monte Carlo (AMC): our approach for
+adapting SMC to potentially black-box agents by learning
+an ancillary value function.
+2.1. Reinforcement Learning & Bayesian Inference
+We begin our journey in a standard reinforcement learning
+setting in which an agent, defined by a policy π, responds to
+its observed state st ∈ Sat each timestep t by producing an
+action at ∼π(a t |s t), at ∈ A. The selected action results
+in a new state st+1 ∼p(s t+1 |s t, at) determined by the
+transition dynamics of the agent’s environment. We assume
+discrete state and action spaces. Preferences over states are
+encoded by a scalar reward function r(st)∈R given by the
+environment, where higher rewards are preferred.
+2
+
+===== [AMC] PAGE 3/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Over a time horizon T , the agent π produces a trajectory
+s0:T ∼π(s 0:T ).2 An optimal agent should produce trajec-
+tories that have large cumulative reward values denoted by
+the shorthandr(s 0:T ) = PT
+t=0 r(st).3
+For many tasks and environments of interest, it has be-
+come standard to initialize policies using pre-trained LLMs
+given their rich semantic understanding and broad world
+knowledge. Our goal is therefore to fine-tune an LLM
+agent for a particular environment. Policy gradient methods
+(Williams, 1992) have become a dominant training paradigm
+with LLMs: the policy is trained to maximize expected re-
+wards, usually with a KL-divergence penalty term against a
+reference policy (Ouyang et al., 2022; Shao et al., 2024),
+π∗ = arg max
+πθ
+Eπθ(s0:T )[r(s0:T )]−βKL[π θ ∥π],(1)
+where πθ is the policy being trained, π is the reference
+model given by a pre-trained LLM, and β is a regularization
+coefficient. Although πθ is usually initialized from π, the
+subscript θ identifies πθ as being a separate model with
+trainable parameters, whileπitself remains fixed.
+As highlighted by Korbak et al. (2022) (and for com-
+pleteness, proven in Appendix A.2), Equation 1 can
+be understood as performing variational inference to
+approximate the following (intractable) posterior:
+π∗(s0:T )∝π(s 0:T )er(s0:T )/β.(2)
+Equation 2 frames KL-regularized RL as a Bayesian
+inference problem where the reference policy’s probabilities
+π(s0:T )—which serve as the prior—are modulated to
+upsample high-reward trajectories as encoded by the
+likelihood er(s0:T )/β. Note that evaluating the right-hand
+sides of Equation 1 and Equation 2 yields the same optimal
+policy: the posteriorπ ∗.
+By framing KL-regularized RL as Bayesian inference, we
+can look beyond variational inference toward the broader
+Bayesian toolbox. While variational inference (the standard
+approach) estimates the posterior by training a parameter-
+ized policy πθ, Monte Carlo methods offer a sampling-based
+alternative that could bypass policy optimization entirely,
+allowing us to simulate reinforcement learning even when π
+is a black box. We exploit this shift in perspective to show
+that π∗ can be estimated by guiding a static prior policy
+π with a simple auxiliary model. This approach provides
+a viable pathway for reinforcement learning in scenarios
+where fine-tuning the reference policy π is intractable or
+impossible.
+2Since our policy of interest π will be notionally intractable,
+we fold transition dynamics into our concept of the policy, ignore
+actions, and focus on the resulting state transitions π(st+1 |s t)
+throughout.
+3We omit discount factors here.
+2.2. Bayesian Inference via Sequential Monte Carlo
+Sequential Monte Carlo (SMC; Gordon et al., 1993; Doucet
+et al., 2001) is a group of Monte Carlo methods for estimat-
+ing posteriors of sequentially evolving systems conditioned
+on step-wise observations. The sequential nature of our state
+transitions π(st+1 |s t) makes SMC particularly well-suited
+to the RL setup described in Section 2.1. For example, Pich´e
+et al. (2019) use SMC to perform planning with a trained
+policy and value function, and Zhao et al. (2024) use SMC
+along with a learned “twist” function for constrained text
+generation using LLMs. Since the nature of many digital
+environments allows us to simulate agent trajectories in par-
+allel, we can use SMC to directly structure a Monte Carlo
+simulation of an agent running the optimal policyπ ∗.
+The most standard SMC method is the bootstrap filter (Gor-
+don et al., 1993; Doucet et al., 2001), i.e., sequential impor-
+tance resampling (SIR). At a high level, SIR provides a prin-
+cipled way to sample several trajectories {s(i)
+0:T }N
+i=1 in paral-
+lel by running our (black-box or otherwise intractable) prior
+π, while intermittentlyresampling: stochastically pruning
+the worst and proliferating the best trajectories in order to
+steer the overall sample towards the posteriorπ∗. Fundamen-
+tally, SIR is an importance sampling algorithm, and impor-
+tance weights will be used to guide these resampling steps.
+Consider apartialagent trajectory s0:t up to timestep
+t. Since it is intractable to sample trajectories from π∗,
+importance sampling instead samples from a tractable
+proposalpolicy and then corrects for the policy mismatch
+using corresponding importance weights. We know that it
+istractable to sample from our (fixed) LLM prior π, so we
+can sample trajectories {s(i)
+0:t}N
+i=1 ∼π and then reweight
+them with importance weights proportional to the ratio of
+their likelihoods under bothπ ∗ andπ:
+wt = π∗(s0:t)
+π(s0:t) .(3)
+In order to use these importance weights for resampling,
+SIR requires a recursive decomposition of wt in terms of
+the previous weight, wt−1. In Appendix A.3, we show that
+wt =w t−1 · Eπ(st+1:T |st)[e
+1
+β
+PT
+τ=t r(sτ )]
+Eπ(st:T |st−1)[e
+1
+β
+PT
+τ=t r(sτ )]
+,
+=w t−1 ·e V(s t)−V(s t−1)+
+r(st−1 )
+β ,
+(4)
+where we define V(s t) = logE π(st+1:T |st)[e
+1
+β
+PT
+τ=t r(sτ )].
+V is known as as thesoft value functionin maximum
+entropy RL because its log-sum-exp structure emulates a
+soft maximum reward value over trajectories (Haarnoja
+et al., 2017; 2018). We refer the reader to Levine (2018)
+for more background. For now, let us assume that we can
+compute V . This recursive decomposition allows us to
+3
+
+===== [AMC] PAGE 4/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+perform SIR (Doucet et al., 2001), which we depict visually
+in Figure 2. The full algorithm, Algorithm 1, is relegated
+to Appendix A.1 due to space constraints.
+SIR runs N trajectories in parallel and, at each step t,
+updates their respective importance weights w(i)
+t . At
+certain timesteps, weresample, with replacement, a
+new subset of trajectories {s(i)
+0:t}N
+i=1 according to their
+corresponding importance weights {w(i)
+t }N
+i=1, and then
+reset their importance weights to be uniform. The decision
+of whether to resample at a given timestep is made by
+an arbitrary boolean resampling criterion c(t,{w (i)
+t }N
+i=1),
+which in experiments we simply set to true only on a
+cross-validated subset of timesteps. Resampling criteria are
+further explored in Appendix D.1.
+Upon completion of SIR, the weighted empirical measure of
+the resulting trajectories {s(i)
+0:T }N
+i=1 and weights {w(i)
+T }N
+i=1
+converges weakly to π∗ as N→ ∞(Doucet et al., 2001).
+Put more simply, sampling from the categorical distribution
+induced by the normalized weights approximates a sample
+fromπ ∗, and does so better asNgets larger.
+Until now, we assumed that we could compute the value
+function V , which is an expectation involving future rewards
+{r(sτ )}T
+τ=t . Estimating this expectation precisely would
+require multiple simulations of our agent until the terminal
+timestep T , which can quickly become computationally
+prohibitive. Instead, we opt tolearn V , a procedure we
+describe in the following section.
+2.3. Learning Importance Weights for Agentic Systems
+We now shift our focus to estimating the value function
+V to then efficiently compute importance weights when
+running SIR. We aim to learn a model Vθ to approximate
+V . Because π is a frozen prior, we can regress our value
+function directly on a set of Monte Carlo trajectories fromπ,
+optimizing for the true value of V by way of the following
+relationship. We assume there exists a set of weights for Vθ
+that gives rise toVas
+V= arg min
+Vθ
+Ep(t,st)
+Vθ(st)−logE π(st+1:T |st)
+h
+e
+1
+β
+PT
+τ=t r(sτ )
+i
+2
+2
+,
+(5)
+where p(t, st), the distribution of training inputs, is any
+distribution with full support over timesteps t and states st.
+We can then optimize using gradient-based methods.
+In our setting, r(st) is available at test time, so we only
+need to learn future rewards. We thus parameterizeV θ as
+Vθ(st) =f θ(st) +r(s t),(6)
+where fθ is a transformer-based model with a regression
+head that outputs a scalar prediction of r(st+1:T ) (if r
+were not available at test-time, we would parameterize Vθ
+directly). In practice, we estimate the outer expectation
+by first sampling M trajectories {s(j)
+0:T }M
+j=1 from π and,
+from these trajectories, collating a subset of individual
+states and corresponding timesteps to use as our training
+set {(tk, s(k)
+tk )}P
+k=1. We approximate the inner expectation
+by a single trajectory, thus accepting some bias through the
+logarithm to arrive at an estimator for the (non-soft) value
+function as the regression target:
+L(fθ) = 1
+P
+PX
+k=1
+fθ(s(k)
+tk )−
+TX
+τ=t k+1
+r(s(k)
+τ )
+
+2
+2
+,(7)
+where we set β= 1 for training and adjust the sampling
+temperature post hoc. It is with this trained network that we
+model Vθ, which then estimates the weight updates needed
+for SIR in Algorithm 1. In Appendix D.2, we show that
+training with Equation 7 performs well in comparison to
+the more expensive and complex Equation 5.
+2.4. Agentic Monte Carlo
+To summarize our method—which we refer to as Agentic
+Monte Carlo (AMC)—we begin with a black-box (or oth-
+erwise intractable) LLM policy π that forms a presumably
+good prior for a given task and environment of interest. This
+is common, for example, with today’s state-of-the-art, gen-
+eralist models accessible only through APIs (e.g., GPT-5,
+Gemini 3, Claude 4.6), for which we are limited to prompt-
+ing methods to steer the agent’s behaviour.
+Ideally, we would like to be able to fine-tune these agents us-
+ing standard RL algorithms to estimate π∗ from Equation 1,
+but this feat is impossible due to their black-box nature. In-
+stead, AMC turns to probabilistic inference to approximate
+π∗ using SMC.
+Before running SMC, we must build our value function.
+We collect a series of trial trajectories from the prior
+{s(j)
+0:T }M
+j=1 ∼π(s 0:T ) and use these trajectories to train
+fθ according to Equation 7. We parameterize our value
+functionV θ according to Equation 6.
+We next use SMC, depicted in Figure 2, to generate an ap-
+proximate set of samples from π∗ using Algorithm 1, where
+we substitute the true value function V with our learned
+value function Vθ in the importance weight computation
+step. This gives us a final set of trajectories {s(i)
+0:T }N
+i=1 and
+weights {w(i)
+T }N
+i=1 that together approximate π∗. In prac-
+tice—and in our experiments—we may only be interested
+in selecting a single best trajectory. We can simply keep
+the trajectory with the highest cumulative reward or, if r
+is unavailable at test time, the trajectory i with the largest
+weightw (i)
+T .
+4
+
+===== [AMC] PAGE 5/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+3. Related Work
+Bayesian Inference, Control-as-Inference, and SMC.The
+connections we exploit between KL-regularized RL and
+Bayesian inference (Korbak et al., 2022) are grounded in
+the control-as-inference framework (Dayan & Hinton, 1997;
+Toussaint & Storkey, 2006; Levine, 2018), which casts opti-
+mal decision-making as probabilistic inference. Pich´e et al.
+(2019) pioneered the use of SMC for planning in this do-
+main, training policy proposals to approximate the optimal
+posterior. Building on this, Lioutas et al. (2023) introduced
+CriticSMC, identifying that standard SMC suffers from sam-
+ple impoverishment in sparse-reward settings; they proposed
+weighting particles using a learned soft Q-function to steer
+sampling toward high-value regions. Although AMC shares
+theoretical roots with these two works, they are designed
+for continuous control tasks and deterministic transition dy-
+namics, respectively. AMC adapts these principles to the
+discrete, semantic state space of black-box LLM agents,
+where gradients are inaccessible and state transitions are
+defined by opaque—possibly stochastic—tool interactions,
+rather than physics engines.
+SMC for Language Models.Recent research has begun
+applying SMC to steer LLM generation toward desired con-
+straints (Lew et al., 2023; Zhao et al., 2024; Loula et al.,
+2025). However, these methods modulate the proposal dis-
+tribution via access to the LLM’s logits, a requirement that
+is impossible to satisfy with proprietary black-box models;
+in contrast, AMC is designed specifically for black-box set-
+tings. Furthermore, while these works focus on constrained
+text generation, AMC targets sequential agentic workflows
+involving external tool interaction. Closer to our work is
+“Rollout Roulette” by Puri et al. (2025), which applies SMC
+using pre-trained Process Reward Models (PRMs) (Light-
+man et al., 2024) to scale test-time reasoning. Instead, we
+focus on multi-step, interactive agents where the state in-
+cludes external environment observations, necessitating a
+critic trained on interaction history rather than a standard
+reasoning PRM. Furthermore, AMC integrates rigorous RL
+concepts, viewing the critic not just as a heuristic verifier
+but as a learned proxy for the (soft) value function in a
+control-as-inference formulation.
+Search and Planning for LLM Agents.The limitations
+of greedy prompting strategies for LLM agents like ReAct
+(Yao et al., 2023) have spurred interest in inference-time
+search. Tree-based methods such as Language Agent Tree
+Search (Zhou et al., 2024) and ExACT (Yu et al., 2025)
+adapt Monte Carlo Tree Search (MCTS) (Silver et al., 2017)
+to LLMs but often suffer from high latency due to sequential
+node expansion. Population-based methods offer a paral-
+lelizable alternative. Klein et al. (2025) introduced Fleet
+of Agents (FoA), which employs a genetic-style particle fil-
+ter to coordinate agent problem-solving. However, it relies
+on static, heuristic value functions (e.g., lexical overlap or
+prompting). Conversely, AMC integrates rigorous RL by
+training a parameterized value function to estimate the likeli-
+hood of agent success, allowing our method to learn optimal-
+ity from data rather than relying on hand-crafted heuristics.
+4. Experiments
+We first detail our experimental configuration, and follow
+that by presenting overall results demonstrating AMC’s ef-
+fectiveness across benchmarks compared to baselines. We
+then provide a multi-perspective analysis, including a head-
+to-head comparison with policy gradient RL, an ablation
+study on value function optimization, and a cost-efficiency
+evaluation. Additional analyses, including the impact of
+the value function’s base model, resampling strategies, met-
+rics, and additional datasets, can be found in Appendix D.
+Qualitative examples are provided in Appendix E.
+4.1. Experimental Configuration
+Here we describe our main experimental settings. We rele-
+gate additional details to Appendix B and Appendix C.
+Datasets.Our core evaluations are done across three agentic
+benchmarks: web-based commerce (WebShop; Yao et al.,
+2022), scientific reasoning (SciWorld; Wang et al., 2022),
+and hierarchical crafting (TextCraft; Prasad et al., 2024).
+To demonstrate the generalizability of our approach, we
+provide further, albeit limited, evaluation on the Weather and
+Movie datasets (Ma et al., 2024), relegating these to Table 13
+in Appendix D.6. These environments encompass both
+dense and sparse reward structures. We evaluate our agents
+using AgentGym (Xi et al., 2025a), a centralized platform
+comprising a heterogeneous collection of environments that
+span a diverse range of real-world tasks.
+Training.To train our value functions, we curate a set of
+trajectories s0:T ∼π(s 0:T ) on a set of training tasks for
+each benchmark. We initialize fθ using pre-trained open-
+weight language models and then fine-tune, in tandem, a
+regression head and a set of low-rank adaptation (LoRA)
+blocks (Hu et al., 2022). Further details on the training
+configuration are available in Appendix B.
+Base Models.Consistent with previous work (Klein et al.,
+2025; Xi et al., 2025a;b), we initialize our learned network
+fθ from the following base LLMs (all of them the instruct
+variants): Llama-3.2-11B, Llama-3.1-8B (Grattafiori et al.,
+2024), Qwen-2.5-3B, and Qwen-2.5-7B (Yang et al., 2024).
+For our prior LLM policy π, we use a broad range of mod-
+els with varying accessibility levels to demonstrate the
+generalizability of our approach. Specifically, we evalu-
+ated open-weight LLM agents—Llama-3.2-11B and Llama-
+3.1-8B—and black-box agents—GPT-4.1-mini (OpenAI,
+5
+
+===== [AMC] PAGE 6/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+2025a) and GPT-5.1 (OpenAI, 2025b). 4 We once again
+highlight the compatibility of our method with black-box
+agents as a key feature for many real-world settings.
+Baselines.We compare AMC with two primary baselines
+performing test-time sampling of parallel agent trajectories:
+Best-of-N and SMC with Fleet-of-Agents (FoA) prompting
+(Klein et al., 2025). Best-of-N acts as a baseline, selecting
+the highest-reward sequence from N parallel trajectories.
+AMC extends this by using learned value estimates from our
+optimized value function to guide selection throughout the
+trajectory, rather than relying solely on terminal outcomes.
+Our SMC baseline with FoA prompting (Klein et al., 2025),
+referred to as SMC (FoA), implements trajectory pruning
+via SMC, leveraging its 2-shot prompt template to evalu-
+ate state values based on the preceding trajectory history.
+Although the original FoA employs tree-based search, we
+focus on its core prompting logic to provide a direct com-
+parison of state-evaluation quality. Since Klein et al. (2025)
+only considered WebShop from AgentGym, we compare
+with their SMC prompting approach on this benchmark. To
+ensure a fair comparison, we apply SMC (FoA) at the same
+empirically optimized resampling step used by AMC (Fig-
+ure 5, Figure 6, and Figure 7 of Appendix D.1). For the
+agent’s action-generation logic, we mainly adopt a ReAct-
+style prompting framework (Yao et al., 2023). To examine
+whether AMC transfers beyond this setting, we also imple-
+ment a ReflAct-style agent (Kim et al., 2025) on SciWorld.
+We also need to choose the number of trajectories N. Fol-
+lowing the discussion in Section 2.2 in which we note that
+SMC approximates the optimal policy only as N→ ∞, we
+are compelled to choose a reasonably large (but tractable)
+trajectory count; to this end, we use N= 15 trajectories
+throughout.
+Metrics.In most applications of our method, we can use
+only a single final trajectory (e.g., in online shopping or
+deciding on a live chat response), and we will also have
+access to a (real or approximated) reward function r. The
+most practical application of our method is then to choose
+the highest reward trajectory out of the N produced. To
+evaluate this setting, we report performance scores of the
+highest-reward trajectory per method using the cumulative
+environmental rewards provided by each benchmark. We
+conduct three independent trials using different seeds to cal-
+culate the mean scores and corresponding standard errors.
+We also compare to the average scores of the top 5 trajec-
+tories within an N-trajectory pool in Appendix D.5, with
+AMC uniformly improving average-trajectory performance
+across tasks. We provide a mathematical proof for this result
+in Appendix A.4.
+4We do not use native reasoning capabilities of OpenAI models.
+Table 1.WebShop performance, obtained with a Llama-3.2-11B-
+based value model for AMC.
+Policy Model Method Score
+Llama-3.2-11B
+ReAct 0.159 (±0.030)
+Best-of-15 (ReAct)0.562 (±0.012)
+SMC (FoA-ReAct)0.580 (±0.016)
+AMC (ReAct) 0.625 (±0.009)
+GPT-4.1-mini
+ReAct 0.113 (±0.026)
+Best-of-15 (ReAct)0.403 (±0.016)
+AMC (ReAct) 0.488 (±0.020)
+GPT-5.1
+ReAct 0.171 (±0.017)
+Best-of-15 (ReAct)0.519 (±0.013)
+AMC (ReAct) 0.543 (±0.009)
+4.2. Experimental Results
+WebShop.We generated N= 15 trajectories for all meth-
+ods, with the exception of the ReAct baseline, which con-
+sists of a single trajectory (N= 1 ). Both AMC and SMC
+(FOA) used the same Llama-3.2-11B as the base value func-
+tion for a fair comparison. Table 1 presents the overall
+performance on WebShop. Scaling the number of sampled
+trajectories with Best-of-15 consistently yields substantial
+performance gains over the single-trajectory ReAct base-
+line. For the Llama-3.2-11B policy, SMC (FoA) provides
+only marginal improvements over Best-of-15, while AMC
+clearly outperforms all methods, demonstrating the benefits
+of learning a value function using AMC compared to the
+hand-crafted prompt-based value function from SMC (FoA).
+We also find it noteworthy that our relatively small (11B)
+value function can successfully guide a large-scale founda-
+tional agent like GPT-5.1, improving performance over this
+base policy without ever updating the underlying model.
+SciWorld.In SciWorld, we use Llama-3.1-8B as the base
+model for our learned value functions in order to match the
+setup of Xi et al. (2025b), who also report results on this
+dataset. Table 2 presents the overall performance results on
+the SciWorld benchmark. Similar to our WebShop findings,
+expanding the trajectory pool with Best-of-N significantly
+outperforms single-trajectory baselines, while AMC delivers
+additional consistent gains across all evaluated policies. For
+this benchmark, we considered both ReAct- and ReflAct-
+style agents; we find that ReflAct demonstrates superior
+performance. Our AMC method with a ReflAct-style policy
+achieved further improvements, highlighting the potential
+for compounding gains when combining AMC with more
+advanced decision-making agents. The consistent perfor-
+mance gains observed across all model scales underscore
+the robustness and scalability of the AMC framework.
+TextCraft.Lastly, in TextCraft, we generated N= 15
+trajectories and trained a Llama-3.2-11B value function for
+AMC. Table 3 again demonstrates that multiple-trajectory
+approaches achieve a higher score compared to single-
+trajectory baselines. AMC also obtained substantial gains
+over Best-of-15 for smaller policy models. However, we
+6
+
+===== [AMC] PAGE 7/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+1 3 5
+Number of Trajectories
+0.20
+0.30
+0.40
+0.50Average Score
+0.09
+AMC
+Best-of-N
+GRPO
+1 5 10 15 20 25
+Number of Trajectories
+0.10
+0.20Average Score
+-0.15
+AMC
+Best-of-N
+GRPO
+Figure 3.Comparisons to GRPO on SciWorld. Left: AMC and Best-of- N with a GPT-5.1 policy and a Qwen-2.5-7B-based value function,
+compared to GRPO with a Qwen-2.5-7B backbone (highlighting the advantage of using AMC with black-box models). Right: AMC and
+Best-of-Nwith a Qwen-2.5-3B policy and value function, compared to GRPO with the same backbone.
+Table 2.SciWorld performance, obtained with a Llama-3.1-8B-
+based value model for AMC.
+Policy Model Method Score
+Llama-3.1-8B
+ReAct 0.013 (±0.014)
+Best-of-15 (ReAct)0.311 (±0.014)
+AMC (ReAct) 0.347 (±0.015)
+ReflAct 0.051 (±0.015)
+Best-of-15 (ReflAct)0.347 (±0.010)
+AMC (ReflAct) 0.376 (±0.016)
+GPT-4.1-mini
+ReAct 0.250 (±0.023)
+Best-of-15 (ReAct)0.616 (±0.020)
+AMC (ReAct) 0.673 (±0.009)
+GPT-5.1
+ReAct 0.090 (±0.049)
+Best-of-15 (ReAct)0.533 (±0.026)
+AMC (ReAct) 0.597 (±0.023)
+observe performance saturation as the base policy improves.
+This is evident with GPT-5.1, where Best-of-15 even ex-
+ceeds AMC. We hypothesize that this performance inversion
+is due to the strength of GPT-5.1 as a prior. For TextCraft,
+GPT-5.1 generates shorter, higher-confidence trajectories,
+leaving little room for improvement and reducing the di-
+versity of the value function’s training data. This makes it
+more difficult for AMC to separate out promising trajecto-
+ries, leading it to accidentally prune some. Based on this
+finding, we expect AMC to be most useful for model-task
+pairs where the model produces good but not uniformly
+perfect trajectories. Crucially, these findings do not imply
+that AMC loses utility as models get better because(i) there
+is no foreseeable upper bound on real-world problem com-
+plexity and (ii) cost constraints will favour smaller, more
+efficient models that may not be performance-maximal.
+4.3. Comparison with GRPO
+GRPO (Shao et al., 2024) is a KL-regularized RL method
+that has become common for LLM-based policies. As with
+AMC, GRPO attempts to model π∗ from Equation 1, but
+unlike AMC, it requires full access to the policy’s under-
+lying parameters to perform weight updates. GRPO also
+Table 3.TextCraft performance, obtained with a Llama-3.2-11B-
+based value model for AMC.
+Policy Model Method Score
+Llama-3.2-11B
+ReAct 0.102 (±0.029)
+Best-of-15 (ReAct)0.296 (±0.019)
+AMC (ReAct) 0.543 (±0.057)
+GPT-4.1-mini
+ReAct 0.432 (±0.055)
+Best-of-15 (ReAct)0.728 (±0.010)
+AMC (ReAct) 0.852 (±0.020)
+GPT-5.1
+ReAct 0.691 (±0.012)
+Best-of-15 (ReAct)0.889 (±0.000)
+AMC (ReAct) 0.790 (±0.021)
+requires online trajectory rollouts during training, which
+incurs additional computational overhead, over the simple
+offline regression task required to learn Vθ (Section 2.3).
+To clarify, AMC is not intended to replace GRPO, but to
+serve as a viable alternative when GRPO is not possible. We
+thus consider GRPO to be an oracle rather than a typical
+baseline.
+In this section, we put AMC and GRPO head-to-head to
+better understand whether our approach is a viable alter-
+native to policy gradient RL. For a direct comparison to
+Xi et al. (2025b), we use the same LLM policy backbone
+(Qwen-2.5-3B) for both AMC and GRPO; we also use this
+same base model to train our value function, thus control-
+ling for base model and pre-training biases. Additionally,
+to highlight AMC’s compatibility with black-box policies,
+we consider an alternative comparison setup: using a fron-
+tier LLM agent (GPT-5.1) as the prior policy for AMC and
+training a value function backed by the same LLM as the
+one GRPO fine-tunes for its policy (Qwen-2.5-7B).
+Figure 3 illustrates these comparisons on the SciWorld
+benchmark. Note that all GRPO scores are taken from Xi
+et al. (2025b). When backed by a GPT-5.1 policy (Figure 3,
+left), AMC outperforms GRPO with only N= 5 trajecto-
+ries, achieving a performance level that remains unattainable
+for Best-of-N given the same trajectory budget. Further-
+7
+
+===== [AMC] PAGE 8/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+more, when using the same LLM backbone for the policy of
+both GRPO and AMC (Figure 3, right), we find that when
+scaling AMC to 25 trajectories it outperforms fully fine-
+tuning this policy with GRPO. These results highlight that
+(i) AMC performs comparably to GRPO using the same
+prior policy given enough trajectories (but requiring fewer
+than Best-of-N), and (ii) it can benefit even more from
+better black-box priors. In Appendix D.4, we fine-tuned
+our own GRPO baselines to provide a comprehensive per-
+formance and cost analysis. To underscore the relative cost
+requirements of AMC and GRPO, we note that all AMC
+experiments were performed on a workstation with two
+RTX 6000 Ada desktop GPUs, whereas GRPO experiments
+required a node with eight A100 GPUs.
+4.4. Impact of Value Model Optimization
+Training vs. Prompting.Since our trained value functions
+are initialized from pre-trained (instruction-tuned) LLMs,
+we ask the question: is training necessary? Can we achieve
+the same performance by prompting alone? We thus com-
+pare AMC to a (heuristic) prompt-based approach, SMC
+(Zero-shot), where we simply ask the pre-trained LLM to
+estimate the value of a given state (see Appendix C for all
+prompts). Table 4 illustrates this comparison across both
+open-weight and black-box policies, revealing consistent
+performance gains from training. Notably, SMC (Zero-Shot)
+delivers inconsistent performance gain over the Best-of-N
+baseline, underscoring that raw pre-trained knowledge is in-
+sufficient for precise state-value estimation in these agentic
+environments.
+4.5. Cost-Efficiency and Scaling
+Trajectory Counts.The effectiveness of our approach re-
+lies on sampling multiple trajectories at test-time, which
+naturally raises questions around inference cost and scal-
+ability. To evaluate the practical feasibility of AMC, we
+compare its efficiency against Best-of-N in Figure 4. When
+the number of trajectories is limited to 5 or 10, AMC demon-
+strates performance gains over the baseline with the excep-
+tion of TextCraft. This exception is likely due to the re-
+duced diversity of visited states arising from TextCraft’s
+lower relative task complexity, and is further hampered by
+AMC’s resampling; increasing the trajectory count resolves
+this by promoting more state space exploration. As N in-
+creases, AMC generally achieves performance parity with
+Best-of-20 using only N= 15 trajectories, thereby reduc-
+ing test-time-compute by approximately 25%. Note that the
+value function is only evaluated on the initial state and on
+resampling steps and requires only a single prefill, so its
+computational overhead is small compared to the cost of the
+LLM policy, which performs both prefill and decoding at
+every step.
+Table 4.Impact of value function optimization on performance.
+Dataset Policy Model Method Score
+Webshop
+Llama-3.2-11B
+Best-of-15 0.562 (±0.012)
+SMC (Zero-shot)0.556 (±0.014)
+AMC 0.625 (±0.009)
+GPT-4.1-mini
+Best-of-15 0.403 (±0.016)
+SMC (Zero-shot)0.418 (±0.014)
+AMC 0.488 (±0.020)
+GPT-5.1
+Best-of-15 0.519 (±0.013)
+SMC (Zero-shot)0.522 (±0.008)
+AMC 0.543 (±0.009)
+SciWorld
+Llama-3.1-8B
+Best-of-15 0.311 (±0.014)
+SMC (Zero-shot)0.305 (±0.013)
+AMC 0.347 (±0.015)
+GPT-4.1-mini
+Best-of-15 0.616 (±0.020)
+SMC (Zero-shot)0.640 (±0.022)
+AMC 0.673 (±0.009)
+GPT-5.1
+Best-of-15 0.533 (±0.026)
+SMC (Zero-shot)0.506 (±0.041)
+AMC 0.597 (±0.023)
+TextCraft
+Llama-3.2-11B
+Best-of-15 0.296 (±0.019)
+SMC (Zero-shot)0.296 (±0.043)
+AMC 0.543 (±0.057)
+GPT-4.1-mini
+Best-of-15 0.728 (±0.010)
+SMC (Zero-shot)0.765 (±0.025)
+AMC 0.852 (±0.020)
+GPT-5.1
+Best-of-15 0.889 (±0.000)
+SMC (Zero-shot)0.815 (±0.026)
+AMC 0.790 (±0.021)
+Table 5.Performance and cost of a lightweight policy using AMC
+versus the more expensive GPT-5.1.
+Dataset Policy Model Method Score Cost (USD)
+WebShopGPT-5.1 Best-of-150.519 (±0.013) 0.39
+GPT-4.1-miniAMC 0.488 (±0.020) 0.14
+SciWorldGPT-5.1 Best-of-150.533 (±0.026) 0.18
+GPT-4.1-miniAMC 0.673 (±0.009) 0.06
+TextCraftGPT-5.1 Best-of-150.889 (±0.000) 0.45
+GPT-4.1-miniAMC 0.852 (±0.020) 0.21
+Policy Cost.Expanding on these results, we find that our
+method also enables smaller black-box models to achieve
+performance comparable to their larger counterparts, ef-
+fectively narrowing the gap between lightweight and high-
+capacity policies. We empirically substantiate this finding
+in Table 5, where costs are calculated based on the average
+input and output token counts across tasks.5 GPT-4.1-mini
+paired with AMC maintains a performance level similar to
+GPT-5.1 while reducing total cost by at least 50%.
+Prior Surrogates.Part of AMC’s upfront cost is the initial
+collection of trajectories from the prior LLM policy π to
+train the value model. When π is behind an API, this up-
+front data acquisition can become expensive. To circumvent
+this, we explore using small, open-weight surrogate policies
+to sample training trajectories instead of using π directly;
+lightweight models can generally be self-hosted on existing
+GPUs to circumvent API costs. Table 6 shows results; using
+a surrogate policy uniformly outperforms Best-of- N. Al-
+though sampling trajectories from π itself performs better
+5OpenAI pricing page.
+8
+
+===== [AMC] PAGE 9/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+1 5 10 15 20
+Number of Trajectories
+0.20
+0.30
+0.40
+0.50
+0.60Average Score
+Best-of-N
+AMC
+1 5 10 15 20
+Number of Trajectories
+0.00
+0.10
+0.20
+0.30Average Score
+Best-of-N
+AMC
+1 5 10 15 20
+Number of Trajectories
+0.10
+0.20
+0.30
+0.40
+0.50
+0.60Average Score
+Best-of-N
+AMC
+Figure 4.Best-of- N vs. AMC across tasks. Left: WebShop with Llama-3.2-11B policy, value function. Middle: SciWorld with
+Llama-3.1-8B policy, value function. Right: TextCraft with Llama-3.2-11B policy, value function.
+Table 6.Transferability of value functions where base models
+are Llama-3.2-11B (WebShop, TextCraft) and Llama-3.1-8B (Sci-
+World).
+Dataset Policy Model Method Surrogate Score
+WebShop GPT-4.1-mini
+Best-of-15- 0.403 (±0.016)
+AMC Llama-3.2-11B0.467 (±0.028)
+None 0.488 (±0.020)
+SciWorld GPT-4.1-mini
+Best-of-15- 0.616 (±0.020)
+AMC Llama-3.1-8B0.645 (±0.023)
+None 0.673 (±0.009)
+TextCraft GPT-4.1-mini
+Best-of-15- 0.728 (±0.010)
+AMC Llama-3.2-11B0.790 (±0.025)
+None 0.852 (±0.020)
+than using a surrogate policy, these results still demonstrate
+transferability ofV θ as a viable way to reduce cost.
+5. Conclusion, Limitations, and Future Work
+Most of today’s LLM-based interactions are hidden behind
+black-box APIs, and yet most agentic applications (e.g.,
+e-commerce, software engineering) are specialized tasks
+that could benefit from task-specific tuning. Is it possible to
+emulate the effects of RL-based fine-tuning with black-box
+policies? Our work answers this question in the affirmative.
+Following the well-known bridge between KL-regularized
+RL and Bayesian inference, we approximate the agent’s opti-
+mal policy without directly training it through RL, but rather
+by Monte Carlo sampling from its Bayesian posterior dis-
+tribution. Our algorithm, Agentic Monte Carlo (AMC), im-
+plements sequential importance resampling using a learned
+value function to guide samples from the black-box LLM
+prior toward samples from the intractable optimal posterior.
+We empirically showed the effectiveness of our approach on
+the WebShop, SciWorld, and TextCraft benchmarks, high-
+lighting improvements over existing baselines. Notably,
+AMC is able to improve the performance of smaller black-
+box models to match that of larger black-box models, thus
+incurring significantly cheaper API costs. We further show-
+cased our method against policy gradient RL methods such
+as GRPO, demonstrating that AMC can achieve equivalent
+performance as we scale test-time compute.
+There are a number of avenues for future work on AMC. For
+one, our learned value function will never perfectly approx-
+imate the true value function. Potential ways to improve
+the training procedure include temporal difference learning,
+(Sutton, 1988), reward shaping (Ng et al., 1999), or better
+approximating Equation 5. Another area for improvement is
+the computational overhead that comes with having to sam-
+ple multiple trajectories in parallel during inference. Greater
+efficiency may be attained, for example, by distilling AMC
+or some component of AMC into a smaller network (Hinton
+et al., 2015). AMC can also be extended to broader settings,
+like multi-agent black-box agents. As more frontier models
+are released with proprietary, opaque architectures, AMC
+provides a principled mechanism to orient and optimize
+these black-box agents for task-specific execution. Addi-
+tionally, several promising directions exist for enhancing
+resampling strategies: developing auxiliary models trained
+to trigger resampling, leveraging LLM-based judges to iden-
+tify specific trajectory states where resampling is likely to
+yield the highest marginal gain (Feng et al., 2026), and
+employing adaptive resampling frameworks or hyperparam-
+eter optimization techniques to arrive at more sophisticated
+choices of resampling intervals (Doucet et al., 2001; Chopin
+et al., 2020). Lastly, there remains theory to be built around
+our method. AMC introduces potential error in the reward
+model (Huang et al., 2025) or value function, and it would be
+useful to understand its interplay with the already-extensive
+body of work around SMC (Crisan & Doucet, 2000; Moral,
+2004; Marion et al., 2023).
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning, specifically the use of LLM agents.
+Our work focuses on providing statistically principled sam-
+pling methods to extend reinforcement learning techniques
+to black-box LLMs. This work is unlikely to cause broader
+societal impact outside of the general impacts of agentic AI.
+9
+
+===== [AMC] PAGE 10/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+References
+Anthropic. Introducing Claude Opus 4.6, 2026.
+URL https://www.anthropic.com/news/
+claude-opus-4-6.
+Chopin, N., Papaspiliopoulos, O., et al.An introduction to
+sequential Monte Carlo, volume 4. Springer, 2020.
+Christiano, P. F., Leike, J., Brown, T., Martic, M., Legg,
+S., and Amodei, D. Deep reinforcement learning from
+human preferences. InAdvances in Neural Information
+Processing Systems, volume 30, 2017.
+Crisan, D. and Doucet, A. Convergence of sequential monte
+carlo methods.Signal Processing Group, Department of
+Engineering, University of Cambridge, Technical Report
+CUEDIF-INFENGrrR38, 1(525):92, 2000.
+Dayan, P. and Hinton, G. E. Using expectation-
+maximization for reinforcement learning.Neural Compu-
+tation, 9(2):271–278, 1997.
+Doucet, A., Godsill, S., and Andrieu, C. On sequential
+Monte Carlo sampling methods for Bayesian filtering.
+Statistics and Computing, 10(3):197–208, 2000. ISSN
+1573-1375. doi: 10.1023/A:1008935410038.
+Doucet, A., de Freitas, N., and Gordon, N.An Introduction
+to Sequential Monte Carlo Methods, pp. 3–14. Springer
+New York, 2001. ISBN 978-1-4757-3437-9. doi: 10.
+1007/978-1-4757-3437-9 1.
+Feng, N., Sui, Y ., Hou, S., Wu, G., and Cresswell, J. C.
+Conformal Agent Error Attribution.arXiv:2605.06788,
+2026.
+Google. Gemini 3 Pro Model Card, November
+2025. URL https://storage.googleapis.
+com/deepmind-media/Model-Cards/
+Gemini-3-Pro-Model-Card.pdf.
+Gordon, N. J., Salmond, D. J., and Smith, A. F. Novel
+approach to nonlinear/non-gaussian bayesian state esti-
+mation. InIEE proceedings F (Radar and Signal Pro-
+cessing), volume 140, pp. 107–113, 1993.
+Grattafiori, A. et al. The Llama 3 Herd of Models.
+arXiv:2407.21783, 2024.
+Haarnoja, T., Tang, H., Abbeel, P., and Levine, S. Rein-
+forcement learning with deep energy-based policies. In
+Proceedings of the 34th International Conference on Ma-
+chine Learning, volume 70, pp. 1352–1361, 2017.
+Haarnoja, T., Zhou, A., Abbeel, P., and Levine, S. Soft
+actor-critic: Off-policy maximum entropy deep reinforce-
+ment learning with a stochastic actor. InProceedings of
+the 35th International Conference on Machine Learning,
+volume 80, pp. 1861–1870, 2018.
+Hinton, G., Vinyals, O., and Dean, J. Distilling the knowl-
+edge in a neural network.arXiv:1503.02531, 2015.
+Hu, E. J., yelong shen, Wallis, P., Allen-Zhu, Z., Li, Y .,
+Wang, S., Wang, L., and Chen, W. LoRA: Low-rank
+adaptation of large language models. InInternational
+Conference on Learning Representations, 2022.
+Huang, A., Block, A., Liu, Q., Jiang, N., Krishnamurthy,
+A., and Foster, D. J. Is best-of-n the best of them? cover-
+age, scaling, and optimality in inference-time alignment.
+InInternational Conference on Machine Learning, pp.
+25075–25126. PMLR, 2025.
+Kim, J., Rhee, S., Kim, M., Kim, D., Lee, S., Sung, Y ., and
+Jung, K. ReflAct: World-Grounded Decision Making in
+LLM Agents via Goal-State Reflection. InProceedings
+of the 2025 Conference on Empirical Methods in Natural
+Language Processing, 2025. ISBN 979-8-89176-332-6.
+doi: 10.18653/v1/2025.emnlp-main.1697.
+Klein, L. H., Potamitis, N., Aydin, R., West, R., Gulcehre,
+C., and Arora, A. Fleet of agents: Coordinated problem
+solving with large language models. InProceedings of
+the 42nd International Conference on Machine Learning,
+volume 267, pp. 30986–31019, 2025.
+Korbak, T., Perez, E., and Buckley, C. RL with KL penalties
+is better viewed as Bayesian inference. InFindings of
+the Association for Computational Linguistics: EMNLP
+2022, pp. 1083–1091. Association for Computational Lin-
+guistics, 2022. doi: 10.18653/v1/2022.findings-emnlp.
+77.
+Levine, S. Reinforcement learning and control as proba-
+bilistic inference: Tutorial and review.arXiv:1805.00909,
+2018.
+Lew, A. K., Zhi-Xuan, T., Grand, G., and Mansinghka,
+V . Sequential Monte Carlo Steering of Large Language
+Models using Probabilistic Programs. InICML 2023
+Workshop: Sampling and Optimization in Discrete Space,
+2023.
+Lightman, H., Kosaraju, V ., Burda, Y ., Edwards, H., Baker,
+B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+Cobbe, K. Let’s Verify Step by Step. InThe Twelfth
+International Conference on Learning Representations,
+2024.
+Lioutas, V ., Lavington, J. W., Sefas, J., Niedoba, M., Liu,
+Y ., Zwartsenberg, B., Dabiri, S., Wood, F., and Scibior, A.
+Critic Sequential Monte Carlo. InThe Eleventh Interna-
+tional Conference on Learning Representations, 2023.
+Loula, J., LeBrun, B., Du, L., Lipkin, B., Pasti, C., Grand,
+G., Liu, T., Emara, Y ., Freedman, M., Eisner, J., Cot-
+terell, R., Mansinghka, V ., Lew, A. K., Vieira, T., and
+10
+
+===== [AMC] PAGE 11/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+O’Donnell, T. J. Syntactic and Semantic Control of Large
+Language Models via Sequential Monte Carlo. InThe
+Thirteenth International Conference on Learning Repre-
+sentations, 2025.
+Ma, C., Zhang, J., Zhu, Z., Yang, C., Yang, Y ., Jin, Y ., Lan,
+Z., Kong, L., and He, J. AgentBoard: An Analytical Eval-
+uation Board of Multi-turn LLM Agents. InAdvances in
+Neural Information Processing Systems, volume 37, pp.
+74325–74362, 2024. doi: 10.52202/079017-2365.
+Marion, J., Mathews, J., and Schmidler, S. C. Finite-sample
+complexity of sequential monte carlo estimators.The
+Annals of Statistics, 51(3):1357–1375, 2023.
+Moral, P.Feynman-Kac formulae: genealogical and in-
+teracting particle systems with applications. Springer,
+2004.
+Ng, A. Y ., Harada, D., and Russell, S. J. Policy Invari-
+ance Under Reward Transformations: Theory and Ap-
+plication to Reward Shaping. InProceedings of the Six-
+teenth International Conference on Machine Learning,
+pp. 278–287. Morgan Kaufmann Publishers Inc., 1999.
+ISBN 1558606122.
+OpenAI. Introducing GPT-4.1 in the API. https://
+openai.com/index/gpt-4-1/, 2025a. Released
+April 14, 2025.
+OpenAI. GPT-5 System Card, August 2025b. URL https:
+//cdn.openai.com/gpt-5-system-card.
+pdf.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+Schulman, J., Hilton, J., Kelton, F., Miller, L., Simens, M.,
+Askell, A., Welinder, P., Christiano, P. F., Leike, J., and
+Lowe, R. Training language models to follow instructions
+with human feedback. InAdvances in Neural Information
+Processing Systems, volume 35, pp. 27730–27744, 2022.
+Pennino, F., Raimondi, B., Rondelli, M., Gurioli,
+A., and Gabbrielli, M. From Reasoning to Code:
+GRPO Optimization for Underrepresented Languages.
+arXiv:2506.11027, 2025.
+Pich´e, A., Thomas, V ., Ibrahim, C., Bengio, Y ., and Pal,
+C. Probabilistic Planning with Sequential Monte Carlo
+methods. InInternational Conference on Learning Rep-
+resentations, 2019.
+Prasad, A., Koller, A., Hartmann, M., Clark, P., Sabhar-
+wal, A., Bansal, M., and Khot, T. ADaPT: As-Needed
+Decomposition and Planning with Language Models.
+InFindings of the Association for Computational Lin-
+guistics: NAACL 2024, pp. 4226–4252, 2024. doi:
+10.18653/v1/2024.findings-naacl.264.
+Puri, I., Sudalairaj, S., Xu, G., Bhandwaldar, A., Xu, K.,
+and Srivastava, A. Rollout Roulette: A Probabilistic
+Inference Approach to Inference-Time Scaling of LLMs
+using Particle-Based Monte Carlo Methods. InAdvances
+in Neural Information Processing Systems, volume 38,
+pp. 156427–156454, 2025.
+Ross, B. L., V ouitsis, N., Ghomi, A. A., Hosseinzadeh, R.,
+Xin, J., Liu, Z., Sui, Y ., Hou, S., Leung, K. K., Loaiza-
+Ganem, G., and Cresswell, J. C. Textual Bayes: Quan-
+tifying Prompt Uncertainty in LLM-Based Systems. In
+The Fourteenth International Conference on Learning
+Representations, 2026.
+Schick, T., Dwivedi-Yu, J., Dessi, R., Raileanu, R., Lomeli,
+M., Hambro, E., Zettlemoyer, L., Cancedda, N., and
+Scialom, T. Toolformer: Language models can teach
+themselves to use tools. InAdvances in Neural Informa-
+tion Processing Systems, volume 36, pp. 68539–68551,
+2023.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and
+Klimov, O. Proximal policy optimization algorithms.
+arXiv:1707.06347, 2017.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+H., Zhang, M., Li, Y . K., Wu, Y ., and Guo, D. DeepSeek-
+Math: Pushing the Limits of Mathematical Reasoning in
+Open Language Models.arXiv:2402.03300, 2024.
+Silver, D., Hubert, T., Schrittwieser, J., Antonoglou, I., Lai,
+M., Guez, A., Lanctot, M., Sifre, L., Kumaran, D., Grae-
+pel, T., Lillicrap, T., Simonyan, K., and Hassabis, D.
+Mastering chess and shogi by self-play with a general re-
+inforcement learning algorithm.arXiv:1712.01815, 2017.
+Sutton, R. S. Learning to predict by the methods of temporal
+differences.Machine Learning, 3(1):9–44, 1988. ISSN
+1573-0565. doi: 10.1007/BF00115009.
+Sutton, R. S., Barto, A. G., et al.Reinforcement learning:
+An introduction, volume 1. 1998.
+Toussaint, M. and Storkey, A. Probabilistic inference for
+solving discrete and continuous state Markov Decision
+Processes. InProceedings of the 23rd International Con-
+ference on Machine Learning, pp. 945–952. Association
+for Computing Machinery, 2006. ISBN 1595933832. doi:
+10.1145/1143844.1143963.
+Wang, R., Jansen, P., C ˆot´e, M.-A., and Ammanabrolu, P.
+ScienceWorld: Is your Agent Smarter than a 5th Grader?
+InProceedings of the 2022 Conference on Empirical
+Methods in Natural Language Processing, pp. 11279–
+11298, 2022. doi: 10.18653/v1/2022.emnlp-main.775.
+11
+
+===== [AMC] PAGE 12/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Wang, Y ., Yang, Q., Zeng, Z., Ren, L., Liu, L., Peng, B.,
+Cheng, H., He, X., Wang, K., Gao, J., Chen, W., Wang,
+S., Du, S., and shen, y. Reinforcement Learning for
+Reasoning in Large Language Models with One Training
+Example. InAdvances in Neural Information Processing
+Systems, volume 38, pp. 122721–122764, 2025.
+Williams, R. J. Simple statistical gradient-following algo-
+rithms for connectionist reinforcement learning.Machine
+Learning, 8(3):229–256, 1992.
+Xi, Z., Ding, Y ., Chen, W., Hong, B., Guo, H., Wang, J.,
+Guo, X., Yang, D., Liao, C., He, W., Gao, S., Chen, L.,
+Zheng, R., Zou, Y ., Gui, T., Zhang, Q., Qiu, X., Huang,
+X., Wu, Z., and Jiang, Y .-G. AgentGym: Evaluating and
+training large language model-based agents across diverse
+environments. InProceedings of the 63rd Annual Meeting
+of the Association for Computational Linguistics (Volume
+1: Long Papers), pp. 27914–27961, 2025a. ISBN 979-8-
+89176-251-0. doi: 10.18653/v1/2025.acl-long.1355.
+Xi, Z., Huang, J., Liao, C., Huang, B., Guo, H., Liu, J.,
+Zheng, R., Ye, J., Zhang, J., Chen, W., He, W., Ding,
+Y ., Li, G., Chen, Z., Du, Z., Yao, X., Xu, Y ., Chen,
+J., Gui, T., Wu, Z., Zhang, Q., Huang, X., and Jiang,
+Y .-G. AgentGym-RL: Training LLM Agents for Long-
+Horizon Decision Making through Multi-Turn Reinforce-
+ment Learning.arXiv:2509.08755, 2025b.
+Yang, A., Yang, B., Zhang, B., Hui, B., Zheng, B., Yu, B.,
+Li, C., Liu, D., Huang, F., Wei, H., Lin, H., Yang, J., Tu,
+J., Zhang, J., Yang, J., Yang, J., Zhou, J., Lin, J., Dang,
+K., Lu, K., Bao, K., Yang, K., Yu, L., Li, M., Xue, M.,
+Zhang, P., Zhu, Q., Men, R., Lin, R., Li, T., Tang, T., Xia,
+T., Ren, X., Ren, X., Fan, Y ., Su, Y ., Zhang, Y ., Wan,
+Y ., Liu, Y ., Cui, Z., Zhang, Z., and Qiu, Z. Qwen2.5
+Technical Report.arXiv:2412.15115, 2024.
+Yao, S., Chen, H., Yang, J., and Narasimhan, K. Web-
+shop: Towards scalable real-world web interaction with
+grounded language agents. InAdvances in Neural Infor-
+mation Processing Systems, volume 35, pp. 20744–20757,
+2022.
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+K. R., and Cao, Y . ReAct: Synergizing Reasoning and
+Acting in Language Models. InThe Eleventh Interna-
+tional Conference on Learning Representations, 2023.
+Yu, X., Peng, B., Vajipey, V ., Cheng, H., Galley, M., Gao,
+J., and Yu, Z. ExACT: Teaching AI Agents to Explore
+with Reflective-MCTS and Exploratory Learning. In
+The Thirteenth International Conference on Learning
+Representations, 2025.
+Zhao, S., Brekelmans, R., Makhzani, A., and Grosse, R. B.
+Probabilistic inference in language models via twisted
+sequential Monte Carlo. InProceedings of the 41st Inter-
+national Conference on Machine Learning, volume 235,
+pp. 60704–60748, 2024.
+Zhou, A., Yan, K., Shlapentokh-Rothman, M., Wang, H.,
+and Wang, Y .-X. Language agent tree search unifies
+reasoning, acting, and planning in language models. In
+Proceedings of the 41st International Conference on Ma-
+chine Learning, pp. 62138–62160, 2024.
+Ziegler, D. M., Stiennon, N., Wu, J., Brown, T. B., Rad-
+ford, A., Amodei, D., Christiano, P., and Irving, G.
+Fine-tuning language models from human preferences.
+arXiv:1909.08593, 2019.
+12
+
+===== [AMC] PAGE 13/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+A. Theory
+A.1. Sequential Importance Resampling
+In this section, we record the full SIR algorithm, Algorithm 1 (Doucet et al., 2001), with our weight update rule including
+the (soft) value function.
+Algorithm 1Sequential Importance Resampling
+Require:Reward functionr, value functionV, prior policyπ, resampling criterionc, trajectory countN, time horizonT
+Ensure:Posterior trajectoriess (i)
+0:T and weightsw (i)
+T fori= 1, . . . , N
+1:Initialization:Fori= 1, . . . , N, samples(i)
+0 ∼π(s 0)and setw (i)
+0 = 1/N.
+2:fort= 1toTdo
+3:fori= 1toNdo
+4:Sample˜s (i)
+t ∼π(s t |s (i)
+t−1)
+5:Set˜s (i)
+0:t ←
+
+s(i)
+0:t−1,˜s(i)
+t
+
+6:Compute importance weights:
+w(i)
+t =w (i)
+t−1eV(˜s(i)
+t )−V(s (i)
+t−1)+r(s(i)
+t−1)
+7:ifc(t,{w (i)
+t }N
+i=1)then
+8: Resample N choices of trajectory {s(i)
+0:t}N
+i=1 from {˜s(i)
+0:t}N
+i=1 according to the normalized weights:
+Multinomial
+ 
+N,
+
+w(i)
+tPN
+j=1 w(j)
+t
+N
+i=1
+!
+.
+9:Reset weightsw (i)
+t ←1/N.
+10:else
+11:s (i)
+0:t ←˜s(i)
+0:t fori= 1, . . . , N.
+A.2. Equivalence between KL-Regularized RL and Bayesian Inference
+For completeness, we include the proof of the equivalence between KL-regularized RL and Bayesian inference discussed by
+Korbak et al. (2022). This is also a known result in the control-as-inference literature (Levine, 2018), and mathematically
+the same as the fundamental proof justifying variational inference (VI) as a method.
+Proposition A.1.If we let
+π(Bayes)
+∗ (s0:T ) = 1
+Z π(s0:T )er(s0:T )/β,(8)
+whereZ=
+R
+π(s0:T )er(s0:T )/βds0:T is a normalizing constant, and let
+π(VI)
+∗ = arg max
+πθ
+J(π θ) = arg max
+πθ
+ 
+Eπθ(s0:T ) [r(s0:T )]−βKL[π θ∥π]
+
+,(9)
+thenπ (Bayes)
+∗ =π (VI)
+∗ .
+Proof.ExpandingJ(π θ), we can rewrite it in terms ofπ (Bayes)
+∗ :
+13
+
+===== [AMC] PAGE 14/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+J(π θ) =E πθ(s0:T ) [r(s0:T )]−βKL[π θ∥π]
+=
+Z
+πθ(s0:T )r(s0:T )ds0:T −β
+Z
+πθ(s0:T ) log πθ(s0:T )
+π(s0:T ) ds0:T
+=β
+Z
+πθ(s0:T )
+ r(s0:T )
+β −log πθ(s0:T )
+π(s0:T )
+
+ds0:T
+=β
+Z
+πθ(s0:T ) log π(s0:T )er(s0:T )/β
+πθ(s0:T ) ds0:T
+=β
+Z
+πθ(s0:T ) log Zπ (Bayes)
+∗ (s0:T )
+πθ(s0:T ) ds0:T
+=βlogZ−β
+Z
+πθ(s0:T ) log πθ(s0:T )
+π(Bayes)
+∗ (s0:T )
+ds0:T
+=βlogZ−βKL
+h
+πθ∥π(Bayes)
+∗
+i
+Because βlogZ is a constant independent of πθ, the argmax of J(π θ) is equivalent to the argmin of KL
+h
+πθ∥π(Bayes)
+∗
+i
+.
+Since the KL divergence is minimized uniquely at zero when its arguments are equal, it follows that π(VI)
+∗ =π (Bayes)
+∗ .
+A.3. Recursive Decomposition of Importance Weights
+Here we show how the importance weights can be recursively decomposed. This proof is similar, for example, to that of
+Pich´e et al. (2019, Appendix A.4).
+Proposition A.2.The importance weightw t = π∗(s0:t)
+π(s0:t) (Equation 3) obeys the recursive decomposition from Equation 4:
+wt =w t−1 ·e V(s t)−V(s t−1)+
+r(st−1 )
+β ,
+whereV(s t) = logE π(st+1:T |st)[e
+1
+β
+PT
+τ=t r(sτ )]is the soft value function.
+Proof.First, we expand the marginal posteriorπ ∗(s0:t)using the definition ofπ ∗ from Equation 2:
+π∗(s0:t) =
+Z
+π∗(s0:T )dst+1:T
+= 1
+Z
+Z
+π(s0:T )e
+1
+β
+PT
+τ=0 r(sτ )dst+1:T
+= 1
+Z π(s0:t)e
+1
+β
+Pt−1
+τ=0 r(sτ )
+Z
+π(st+1:T |s t)e
+1
+β
+PT
+τ=t r(sτ )dst+1:T
+= 1
+Z π(s0:t)e
+1
+β
+Pt−1
+τ=0 r(sτ )eV(s t).
+We then use this expression to expand out the importance weight:
+wt = π∗(s0:t)
+π(s0:t)
+= 1
+Z e
+1
+β
+Pt−1
+τ=0 r(sτ )eV(s t).
+From this expression, we can isolatew t−1 to get a recursive decomposition:
+wt =
+ 1
+Z e
+1
+β
+Pt−2
+τ=0 r(sτ )eV(s t−1)
+
+· e
+1
+β r(st−1)eV(s t)
+eV(s t−1)
+=w t−1 ·e V(s t)−V(s t−1)+
+r(st−1 )
+β .
+14
+
+===== [AMC] PAGE 15/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+A.4. SMC Improves the Average-Case Trajectory
+Here, we show in a simplified setting that SMC will always improve the expected average reward across N trajectories.
+In a setting with sparse, binary rewards, we can express the usefulness of a state s(i)
+t by its success probability, p(i)
+t =
+P(r(s (i)
+T ) = 1|s (i)
+t ).
+• Given N different states {s(1)
+t , . . . , s(N)
+t } and any step t, the expected average reward over the N trajectories in a
+single Best-of-N run is:
+E[RewardN] = 1
+N
+NX
+i=1
+p(i)
+t
+• On the other hand, with AMC (assuming a perfectly learned value function) let us assume resampling occurs once at
+timestept. Here, we have a simplified value function and weight, so that:
+–V(s (i)
+t ) = log[ep(i)
+t + (1−p (i)
+t )]. This comes from the definition of V(·) (under Equation 4), setting r(st) = 0
+for t̸=T , and from expanding out the expectation in the definition with binary rewards. (For this proof we set
+β= 1.)
+–The unnormalized weights are:
+w(i)
+t =e V(s (i)
+t )−V(s (i)
+0 ) = ep(i)
+t + 1−p (i)
+t
+ep(i)
+0 + 1−p (i)
+0
+= (e−1)p (i)
+t + 1
+(e−1)p (i)
+0 + 1
+– We also let ¯w(i)
+t for i= 1, . . . , Nbe the renormalized weights used for sampling at timestept. Since all trajectories
+share the same initial state, the denominator cancels out during normalization, yielding the following value:
+¯w(i)
+t = (e−1)p (i)
+t + 1
+(e−1) PN
+j=1 p(j)
+t +N
+The average resulting reward will be:
+E[RewardAMC] = 1
+N
+NX
+k=1
+E˜s(k)
+t ∼¯wt
+h
+˜p(k)
+t
+i
+= 1
+N
+NX
+k=1
+ NX
+i=1
+¯w(i)
+t p(i)
+t
+!
+=
+NX
+i=1
+¯w(i)
+t p(i)
+t
+=
+NX
+i=1
+ 
+(e−1)p (i)
+t + 1
+(e−1) PN
+j=1 p(j)
+t +N
+!
+p(i)
+t
+= (e−1) PN
+i=1(p(i)
+t )2 + PN
+i=1 p(i)
+t
+(e−1) PN
+j=1 p(j)
+t +N
+≥
+(e−1)
+
+1
+N
+PN
+i=1 p(i)
+t
+2
++ PN
+i=1 p(i)
+t
+(e−1) PN
+j=1 p(j)
+t +N
+(Cauchy-Schwarz inequality)
+=
+1
+N
+PN
+i=1 p(i)
+t
+ h
+(e−1) PN
+i=1 p(i)
+t +N
+i
+(e−1) PN
+j=1 p(j)
+t +N
+= 1
+N
+NX
+i=1
+p(i)
+t
+=E[RewardN]
+15
+
+===== [AMC] PAGE 16/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+where theinequality is strictunless all states have the same success probability (which is essentially never true in practice).
+Hence, AMC will nearly always result in higher average reward compared to the average of the N trajectories in Best-of-N.
+We note that in this theoretical setup, AMC will not always have higher maximum reward, particularly when there already
+exist very strong trajectories (e.g., a two-trajectory binary success case where one trajectory is guaranteed to succeed, and
+one is guaranteed to fail).
+B. Experiment Setup
+Hardware and Computational Costs.All AMC experiments were conducted on a workstation equipped with two NVIDIA
+RTX 6000 Ada Generation GPUs (48GB VRAM each) and 1TB of system RAM. Under this configuration, the training
+duration for the Llama-3.1-8B value model was approximately 2 hours, while the Llama-3.2-11B value model required
+roughly 3 hours to complete. A comprehensive specification of hyperparameters is detailed in Table 7.
+Experimental Protocol.To ensure statistical robustness and account for stochasticity in model generation, every experiment
+was executed across three independent trials using distinct random seeds. We report the mean scores alongside their
+corresponding standard errors to provide a clear measure of performance stability and variance.
+Table 7.Detailed implementation settings.
+Category Hyperparameter Value
+Value Model
+Optimization
+Optimizer AdamW
+Learning rate1×10 −5
+Scheduler Cosine
+Warmup ratio1×10 −1
+Max gradient norm 1
+Loss function Exponentially weighted MSE
+Training epochs 3
+LoRA rank (r) 8
+LoRA alpha (α) 16
+Output format Scalar (float) value
+Inference
+Configuration
+Temperature (β) 1.0
+Top-p0.95
+Max output length 4096
+Max steps
+WebShop: 10
+SciWorld: 20
+TextCraft: 20
+Resampling steps
+WebShop: [6]
+SciWorld: [4, 12]
+TextCraft: [4]
+Datasets.We evaluate our framework on three distinct environments.WebShopis a simulated e-commerce environment that
+evaluates an agent’s ability to navigate a multi-step web interface to purchase products satisfying multi-attribute constraints.
+It features an open-ended action space and a continuous reward based on attribute overlap with the target item.SciWorld
+evaluates long-horizon reasoning through elementary science tasks within a text-based simulator. This environment features
+a massive combinatorial action space of approximately 200K action-object combinations per step. Success requires strict
+adherence to procedural instructions, as deviation from the required sequence can trigger a terminal failure reward of -1.
+Performance is measured by sub-goal milestones, where agents earn incremental points for completing discrete required
+stages of an experiment.TextCraftis a Minecraft-inspired benchmark where agents craft items using hierarchical recipes.
+Using three primary actions (get, craft, and inventory), agents must manage compositional dependencies to earn a sparse
+binary reward of 1, granted only upon successful creation of the target item. While the environment features recipes across
+four levels of depth, we evaluated tasks at depths 3 and 4 since performance on lower-depth tasks has already reached
+saturation with current policy models (Xi et al., 2025b).
+Training Set Construction.We first sampled G trajectories per task and only included in our dataset the sample with the
+16
+
+===== [AMC] PAGE 17/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+highest cumulative reward. In total, we generated M= 1.4k trajectories for WebShop and 1.1k for SciWorld, both using
+G= 3 . For TextCraft, given the limited availability of only 44 tasks, we set G= 8 to promote more diversity in the sampled
+trajectories. Following previous works (Xi et al., 2025a;b), the maximum number of steps was fixed to T= 10 for WebShop
+and T= 20 for both SciWorld and TextCraft. By treating each individual step within a trajectory as a separate data point
+(see Section 2.3), we produced approximately P= 14 k, 22k, and 880 samples for WebShop, SciWorld, and TextCraft,
+respectively, which we then further split 80%/20% for our training and validation sets.
+C. Prompt Templates
+ReAct Prompt Template for WebShop
+You are web shopping.
+I will give you instructions about what to do.
+You have to follow the instructions.
+Every round I will give you an observation and a list of available actions, you have
+to respond an action based on the state and instruction.
+You can use search action if search is available.
+You can click one of the buttons in clickables.
+An action should be of the following structure:
+search[keywords]
+click[value]
+If the action is not valid, perform nothing.
+Keywords in search are up to you, but the value in click must be a value in the list
+of available actions.
+Remember that your keywords in search should be carefully designed.
+Your response should use the following format:
+Thought:
+I think ...
+Action:
+click[something]
+17
+
+===== [AMC] PAGE 18/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+ReAct Prompt Template for SciWorld
+You are an agent for science world. Every round I will give you an observation, you
+have to respond an action based on the observation to finish the given task. Here
+are the actions you may take:
+["action": "open/close OBJ", "description": "open/close a container",
+"action": "de/activate OBJ", "description": "activate/deactivate a device",
+"action": "connect OBJ to OBJ", "description": "connect electrical components",
+"action": "disconnect OBJ", "description": "disconnect electrical components",
+"action": "use OBJ [on OBJ]", "description": "use a device/item",
+"action": "look around", "description": "describe the current room",
+"action": "look at OBJ", "description": "describe an object in detail",
+"action": "look in OBJ", "description": "describe a container ´s contents",
+"action": "read OBJ", "description": "read a note or book",
+"action": "move OBJ to OBJ", "description": "move an object to a container",
+"action": "pick up OBJ", "description": "move an object to the inventory",
+"action": "put down OBJ", "description": "drop an inventory item",
+"action": "pour OBJ into OBJ", "description": "pour a liquid into a container",
+"action": "dunk OBJ into OBJ", "description": "dunk a container into a liquid",
+"action": "mix OBJ", "description": "chemically mix a container",
+"action": "go to LOC", "description": "move to a new location",
+"action": "eat OBJ", "description": "eat a food",
+"action": "flush OBJ", "description": "flush a toilet",
+"action": "focus on OBJ", "description": "signal intent on a task object",
+"action": "wait", "description": "take no action for 10 iterations",
+"action": "wait1", "description": "take no action for 1 iteration",
+"action":"examine OBJ","description":"provides a description of the objects present
+on or in a receptacle.",
+"action": "task", "description": "describe current task",
+"action": "inventory", "description": "list your inventory"]
+Your response should use the following format:
+Thought:
+your thoughts.
+Action:
+your next action
+18
+
+===== [AMC] PAGE 19/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+ReAct Prompt Template for TextCraft
+You are given few useful crafting recipes to craft items in Minecraft. Crafting
+commands are of the format "craft [target object] using [input ingredients]".
+Every round I will give you an observation, you have to respond an action based on
+the state and instruction. You can "get" an object (ingredients) from the inventory
+or the environment, look-up the game inventory by "inventory", or "craft" (target)
+using any of the crafting commands.
+Your output must strictly follow this format:
+"Thought:
+your thoughts.
+Action:
+your next action"
+Reminder:
+1. Always specify the quantity when using "get" and "craft" commands.
+- Example of get: get 1 lapis lazuli
+- Example1 of craft: craft 1 blue dye using 1 lapis lazuli
+- Example2 of craft: craft 1 golden carrot using 8 gold nugget, 1 carrot
+2. When using "get" command, do not specify whether the item comes from the
+inventory or the environment.
+3. You can use ONLY crafting commands provided, do not use your own crafting
+commands. However, if the crafting command uses a generic ingredient like "planks",
+you can use special types of the same ingredient e.g. "dark oak planks" in the
+command instead.
+Value Function Prompt Template for WebShop
+You are a value estimator for a web shopping task.
+Your job is to estimate the expected future reward (return) from the current STATE,
+given the INSTRUCTION and the previous STATES, ACTIONS provided as context.
+Format of the input you will receive:
+- INSTRUCTION: The original shopping request to evaluate progress against.
+- HISTORY: Consecutive pairs of (STATE, ACTION) taken so far.
+- NOW: Current STATE.
+Use the INSTRUCTION with HISTORY and NOW to infer progress and likelihood of
+success.
+Focus on attributes, type, options, and price of shown products relative to the
+INSTRUCTION.
+Based on your analysis, provide a score between 0.0 and 1.0.
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+19
+
+===== [AMC] PAGE 20/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Value Function Prompt Template for SciWorld
+You are a value estimator for a science world task.
+Your job is to estimate the expected future reward (return) from the current STATE,
+given the INSTRUCTION and the previous STATES, ACTIONS provided as context.
+Format of the input you will receive:
+- INSTRUCTION: The original scientific request to evaluate progress against.
+- HISTORY: Consecutive pairs of (STATE, ACTION) taken so far.
+- NOW: Current STATE.
+Use the INSTRUCTION with HISTORY and NOW to infer progress and likelihood of
+success.
+Focus on milestones, such as locating the correct room, acquiring required tools,
+and following the specific steps (e.g., ’focus’, ’interaction’) outlined in the
+INSTRUCTION.
+Heavily penalize states where the observation is ’No known action matches that
+input’, as this indicates the agent is stuck in an invalid command loop or syntax
+error.
+Based on your analysis, provide a score between -1.0 and 1.0.
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+Value Function Prompt Template for TextCraft
+You are a value estimator for a Minecraft crafting task.
+Your job is to estimate the expected future reward (return) from the current STATE,
+given the INSTRUCTION and the previous STATES, ACTIONS provided as context.
+Format of the input you will receive:
+- INSTRUCTION: The original crafting request to evaluate progress against.
+- HISTORY: Consecutive pairs of (STATE, ACTION) taken so far.
+- NOW: Current STATE.
+Use the INSTRUCTION with HISTORY and NOW to infer progress and likelihood of
+success.
+Focus on the crafting material, intermediate crafting results and quantities
+relative to the INSTRUCTION.
+Based on your analysis, provide a score between 0.0 and 1.0.
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+20
+
+===== [AMC] PAGE 21/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Zero-shot Prompt Template for WebShop
+...(Preamble identical to WebShop value function template)
+First, analyze the real task data provided below.
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+Your response MUST be a single floating-point number between 0.0 and 1.0, and
+NOTHING ELSE.
+Score:
+Zero-shot Prompt Template for SciWorld
+...(Preamble identical to SciWorld value function template)
+First, analyze the real task data provided below.
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+Your response MUST be a single floating-point number between -1.0 and 1.0, and
+NOTHING ELSE.
+Score:
+Zero-shot Prompt Template for TextCraft
+...(Preamble identical to TextCraft value function template)
+=== INSTRUCTION ===
+{Instruction}
+=== HISTORY ===
+{History}
+=== NOW ===
+{Current state}
+Your response MUST be a single floating-point number between 0.0 and 1.0, and
+NOTHING ELSE.
+Score:
+21
+
+===== [AMC] PAGE 22/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+FoA Prompt Template for WebShop
+Given an item to purchase and a trajectory that aims to buy an item that exactly
+matches the specification, which corresponds to the ideal score of 10, analyze the
+following trajectory, then at the last line conclude "Thus the correctness score is
+", where score is an integer from 1 to 10.
+Here are some examples
+...(Same in-context examples as Klein et al. (2025))
+ReflAct Prompt Template for SciWorld
+You are a helpful assistant to do some scientific experiment in an environment.
+In the environment, there are several rooms: kitchen, foundry, workshop, bathroom,
+outside, living room, bedroom, greenhouse, art studio, hallway
+You should explore the environment and find the items you need to complete the
+experiment.
+You can teleport to any room in one step.
+All containers in the environment have already been opened, you can directly get
+items from the containers.
+For each of your turn, you will be given the observation of the last turn.
+You should first reflect on the agent’s state, including the location, inventory,
+and focused object, in relation to the task goal.
+Then, output the action for this turn. Your output must strictly follow this
+format:
+Reflection:
+your reflection.
+Action:
+your next action.
+The available actions are:
+open OBJ: open a container
+close OBJ: close a container
+activate OBJ: activate a device
+deactivate OBJ: deactivate a device
+connect OBJ to OBJ: connect electrical components
+disconnect OBJ: disconnect electrical components
+use OBJ [on OBJ]: use a device/item
+look around: describe the current room
+examine OBJ: describe an object in detail
+look at OBJ: describe a container’s contents
+read OBJ: read a note or book
+move OBJ to OBJ: move an object to a container
+pick up OBJ: move an object to the inventory
+pour OBJ into OBJ: pour a liquid into a container
+mix OBJ: chemically mix a container
+teleport to LOC: teleport to a specific room
+focus on OBJ: signal intent on a task object
+wait: task no action for 10 steps
+wait1: task no action for a step
+Example:
+...(Same in-context examples as Kim et al. (2025))
+22
+
+===== [AMC] PAGE 23/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+D. Additional Experiments
+D.1. Resampling Steps
+D.1.1. TASK-SPECIFICFIXED-STEPRESAMPLING
+4 6 8 4,6 4,8 6,8 4,6,8
+Resampling Step Configurations
+0.360
+0.390
+0.420
+0.450Average Score
+1-Step Resampling
+2-Step Resampling
+3-Step Resampling
+Figure 5.WebShop performance across different resampling steps.
+4 8 12 16 4,8 4,12 4,16 8,12 8,1612,164,8,124,8,164,12,168,12,164,8,12,16
+Resampling Step Configurations
+0.180
+0.210
+0.240
+0.270Average Score
+1-Step Resampling
+2-Step Resampling
+3-Step Resampling
+4-Step Resampling
+Figure 6.SciWorld performance across different resampling steps.
+Our ablation study on resampling step configurations with 5 trajectories (Figure 5, Figure 6, and Figure 7) demonstrates that
+agent performance is highly adaptable to the strategic timing of value function interventions. Across all tested environments,
+results indicate that increasing resampling frequency does not inherently guarantee higher performance. Instead, AMC’s
+strength lies in its ability to provide high-impact, sparse corrections at pivotal moments. For example, in TextCraft, a dense
+4-step resampling approach actually hindered performance compared to more focused 1-step or 2-step interventions. Peak
+efficiency is reached through task-specific timing: a single intervention at step 6 for WebShop, a dual-step approach at steps
+4 and 12 for SciWorld, and an early correction at step 4 for TextCraft. These results highlight that AMC’s effectiveness is
+driven by precision-targeted interventions rather than sheer computational volume, allowing for significant performance
+gains while maintaining minimal overhead.
+D.1.2. DYNAMICRESAMPLING WITHEFFECTIVESAMPLESIZE
+Empirical analysis in Appendix D.1.1 reveals that the optimal resampling frequency is inherently task-dependent. For
+instance, WebShop requires early-to-mid trajectory interventions to preserve the enough step budget to finalize transactions.
+To confirm this, we compare fixed-step resampling against a dynamic criterion based on the Effective Sample Size
+(ESS) (Doucet et al., 2000). Specifically, we resample at step t using normalized weights ˜w(i)
+t whenever ESS:=
+23
+
+===== [AMC] PAGE 24/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+4 8 12 16 4,8 4,12 4,16 8,12 8,1612,164,8,124,8,164,12,168,12,164,8,12,16
+Resampling Step Configurations
+0.000
+0.100
+0.200
+0.300Average Score
+1-Step Resampling
+2-Step Resampling
+3-Step Resampling
+4-Step Resampling
+Figure 7.TextCraft performance across different resampling steps.
+(PN
+i=1( ˜w(i)
+t )2)−1 < N ρfor a given threshold ρ∈(0,1) . While ESS is designed to mitigate trajectory degeneracy by
+filtering low-weight samples, Table 8 shows that fixed-step selections consistently outperform ESS across various thresholds
+on both WebShop and SciWorld. Beyond superior performance, fixed-step resampling is significantly more computationally
+efficient. While ESS requires value network evaluation at every step, fixed-step allows the recursive update rule (Equation 4)
+to telescope, effectively skipping value estimation at most steps.
+Table 8.Comparison of dynamic resampling and fixed-step resampling for AMC.
+Dataset Policy Model Method Resampling (ρ) Score
+WebShop Llama-3.2-11B
+Best-of-5- 0.385 (±0.015)
+AMC
+ESS (0.1) 0.387 (±0.015)
+ESS (0.5) 0.402 (±0.017)
+ESS (0.9) 0.435 (±0.013)
+Fixed-step 0.454 (±0.009)
+SciWorld Llama-3.1-8B
+Best-of-5- 0.206 (±0.010)
+AMC
+ESS (0.1) 0.211 (±0.007)
+ESS (0.5) 0.216 (±0.006)
+ESS (0.9) 0.228 (±0.006)
+Fixed-step 0.255 (±0.008)
+Table 9.Comparison of value estimation objectives whenN= 15.
+Dataset Policy Model Sampling Score
+SciWorld Llama-3.1-8B Equation 7 0.347 (±0.015)
+Equation 5 0.332 (±0.005)
+D.2. Value Estimation Approaches
+As discussed in Section 2.3, we approximate the ideal value V in Equation 5, which requires a soft maximum over multiple
+trajectories per task, with the single trajectory formulation in Equation 7. Multiple sampling has also been used in MCMC
+frameworks for uncertainty quantification in LLMs (Ross et al., 2026). To evaluate the empirical impact of this approximation
+bias, we compare the performance of both methods on SciWorld in Table 9. For Equation 5, we use 3 trajectory estimates to
+better approximate the log-sum-exp. We find that the single trajectory approximation yields comparable performance to the
+multiple trajectory baseline. This indicates that Equation 7 serves as an effective surrogate for Equation 5. In the context of
+our training set construction approach (Appendix B), in which we sample multiple trajectories per task and only include the
+max-reward trajectory, one can view Equation 7 as using a hard maximum to approximate the soft maximum of Equation 5.
+24
+
+===== [AMC] PAGE 25/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+D.3. Impact of Base Model Selection on Value Function
+We evaluated the AMC framework using an additional base model architecture for the value model, Qwen-3-4B, alongside
+open-weight policies, to verify that the value function’s effectiveness is not dependent on a specific base model from the
+Llama-3 family. As illustrated in Table 10, a Qwen-3-4B based value model achieves competitive performance across all
+benchmarks, closely trailing the results of the Llama-3 family. This confirms the architectural generalizability of the value
+function and suggests that overall performance can be further optimized by selecting the base model best suited to a specific
+benchmark.
+Table 10.Sensitivity of the value function backbone across benchmarks with 5 trajectories.
+Dataset Policy Model Value Model Score
+WebShop Llama-3.2-11BLlama-3.2-11B 0.454 (±0.014)
+Qwen-3-4B 0.444 (±0.017)
+SciWorld Llama-3.1-8B Llama-3.1-8B 0.249 (±0.011)
+Qwen-3-4B 0.236 (±0.011)
+TextCraft Llama-3.2-11BLlama-3.2-11B 0.234 (±0.012)
+Qwen-3-4B 0.222 (±0.043)
+D.4. GRPO Baseline and Cost Analysis
+Since Xi et al. (2025b) did not release their GRPO models, we used a 8xA100 40GB node to fine-tune our own GRPO
+baselines for 2 epochs, removing a leak of 30% of test tasks identified in the AgentGym-RL codebase. As shown in Table 11,
+GRPO with Best-of-N provides only marginal improvements over GRPO across different policies, as the GRPO policy is
+already converged with a low standard error across 3 trials. When considering GPT-5.1 with a Qwen-2.5-7B value model,
+AMC significantly outperforms GRPO models with Best-of-N, showing the practicality of implementing our approach on a
+black-box policy. When considering the same policy model as GRPO (i.e., Qwen-2.5-3B), we outperform GRPO at the
+same N while saving on total training and inference costs. Note that cost comparisons use AWS on-demand rates as of
+April 2026 (USD 21.96/hr for 8xA100, which is used only for GRPO training; USD 5.27/hr for an NVIDIA RTX 6000
+96GB, which is the most comparable currently available server GPU to our main evaluation environment).
+Table 11.Performance and cost efficiency comparison between GRPO and AMC across varying numbers of trajectories.
+Training Method Policy Model Value Model Score Training Cost (USD) Inference Cost (USD)
+GRPO
+ReAct Qwen-2.5-7B - 0.183 (±0.001) 702.64 10.54
+Best-of-5 Qwen-2.5-7B - 0.190 (±0.001) 702.64 55.32
+Best-of-20 0.194 (±0.001) 702.64 231.80
+- AMC (N= 5) GPT-5.1 Qwen-2.5-7B 0.518 (±0.030) 138.39 57.97
+GRPO
+ReAct Qwen-2.5-3B - 0.182 (±0.001) 395.24 5.27
+Best-of-5 Qwen-2.5-3B - 0.185 (±0.003) 395.24 12.28
+Best-of-20 0.187 (±0.001) 395.24 50.05
+- AMC (N= 5) Qwen-2.5-3B Qwen-2.5-3B 0.133 (±0.006) 147.51 47.41
+AMC (N= 20) 0.216 (±0.004) 147.51 210.73
+D.5. Evaluating for Average Trajectory Performance
+Our primary evaluation relies on the highest-reward trajectory. This is the most practical metric, as downstream applications
+typically deploy only the single best outcome. However, to ensure our results are robust against high-variance noise, we
+expand our evaluation to include an alternative metric. In Table 12, we evaluate the mean reward of the top 5 trajectories
+(out of 15 generated) for each task, averaged these results across all tasks in the dataset. Using Llama-based policies across
+WebShop, SciWorld, and TextCraft, AMC consistently outperforms the average top-5-of-15 baseline (derived from the
+Best-of-15). These results indicate that AMC significantly elevates the overall quality of the top-performing trajectories
+within the trajectory pool, rather than relying on isolated high-reward outliers to achieve a superior score. These results are
+25
+
+===== [AMC] PAGE 26/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+corroborated by the analysis in Appendix A.4, in which we show that, on expectation, AMC is guaranteed to improve the
+average reward across trajectories.
+Table 12.Comparison of the averaged top 5 highest reward trajectories.
+Dataset Method Score
+WebShop Best-of-15 (Top-5)0.202 (±0.014)
+AMC (Top-5) 0.371 (±0.013)
+SciWorld Best-of-15 (Top-5)0.183 (±0.010)
+AMC (Top-5) 0.226 (±0.014)
+TextCraft Best-of-15 (Top-5)0.215 (±0.030)
+AMC (Top-5) 0.462 (±0.020)
+D.6. Additional Datasets
+To further evaluate the robustness of our approach, we test AMC on two additional tasks from the AgentBoard benchmark
+(Ma et al., 2024). Unlike our previous benchmarks, these datasets emphasize tool use, temporal synthesis, and multi-hop
+relational reasoning:
+• Weather: This task evaluates the agent’s ability to perform multi-step information retrieval using a specialized Weather
+API. The agent navigates 18 distinct actions (e.g., querying historical data, local forecasts) to answer complex queries
+such as comparing precipitation across different time periods. Success requires precise tool-calling and temporal logic.
+We used a strict binary reward (1 only for an exact match with the ground truth), a maximum horizon of T= 10 , and a
+resampling step of 4.
+• Movie: This dataset tests the agent’s ability to perform relational queries within a large-scale cinematic database. With
+16 available actions, the agent often executes multi-hop reasoning (e.g., identifying a specific director’s filmography,
+filtering by release year, and then retrieving the lead actor’s accolades). We utilized a strict binary reward (1 only for an
+exact match with the ground truth), a maximum horizon ofT= 12, and a resampling step of 6.
+As shown in Table 13, AMC consistently matches or outperforms the Best-of-N and SMC (Zero-shot) baselines across
+these new domains. These results demonstrate that AMC’s performance gains are robust and generalizable to diverse tasks
+with varying requirements.
+E. Qualitative Analysis
+Figure 8 provides a side-by-side comparison of two AMC trajectories on WebShop, highlighting a critical divergence
+between the two at resampling step 6. In Case 1, the agent identifies a product candidate ([B09LM3H2F5]) that initially
+satisfies several key semantic and budgetary criteria. This partial alignment yields a high value score of 0.6, which encourages
+the agent to proceed with this trajectory, ultimately securing a successful 1.0 reward through early task completion. In
+contrast, Case 2 illustrates a representative failure mode. While the agent initiates the task with the same search query as
+Case 1, it fails to prioritize relevant items, eventually returning to the initial search interface at step 6. At this step, our
+value model assigns a low score of 0.1, identifying the trajectory as being far from the target state, from which it goes on to
+achieve a reward of 0.0. This qualitative comparison confirms that our value function effectively distinguishes between
+goal-aligned progress and unproductive behavior at resampling step 6.
+The value model also effectively distinguishes between promising and non-promising trajectories within the SciWorld
+environment. For the qualitative evaluation, we focus on resampling step 12, the second-most effective intervention from
+our ablation study (Figure 6), as it provides a clearer baseline for analyzing individual trajectory outcomes. As illustrated
+in Figure 9 (left), by step 12, the agent has successfully located its target—a non-living object (finger painting). At this
+stage, the value model assigns a high score of 0.4 out of its range of [−1,1] . This trajectory culminates at step 15, where the
+agent enters the bathroom and places the painting in the red box, achieving a perfect environment reward of 1.0. Conversely,
+the non-promising trajectory in Figure 9 (right) illustrates the agent repeatedly performing redundant actions to access the
+bathroom despite the absence of a direct path from the hallway. This lack of progress results in a low value function score of
+26
+
+===== [AMC] PAGE 27/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+0.1 at step 12. Although the agent eventually identifies the target non-living item at step 18 and attempts to pick it up in
+the final step, it ultimately receives an environment reward of 0.0. This failure stems from the agent’s inability to satisfy
+necessary sub-goals, such as the initial “focus on” action required by the objective.
+Furthermore, the value function can accurately provide more granular comparisons between relatively similar states.
+Figure 10 presents a qualitative analysis of two partial trajectories within the TextCraft domain. While both trajectories align
+with the optimal policy, Case 1 has progressed further along the crafting dependency tree compared to Case 2. Reflecting
+this state progression, the value function assigns a higher value estimate to the former (0.275) than the latter (0.191). This
+demonstrates that the value function can identify states closer to the terminal condition possess a higher probability of
+success.
+Figure 8.Comparison of agent trajectories in WebShop. We highlight the divergence at the resampling step 6, where the value function
+differentiates between promising and non-promising ones.
+Case 1: Promising (Success)
+Goal:Find me hand crafted candy & chocolate for gift set,
+valentine day with style: happy birthday truffle chocolate,
+and price lower than 60.00 dollars.
+[STEP 1]
+Action:
+search[hand crafted candy gift set
+valentine day truffle chocolate
+birthday price:60]
+. . . (Search around items)
+[STEP 6]
+Observation:Item [B09LM3H2F5] partially matches gift
+set, truffle, and<$60.
+Value Function: 0.6
+Action:click[B09LM3H2F5]
+[STEP 7]
+Observation:Options for style refinement:happy birthday
+truffle chocolate, holiday truffle chocolate, truffle collection
+chocolate.
+Action:click[style]
+[STEP 8]
+Observation:Specific style options available.
+Action:
+click[happy birthday truffle
+chocolate]
+[STEP 9]
+Observation:Identified product matching all criteria.
+Action:click[Buy Now]
+Environment Reward: 1.0 (Success)
+Case 2: Non-Promising (Failure)
+Goal:Find me hand crafted candy & chocolate for gift set,
+valentine day with style: happy birthday truffle chocolate,
+and price lower than 60.00 dollars.
+[STEP 1]
+Action:
+search[hand crafted candy chocolate
+gift set valentine happy birthday
+truffle price lower 60]
+. . . (Search around items)
+[STEP 6]
+Observation:Back to the first page to search.
+Value Function: 0.1
+Action:
+search[hand crafted candy chocolate
+gift set valentine happy birthday
+truffle price lower 60]
+[STEP 7]
+Observation:Search results for previous request.
+Action:
+search[hand crafted candy chocolate
+gift set valentine happy birthday
+truffle chocolate gift box]
+[STEP 8]
+Observation:Search results for previous request.
+Action:
+click[Waterbridge Wave Milk Chocolate
+Hazelnut Crunch]
+[STEP 9]
+Observation:View product page for Waterbridge Wave...
+Action:click[Add to Cart]
+[STEP 10]
+Observation:No state transition.
+Action:
+click[CRAVINGS BY ZOE Valentine’s Day
+Chocolate Truffles]
+Environment Reward: 0.0 (Failure)
+27
+
+===== [AMC] PAGE 28/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Figure 9.Comparison of agent trajectories in SciWorld. We show the divergence at the resampling step 12, where the value function
+distinguishes between promising and non-promising ones.
+Case 1: Promising (Success)
+Goal:Your task is to find a(n) non-living thing. First,
+focus on the thing. Then, move it to the red box in the
+bathroom.
+This room is called the hallway. In it, you see:
+the agent, a substance called air, a finger painting
+You also see:
+A door to the kitchen (that is closed)
+. . . (Multiple doors to alternative locations are visible, but
+a door for the bathroom is absent)
+[STEP 1]
+Action:Focus on the finger painting
+[STEP 2]
+Observation:You focus on the finger painting.
+Action:pick up the finger painting
+. . . (Explore the hallway)
+[STEP 9]
+Observation:You move through the door to the kitchen.
+Action:look around
+[STEP 10]
+Observation:The description of the kitchen. There is a
+door to the bathroom (that is closed)
+Action:go to LOC (bathroom)
+[STEP 11]
+Observation:No known action matches that input.
+Action:open bathroom door
+[STEP 12]
+Observation:The door is now open.
+Value Function: 0.4
+Action:look around
+. . . (Explore the kitchen)
+[STEP 14]
+Observation:You move through the door to the bathroom.
+Action:look around
+[STEP 15]
+Observation:The description of the bathroom. There is a
+red box (containing nothing)
+Action:move finger painting to red box
+Environment Reward: 1.0 (Success)
+Case 2: Non-Promising (Failure)
+Goal:Your task is to find a(n) non-living thing. First,
+focus on the thing. Then, move it to the red box in the
+bathroom.
+This room is called the hallway. In it, you see:
+the agent, a substance called air, a finger painting
+You also see:
+A door to the kitchen (that is closed)
+. . . (Multiple doors to alternative locations are visible, but
+a door for the bathroom is absent)
+[STEP 1]
+Action:look around
+[STEP 2]
+Observation:The description of the hallway.
+Action:go to LOC (bathroom)
+[STEP 3]
+Observation:No known action matches that input.
+Action:go to LOC (bathroom)
+. . . (Redundant actions attempted to access the bathroom)
+[STEP 12]
+Observation:No known action matches that input.
+Value Function: 0.1
+Action:go to LOCATION bathroom
+. . . (Redundant actions attempted to access the bathroom)
+[STEP 17]
+Observation:No known action matches that input.
+Action:look around
+[STEP 18]
+Observation:The description of the hallway.
+Action:look at finger painting
+[STEP 19]
+Observation:a finger painting of a cow. The artist is listed
+as Owen.
+Action:move finger painting to bathroom
+[STEP 20]
+Observation:No known action matches that input.
+Action:pick up finger painting
+Environment Reward: 0.0 (Failure)
+28
+
+===== [AMC] PAGE 29/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Figure 10.Comparison of agent trajectories in TextCraft. We highlight the divergence at the resampling step 4, where the value function
+differentiates between more promising and less promising trajectories.
+Case 1: Promising (Success)
+Crafting commands:
+craft 1 lever using 1 cobblestone, 1 stick
+craft 6 andesite slab using 3 andesite
+craft 6 andesite wall using 6 andesite
+craft 6 cobblestone wall using 6 cobblestone
+craft 2 diorite using 2 quartz, 2 cobblestone
+craft 4 andesite stairs using 6 andesite
+craft 1 granite using 1 diorite, 1 quartz
+craft 1 mossy cobblestone using 1 cobblestone, 1 vine
+craft 1 quartz block using 4 quartz
+craft 1 dropper using 1 redstone, 7 cobblestone
+craft 1 dispenser using 1 redstone, 7 cobblestone, 1 bow
+craft 4 diorite stairs using 6 diorite
+craft 2 andesite using 1 diorite, 1 cobblestone
+Goal:craft andesite wall.
+[STEP 1]
+Action:
+Inventory
+[STEP 2]
+Observation:
+Inventory: You are not carrying
+anything.
+Action:
+Get 2 quartz
+Get 2 cobblestone
+[STEP 3]
+Observation:
+Got 2 quartz.
+Action:
+Get 2 cobblestone
+[STEP 4]
+Observation:
+Got 2 cobblestone.
+Value Function: 0.275
+Action:
+craft 2 diorite using 2 quartz, 2
+cobblestone
+. . .
+[STEP 16]
+Observation:
+Could not execute [no action].
+Action:
+craft 6 andesite wall using 6 andesite
+Environment Reward: 1.0 (Success)
+Case 2: Non-Promising (Failure)
+Crafting commands:
+craft 1 lever using 1 cobblestone, 1 stick
+craft 6 andesite slab using 3 andesite
+craft 6 andesite wall using 6 andesite
+craft 6 cobblestone wall using 6 cobblestone
+craft 2 diorite using 2 quartz, 2 cobblestone
+craft 4 andesite stairs using 6 andesite
+craft 1 granite using 1 diorite, 1 quartz
+craft 1 mossy cobblestone using 1 cobblestone, 1 vine
+craft 1 quartz block using 4 quartz
+craft 1 dropper using 1 redstone, 7 cobblestone
+craft 1 dispenser using 1 redstone, 7 cobblestone, 1 bow
+craft 4 diorite stairs using 6 diorite
+craft 2 andesite using 1 diorite, 1 cobblestone
+Goal:craft andesite wall.
+[STEP 1]
+Action:
+Inventory
+[STEP 2]
+Observation:
+Inventory: You are not carrying
+anything.
+Action:
+get 2 diorite
+[STEP 3]
+Observation:
+Could not find diorite.
+Action:
+Get 2 quartz
+[STEP 4]
+Observation:
+Got 2 quartz.
+Value Function: 0.191
+Action:
+Get 2 cobblestone
+. . .
+[STEP 20]
+Observation:
+Crafted 2 minecraft:andesite.
+Action:get 1 diorite
+Environment Reward: 0.0 (Failure)
+29
+
+===== [AMC] PAGE 30/30 =====
+Agentic Monte Carlo: Simulating Reinforcement Learning for Black-Box Agents
+Table 13.Weather and Movie performance, obtained with a Llama-3.2-11B-based value model for SMC (Zero-shot) and AMC.
+Dataset Policy Model Method Score
+Weather
+Llama-3.2-11B
+ReAct 0.433 (±0.041)
+Best-of-5 0.517 (±0.020)
+SMC (Zero-shot)0.483 (±0.054)
+AMC 0.533 (±0.020)
+Best-of-15 0.550 (±0.000)
+SMC (Zero-shot)0.550 (±0.000)
+AMC 0.550 (±0.000)
+GPT-4.1-mini
+ReAct 0.450 (±0.035)
+Best-of-5 0.483 (±0.041)
+SMC (Zero-shot)0.517 (±0.020)
+AMC 0.550 (±0.000)
+Best-of-15 0.533 (±0.020)
+SMC (Zero-shot)0.550 (±0.000)
+AMC 0.550 (±0.000)
+GPT-5.1
+ReAct 0.550 (±0.000)
+Best-of-5 0.550 (±0.000)
+SMC (Zero-shot)0.550 (±0.000)
+AMC 0.567 (±0.020)
+Best-of-15 0.550 (±0.000)
+SMC (Zero-shot)0.550 (±0.000)
+AMC 0.583 (±0.020)
+Movie
+Llama-3.2-11B
+ReAct 0.417 (±0.041)
+Best-of-5 0.833 (±0.041)
+SMC (Zero-shot)0.767 (±0.054)
+AMC 0.783 (±0.020)
+Best-of-15 0.850 (±0.000)
+SMC (Zero-shot)0.850 (±0.035)
+AMC 0.883 (±0.020)
+GPT-4.1-mini
+ReAct 0.750 (±0.061)
+Best-of-5 0.800 (±0.035)
+SMC (Zero-shot)0.817 (±0.020)
+AMC 0.850 (±0.000)
+Best-of-15 0.850 (±0.000)
+SMC (Zero-shot)0.850 (±0.000)
+AMC 0.850 (±0.000)
+GPT-5.1
+ReAct 0.867 (±0.020)
+Best-of-5 0.883 (±0.020)
+SMC (Zero-shot)0.867 (±0.020)
+AMC 0.900 (±0.000)
+Best-of-15 0.883 (±0.020)
+SMC (Zero-shot)0.900 (±0.000)
+AMC 0.900 (±0.000)
+30

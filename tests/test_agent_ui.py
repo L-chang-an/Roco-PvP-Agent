@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
 
 from rock_pvp_agent.config import Settings  # noqa: E402
-from rock_pvp_agent.ui.server import create_chat_app  # noqa: E402
+from ui.server import create_chat_app  # noqa: E402
 
 from fakes import ScriptedLLM, tool_call  # noqa: E402
 

@@ -169,8 +169,11 @@ def test_calc_iv_adds_points() -> None:
 
 def test_calc_nature_changes_values() -> None:
     out = calc_combat_stats(_BASE, nature="加攻击减速度")  # 升 atk +20%、降 speed −10%
-    assert out["atk"] == 215   # (1.1×80+50)×1.2+50 = 215.6 → 215
-    assert out["speed"] == 186  # (1.1×92+50)×0.9+50 = 186.08 → 186
+    # 口径（负责人 2026-08-25 改公式：先对 raw 取整，再乘性格修正、加平值，最后再取整）：
+    #   atk: int(int(1.1×80+50)×1.2)+50 = int(138×1.2)+50 = 165+50... 实际 int(165.6+50)=215
+    #   speed: int(int(1.1×92+50)×0.9)+50 = int(151×0.9)+50 = int(135.9+50) = 185
+    assert out["atk"] == 215
+    assert out["speed"] == 185
     assert out["hp"] == 374     # 中性项不变
 
 

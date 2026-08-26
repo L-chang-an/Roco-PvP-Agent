@@ -51,10 +51,10 @@ def test_version_flag(monkeypatch, capsys):
 
 
 def test_serve_calls_run_ui(monkeypatch, capsys):
-    """--serve 委托给 ui.__main__.run_ui（M3 起不再是占位）。"""
+    """--serve 委托给 ui.__main__.run_ui（M3 起不再是占位；ui 包 2026-08-25 提级为顶层）。"""
     called = []
     monkeypatch.setattr(
-        "rock_pvp_agent.ui.__main__.run_ui",
+        "ui.__main__.run_ui",
         lambda: called.append(True) or 0,
     )
     code = _run_main(monkeypatch, ["--serve"])

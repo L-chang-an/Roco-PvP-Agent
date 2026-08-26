@@ -68,7 +68,7 @@ LLM_BASE_URL=https://你的网关地址      # 自动补 /v1；也接受完整 /
 
 ## 3. 会话持久化（内存 → sqlite）
 
-当前 `ChatContext`（`src/rock_pvp_agent/ui/context.py`）用 `OrderedDict` 存会话历史，LRU 上限 64，重启即丢。
+当前 `ChatContext`（`src/ui/context.py`，2026-08-25 从 rock_pvp_agent.ui 提级）用 `OrderedDict` 存会话历史，LRU 上限 64，重启即丢。
 
 **改法**：`ChatContext` 对外接口已稳定，把存储层从 dict 换成 sqlite 即可，**上层（server/前端）零改动**：
 
@@ -118,7 +118,7 @@ class ChatContext:
 
 ## 6. 前端扩展
 
-前端是**纯静态文件**（`src/rock_pvp_agent/ui/static/`），改完即生效、无构建步骤。改完记得同步 `pyproject.toml` 的 wheel `force-include` 已覆盖整个 `ui/static` 目录，构建产物自动带上。
+前端是**纯静态文件**（`src/ui/static/`，2026-08-25 从 rock_pvp_agent.ui 提级），改完即生效、无构建步骤。`pyproject.toml` 的 wheel `packages` 已含 `src/ui`，整个 `static/` 目录自动进构建产物。
 
 | 想做的事 | 改哪里 |
 |---|---|

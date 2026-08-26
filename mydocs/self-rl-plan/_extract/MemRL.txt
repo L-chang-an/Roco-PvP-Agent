@@ -1,0 +1,2489 @@
+
+
+===== [MemRL] PAGE 1/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on
+Episodic Memory
+Shengtao Zhang 1 * Jiaqian Wang 2 * Ruiwen Zhou 3 Junwei Liao 1 4 Yuchen Feng5 Zhuo Li 1 Yujie Zheng1
+Weinan Zhang 1 4 Ying Wen1 4 Zhiyu Li 5 Feiyu Xiong 5 Yutao Qi2 Bo Tang6 5 Muning Wen 1
+Abstract
+The hallmark of human intelligence is the self-
+evolving ability to master new skills by learn-
+ing from past experiences. However, current AI
+agents struggle to emulate this self-evolution: fine-
+tuning is computationally expensive and prone to
+catastrophic forgetting, while existing memory-
+based methods rely on passive semantic matching
+that often retrieves noise. To address these chal-
+lenges, we propose MEMRL, a non-parametric
+approach that evolves via reinforcement learning
+on episodic memory. By decoupling stable rea-
+soning from plastic memory, MEMRL employs a
+Two-Phase Retrieval mechanism to filter noise
+and identify high-utility strategies through en-
+vironmental feedback. Extensive experiments
+on HLE, BigCodeBench, ALFWorld, and Life-
+long Agent Bench demonstrate that MEMRL sig-
+nificantly outperforms state-of-the-art baselines,
+confirming that MEMRL effectively reconciles
+the stability-plasticity dilemma, enabling continu-
+ous runtime improvement without weight updates.
+Code is available at https://github.com/
+MemTensor/MemRL.
+1. Introduction
+Human intelligence balances cognitive stability and episodic
+plasticity (Grossberg, 2013; McClelland et al., 1995; Ku-
+maran et al., 2016) via Constructive Episodic Simulation,
+enabling adaptation without rewiring neural circuitry (Schac-
+ter & Addis, 2007; Hassabis & Maguire, 2007; Schacter
+et al., 2012; Gick & Holyoak, 1980). Despite their rea-
+*Equal contribution 1Shanghai Jiao Tong University, Shanghai,
+China 2Xidian University, Xi’an, China 3National University of
+Singapore, Singapore 4Shanghai Innovation Institute, Shanghai,
+China 5MemTensor (Shanghai) Technology Co., Ltd., Shanghai,
+China 6University of Science and Technology of China, Hefei,
+China. Correspondence to: Bo Tang <tangb@memtensor.cn>,
+Muning Wen<muningwen@sjtu.edu.cn>.
+Preprint. February 13, 2026.
+soning capabilities, current AI agents struggle to emulate
+this decoupled self-evolution (Wei et al., 2022; Yao et al.,
+2023; Schick et al., 2023; Wang et al., 2023). Specifically,
+fine-tuning internalizes experience by modifying weights
+(Ouyang et al., 2022; Stiennon et al., 2020; Rafailov et al.,
+2023; Ethayarajh et al., 2024) but suffers from computa-
+tional costs and catastrophic forgetting (Kirkpatrick et al.,
+2017; Li et al., 2024; Wu et al., 2024). Conversely, Retrieval-
+Augmented Generation (RAG) (Lewis et al., 2020) provides
+a non-parametric alternative but remains passive, retrieving
+by semantic similarity rather than utility (Karpukhin et al.,
+2020; Gao et al., 2024); this prevents agents from effec-
+tively leveraging runtime feedback to distinguish high-value
+strategies from noise.
+Human cognition MemRL (runtime learning)
+Stable
+reasoning
+(Cortex)
+Inspired by
+constructive
+episodic
+simulation
+Episodic memory
+Decouple stable
+reasoning from
+plastic episode 
+memory
+Environment
+Feedback
+weights frozen
+utility score
+estimate expected
+outcome
+learning happens
+in memory
+(no weight updates)
+Evolving
+Intent expected
+outcome
+update expected
+outcome
+constructive
+episodic
+simulation
+mental simulation / rollout
+expected
+outcome
+strategy
+episode
+Value-aware
+retrieval
+Update
+utility
+score
+Frozen LLM
+(locked)
+intent
+solution
+attempt
+utility score
+Query / Intent
+Figure 1.The conceptual framework of MemRL.
+This limitation underscores a critical research question:
+How can we enable an agent to continuously improve
+its performance after deployment, without compromis-
+ing the stability of its pre-trained backbone?Our ob-
+jective is to achieve an agent that evolves with continued
+usage and rapidly adapts to new tasks after deployment,
+referred to as Runtime Continuous Learning (Javed et al.,
+2023; Silver & Sutton, 2025; Parisi et al., 2019; Wu et al.,
+2024), all while keeping the backbone model frozen to pre-
+vent catastrophic forgetting (Finn et al., 2017; Wei et al.,
+2025). To address this challenge, inspired by the human cog-
+nitive mechanism of constructive simulation, we propose
+MEMRL, an approach that facilitates self-evolving agents
+by explicitly decoupling the model’s stable cognitive reason-
+1
+arXiv:2601.03192v2  [cs.CL]  12 Feb 2026
+
+===== [MemRL] PAGE 2/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+ing from dynamic episodic memory. Figure 1 illustrates the
+conceptual framework of our proposed MEMRL. Drawing
+on tries-and-errors manner in Reinforcement Learning (RL)
+to estimate expected experience utilities (Sutton & Barto,
+2018), we formalize the interaction between the frozen LLM
+and external memory as a Markov Decision Process (MDP)
+(Puterman, 2014). Unlike traditional methods that optimize
+the backbone model, MEMRL optimizes the policy of mem-
+ory usage without tuning model weights.
+MEMRL organizes memory into a structuredIntent-
+Experience-Utilitytriplet. This structure transforms re-
+trieval from a passive semantic match task into an active
+decision-making process:Two-Phase Retrievalselects ex-
+periences based on their learned Q-values, reflecting ex-
+pected utility, rather than semantic similarity alone (Watkins
+& Dayan, 1992);Utility-Driven Updaterefines these Q-
+values through environmental feedback, applying Monte
+Carlo style updates (Metropolis & Ulam, 1949). This closed-
+loop cycle enables the agent to distinguish high-value mem-
+ories from similar noise, effectively learning from both suc-
+cess and failure without high computational cost or catas-
+trophic forgetting risks associated with weight updates. As
+for experiments, we validate MEMRL on four diverse bench-
+marks, including HLE, BigCodeBench, ALFWorld, and
+Lifelong Agent Bench. Our results demonstrate consistent
+superiority over baselines, achieving relative improvement
+in exploration-heavy environments. Our in-depth analysis
+reveals a strong correlation between learned utility and task
+success, further confirming MEMRL’s effectiveness.
+In summary, our contributions are threefold:
+• We propose a runtime learning framework using Model-
+Memory decoupling and Intent-Experience-Utility
+triplet to reconcile the stability-plasticity dilemma, en-
+abling tuning-free agent learning.
+• We introduce MEMRL, a non-parametric approach
+enabling agent self-evolution via Two-Phase Retrieval
+and Utility-Driven Update.
+• We conduct extensive evaluations and provide a rigor-
+ous analysis for MEMRL’s stability, showing how it
+ensures task integrity and minimizes forgetting.
+2. Related Works
+Runtime LearningRuntime Learning focuses on the
+post-deployment improvement of agents through interac-
+tion streams rather than offline data, marking a shift toward
+the “era of experience” (Silver & Sutton, 2025). Unlike
+Continual Learning (Parisi et al., 2019; Wu et al., 2024) or
+Test-Time Adaptation (Sun et al., 2020; Wang et al., 2020;
+Liang et al., 2025), which typically update parameters to
+handle forgetting or distribution shifts, our setting constrains
+the backbone to remain frozen to ensure stability and ef-
+ficiency. While recent memory-augmented agents (Zheng
+et al., 2025; Wei et al., 2025; Zhou et al., 2025b) emphasize
+memory organization, the selection problem—identifying
+which experiences to reuse under feedback—remains a crit-
+ical challenge. Drawing from value-aware episodic control
+(Tulving et al., 1972; McClelland et al., 1995), we frame
+runtime learning as identifying valuable episodes. By using
+interaction feedback to assign utility, our approach guides
+retrieval and reuse without weight modification, thereby
+ensuring sustained improvement (Pritzel et al., 2017).
+Reinforcement LearningReinforcement learning has
+been widely adopted for LLMs enhancement. A represen-
+tative paradigm is to construct reward signals from human
+feedback and optimize the model policy accordingly to align
+with human preference (Stiennon et al., 2020; Ouyang et al.,
+2022). Other recent approaches leverage rule-based veri-
+fiers to improve LLMs’ reasoning capabilities (Guo et al.,
+2025; Yu et al., 2025). In parallel, agent-oriented research
+explores how interaction signals can improve tool use and
+action decision-making, and investigates mechanisms by
+which language models execute composite actions in envi-
+ronments (Schick et al., 2023). Despite the demonstrated
+effectiveness of reward-driven optimization, these methods
+generally place learning in the model parameters or addi-
+tional parametric modules, and thus do not avoid the cost
+of online updates or the risk of forgetting. In contrast, our
+method frames memory usage as a learnable decision prob-
+lem and appliesnon-parametricreinforcement learning on
+memory to bypass the risk.
+Agentic MemoryTo avoid the costs of fine-tuning, ex-
+ternal memory systems have evolved from a static RAG
+paradigm to dynamic, governable memory structures (Lewis
+et al., 2020; Karpukhin et al., 2020). Early agentic memory
+introduced reflection mechanisms and hierarchical manage-
+ment to handle long context experiences (Shinn et al., 2023;
+Packer et al., 2024). More recent frameworks have system-
+atized the memory lifecycle, focusing on unified storage
+and structured indexing for complex tasks (Li et al., 2025b;
+Xu et al., 2025; Huang et al., 2025; Ye, 2025). Further-
+more, adaptive approaches now explore improving retrieval
+via feedback-driven updates or automated augmentation
+(Salama et al., 2025; Zhang et al., 2025; Li et al., 2025a;
+Zhou et al., 2025a). However, except for training additional
+learnable modules, most existing methods still rely predom-
+inantly on semantic similarity or heuristic rules, lacking a
+rigorous metric to evaluate the actual utility of a memory
+in maximizing returns. Inspired by cognitive theories of
+memory reconsolidation (Schacter & Addis, 2007; Gick
+& Holyoak, 1980; Nader et al., 2000), MEMRL bridges
+this gap by formulating retrieval as a value-based decision
+process, learning robust utility estimates (Q-values) from en-
+2
+
+===== [MemRL] PAGE 3/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Time Step T
+Memory 
+Failure
+Intent B
+m1 m3
+Retrieval &Gen.
+Reward
+m1 m2
+Retrieval &Gen.
+Intent A
+Time Step T+1
+Memory 
+Failure
+Success
+Intent B
+m2 m4
+Retrieval &Gen.
+Reward
+Reward
+Retrieval &Gen.
+Intent A
+Failure
+Reward
+Time Step T+2
+Memory 
+Success
+Success
+Intent B
+Retrieval &Gen.
+Reward
+Retrieval &Gen.
+Intent A
+Reward
+Experience
+Intent
+Utility
+Experience
+Intent
+Utility
+m1 m3
+Experience
+Intent
+Utility
+m1 m5
+m2 m4
+Figure 2.An illustrative example of memory-augmented decision making under a Markov Decision Process. At time step t, the agent
+starts with an initial memory set Mt. At time step t+1, an intent (Intent A) retrieves relevant past experiences, but initially leads to a
+failed generation. In contrast, another intent (Intent B) succeeds, and its associated experience is added to memory. At time step t+2,
+Intent Aretrieves the newly stored successful experience fromIntent B, resulting in a successful outcome. This example shows how
+memory retrieval enables knowledge reuse across intents, implicitly supporting self-evolution through shared experiences.
+vironmental rewards to distinguish high-value experiences.
+3. Problem Formulation
+In this section, we formally define the problem of memory-
+augmented generation and establish the theoretical link be-
+tween agent policy and memory retrieval. We adopt the for-
+mulation of Memory-Based Markov Decision Process (M-
+MDP) (Zhou et al., 2025a), and apply our non-parametric
+reinforcement learning approach to it. Figure 2 provides
+an illustrative example of this memory-augmented decision
+process, showing how retrieval outcomes and memory evo-
+lution unfold over multiple time steps.
+3.1. Memory-Augmented Agent Policy
+To enable the agent to self-evolution, we adopt the M-
+MDP framework (Zhou et al., 2025a), defined by the tuple
+(S,A, P,R, γ,M). Here, S and A represent state and ac-
+tion spaces, P is the transition dynamics, R is the reward
+function of state and action, γ∈[0,1) denotes the discount
+factor, and M= (S × A ×R)∗ constitutes the evolving
+memory bank of past experiences (Zhou et al., 2025a). At
+each step t, the agent receives state st and leverages Mt
+to generate a response at maximizing the expected reward.
+The joint policy π(at|st,M t) is formulated as the marginal
+probability over all possible retrieved itemsm(Zhou et al.,
+2025a):
+π(at|st,M t) =
+X
+m∈Mt
+µ(m|st,M t)pLLM (at|st, m).
+(1)
+where µ(m|st,M t) is theRetrieval Policyfor selecting
+memory contexts, and pLLM (at|st, m)is theInference
+Policyparameterized by a frozen LLM. This approach trans-
+forms retrieval from a passive match into an active decision
+process, effectively accounting for the functionalutilityof
+min generating successful outcomesa t.
+In previous RAG or memory-based agentic paradigms, the
+retrieval policyµ is usually determined by a fixed vector sim-
+ilarity metric, e.g., cosine similarity of embeddings. While
+effective for semantic matching, such policies fail to ac-
+count for theutilityof a memory, i.e., whether retrieving m
+actually leads to a successful outcomea t.
+3.2. Non-Parametric Reinforcement Learning
+To overcome static similarity limitations, we operationalize
+the M-MDP framework by formulating memory retrieval as
+a value-based decision-making process (Zhou et al., 2025a).
+Unlike parametric methods optimizing πLLM via weight up-
+dates, we optimize the retrieval policy µ(m|s,M) directly
+within the memory space by mapping M-MDP components
+to a structuredIntent-Experience-Utilitytriplet:
+From Semantic Matching to Decision Making.We instan-
+tiate state s as the User Intent, encapsulated by the current
+query embedding (Lewis et al., 2020). Consequently, the
+action space At becomes dynamic and discrete, correspond-
+ing to selecting a specific m from the memory bank Mt
+(Zhou et al., 2025a). In this formulation, retrieval is not a
+passive matching task but a strategic decision step taken to
+augment the generator’s actiona(Zhou et al., 2025a).
+Defining Utility via Q-Values.While the agent’s exe-
+cutable action a is generated by the policy π (as formal-
+ized in Sec. 3.1), the quality of this generation is strictly
+conditioned on the retrieved context. Therefore, we adapt
+the traditional value function Q(s, a)to the retrieval phase,
+defining Q(s, m)as the expected utility of the subsequent
+action a augmented by memory m. MEMRL learns an
+optimal retrieval policyµ ∗ that maximizes this utility:
+µ∗(m|s,M) = arg max
+m∈M
+Q(s, m).(2)
+In this view, the Q-value acts as a critic for the retrieval
+mechanism, distinguishing memories that strategically aid
+3
+
+===== [MemRL] PAGE 4/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+ 
+Two-Phase
+Retrieval
+ 
+Context Action EnvironmentQuery Frozen LLM Reward
+LLM Summary
+Experience
+Sim:
+0.87
+Sim:
+0.83
+Sim:
+0.83
+Sim:
+0.83
+Sim:0.87
+Q:0.92
+Sim:0.83
+Q:0.95
+Sim:0.83
+Q:0.82
+ 
+Context
+Phase A: Similarity RecallPhase B:Value-aware Selection
+Two-Phase Retrieval (Zoom-In) Memory Item & Utility Update (Zoom-In)
+Update 
+Update 
+End-to-End Framework
+Intent Z
+Experience ELLM: 'Carbone' is highly rated...User: Booked it! Great experience.
+Utility Q (Score: 0.95)
+Intent
+Experience
+Utility
+Intent
+Experience
+Utility
+Find best Italian restaurant in NYC
+ 
+MEMRL
+Figure 3.Overview of MEMRL. The end-to-end learning loop(Top): given a query s, the agent retrieves context mctx from memory
+M, generates output y, and updates memory value Q based on reward R.Two-Phase Retrieval(Bottom Left): Candidates are recalled
+via similarity, then re-ranked using learned Q-values.Utility Update(Bottom Right): Values ( Q) are updated using environmental
+rewards to distinguish functional utility from semantic similarity.
+the generator from irrelevant noise that merely shares high
+semantic similarity.
+Non-Parametric Learning.Since the retrieval action space
+is decoupled from LLM generation, we perform learning
+without modifying model weights. Upon receiving environ-
+mental feedback r, we update the Q-value via a Temporal-
+Difference (TD) error (Sutton, 1988):
+Q(s, m)←Q(s, m) +α[r+γmaxQ(s ′, m′)−Q(s, m)],
+(3)
+or Monte Carlo style rule (Metropolis & Ulam, 1949):
+Qnew ←Q old +α
+ 
+r−Q old
+
+,(4)
+where α is the learning rate. Equation 4 performs as a
+naturally simplified version of Equation 3 by setting s′ as
+a terminal state to balance complexity and performance,
+sharing a similar one-step MDP formulation with Guo et al.
+(2025). These manners allow utility estimates to converge
+to true expected returns over time (Bellman, 1966). By
+explicitly updating Q-values within the memory structure,
+MEMRL provides a non-parametric learning manner with a
+theoretical guarantee, enabling agents to self-evolve through
+interaction.
+4. MEMRL
+Building upon the M-MDP formulation defined in Sec-
+tion 3, we propose MEMRL, a framework that enables
+frozen LLMs to self-evolve via non-parametric reinforce-
+ment learning. Instead of modifying the model weights θ,
+MEMRL optimizes theretrieval policy µ(m|s,M) within
+an evolving memory space. As illustrated in Figure 3, the
+framework consists of three core components: (i) a struc-
+turedIntent-Experience-Utilitymemory bank, (ii) aTwo-
+Phase Retrievalmechanism that decouples semantic recall
+from value-aware selection, and (iii) aRuntime Utility
+Updaterule that stabilizes Q-value estimation.
+4.1. The Intent-Experience-Utility Triplet
+To support value-based decision-making, we structure the
+external memory M not merely as key-value pairs, but as a
+set of triplets:
+M={(z i, ei, Qi)}|M|
+i=1 ,(5)
+where zi represents theIntent, ei stores the rawExperi-
+ence(e.g., a successful solution trace or trajectory), and Qi
+denotes the learnedUtility. Qi approximates the expected
+return of applying experience ei to intents similar to zi,
+4
+
+===== [MemRL] PAGE 5/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+serving as thecriticin RL.
+4.2. From Semantic Recall to Value-Aware Selection
+Standard RAG systems assume “similar implies useful,”
+but agentic tasks often involve environment-specific rou-
+tines that generalize poorly (Singh et al., 2025; Cuconasu
+et al., 2024; Gan et al., 2024; Zhou et al., 2024). There-
+fore, MEMRL implements aTwo-Phase Retrievalstrategy.
+Phase A: Similarity-Based Recall.Given query s, we
+isolate a candidate poolC(s)of semantically consistent ex-
+periences by filtering memory bank M via cosine similarity
+and a sparsity thresholdδ:
+C(s) =TopK k1 ({i|sim(Emb(s), Emb(zi))> δ}),(6)
+where Emb represents the Embedding Model to transfer the
+raw text to a vector. If C(s) =∅ , MEMRL relies solely on
+the frozen LLM for exploration.Phase B: Value-Aware Se-
+lection.To determine the final context Mctx(s), we select
+top-k2 items from C(s) using a composite score balancing
+exploration (similarity) and exploitation (utilityQ):
+score(s, zi, ei) = (1−λ)· ˆsim(Emb(s), Emb(zi))+λ· ˆQi.
+(7)
+where ˆ· denotes z-score normalization and λ∈[0,1] modu-
+lates the trade-off. This mechanism filters out “distractor”
+memories—those semantically similar but with low histori-
+cal utility. As detailed in Section 5.4.2, normalization and
+strict similarity thresholds are essential for noise filtering
+and maintaining stability during self-evolution.
+4.3. Non-Parametric RL on Memory
+The core of MEMRL is the continuous refinement of Q-
+values based on environmental feedback, enabling the agent
+to “remember” what works. During runtime, MEMRL per-
+forms learning entirely in memory space. With the retrieved
+context m, the agent samples an action a according to the
+policy π defined in Eq. 1. Executing a then yields an envi-
+ronmental reward r (e.g., execution success or scalar score).
+For the memories actually injected into the input context
+Mctx(s), we update their utilities in triplets with a Monte
+Carlo style rule, i.e., the Eq. 4, following the runtime learn-
+ing loop shown in Figure 3. This update drives Qnew toward
+the empirical expected return of using experience ei under
+similar intents. Meanwhile, for each sampled trajectory,
+we use an LLM to summarize the experience (Fang et al.,
+2025), and write it back into the memory bank as a new
+triplet (z, enew, Qinit), enabling continual expansion of expe-
+rience while keeping the LLM parameters unchanged.
+4.4. Theoretical Stability Analysis
+We analyze the stability of MEMRL from a reinforcement
+learning perspective, with full analysis provided in Ap-
+pendix A. We posit two standard assumptions: a frozen infer-
+ence policy pLLM and a stationary task distribution. Under
+these conditions, the learning targetβ(s, m) =E[rt|s, m]is
+well-defined, where the expectation is taken over the stochas-
+tic rewards resulting from the Inference Policy pLLM dis-
+tribution. We prove that utility estimates updated via Eq. 4
+are unbiased and variance-bounded (Sutton & Barto, 2018).
+Specifically, ast→ ∞:
+lim
+t→∞
+E[Qt] =β(s, m),
+lim sup
+t→∞
+Var(Qt)≤ α
+2−α Var(rt |s, m).
+(8)
+Furthermore, we address the challenge of the latent retrieval
+distribution Pr(s|m) shifting during training by framing
+MEMRL as aGeneralized Expectation-Maximization
+(GEM)(Dempster et al., 1977) process. The system per-
+forms coordinate ascent on a global objective: the retrieval
+ranking acts as thePolicy Improvement(E-step), while the
+utility update acts as theValue Update(M-step). By the
+monotonic improvement theorem(Neal & Hinton, 1998),
+the system converges to a stationary point where the global
+memory utility stabilizes:
+lim
+t→∞
+E[Qt(m)] =
+X
+s∈S(m)
+E[r|s, m] Pr(s|m).(9)
+where S(m) is the effective support set of the memory. This
+formulation guarantees global stability and prevents catas-
+trophic forgetting. Details can be found in Appendix A.4.
+5. Experiments
+5.1. Experimental Setup
+Baselines & Benchmarks.We compare MemRL against
+RAG-based (RAG, Self-RAG), Agentic Memory (Mem0,
+MemP), and Test-Time Scaling (Pass@k) baselines under a
+frozen-backbone setting (see Appendix D.1). Evaluations
+span four domains: BigCodeBench (coding), ALFWorld
+(navigation), LifelongAgent Bench (OS/DB), and Human-
+ity’s Last Exam(HLE). Details are in Appendix D.2. Back-
+bones are selected per benchmark to avoid no-signal or
+ceiling problems, ensuring valid learning signals, while Ap-
+pendix E.4 provides a unified comparison to demonstrate
+cross-task consistency under identical capacity.
+Metrics.We employ two metrics: (1)Success Rate (SR),
+the ratio of tasks completed in an epoch; (2)Cumulative
+Success Rate (CSR), the proportion of tasks solved at least
+once across epochs.
+We evaluate our MEMRL and baselines under two distinct
+settings:Runtime Learning, which assesses the ability to
+learn and adapt within a training session, andTransferring,
+which evaluates the generalization capability of the learned
+5
+
+===== [MemRL] PAGE 6/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+1 2 3 4 5 6 7 8 9 10
+Epoch
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0Success Rate (%)
+MemP+RL
+MemP
+RAG+RL
+RAG
+Figure 4.OS Interaction Performance.Performance comparison
+of MEMRL vs. baselines (MemP, RAG).Solid linesrepresent the
+Epoch Success Rate, whiledashed linesindicate the Cumulative
+Success Rate (CSR). MEMRL demonstrates superior stability and
+a widening performance gap in CSR.
+memory on unseen tasks. Implementation and reproducibil-
+ity details, including all prompts used in our experiments,
+can be found in Appendix E and Appendix I.
+5.2. Main Results
+Runtime Learning Results.As detailed in Table 1,
+MEMRL demonstrates robust superiority across all domains,
+surpassing the strongest baseline (MemP) by an average
+of +3.8% in Cumulative Success Rate (CSR). The gains
+are most significant in exploration-intensive environments
+like ALFWorld and OS tasks (both +6.2%), while main-
+taining a steady lead on the challenging HLE benchmark
+(+3.6%). This confirms that our value-based mechanism,
+unlike MemP’s heuristic retrieval, effectively filters noise to
+retain high-utility procedural patterns.
+Transferring Results.We evaluate memory transferabil-
+ity by freezing the memory bank after training and testing
+on held-out sets. As shown in Table 2, MEMRL exhibits su-
+perior transferability, outperforming the strongest baseline
+(MemP) by an average of +2.8% in Success Rate. The ad-
+vantage is particularly pronounced in complex environments
+like ALFWorld ( +5.8%) and OS tasks ( +2.6%). These
+margins validate that ourTwo-Phase Retrievaleffectively
+filters low-value noise, retaining high-utility procedural pat-
+terns that generalize robustly to unseen scenarios.
+5.3. Ablations
+5.3.1. EFFECTIVENESS OFRUNTIMERL
+To isolate the efficacy of runtime RL, we compare MEMRL
+and its RAG-based variant against their non-RL counterparts
+(MemP and standard RAG) in the OS interaction environ-
+ment. As shown in Figure 4, while initial performance is
+comparable, a clear divergence emerges as training pro-
+gresses: MEMRL achieves a smoother learning curve and
+superior stability. Crucially, this advantage is most pro-
+nounced in the Cumulative Success Rate (dashed lines),
+1 2 3 4 5 6 7 8 9 10
+Epoch
+60.0
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0Success Rate (%)
+Q-Weight = 0
+Q-Weight = 0.25
+Q-Weight = 0.5
+Q-Weight = 0.75
+Q-Weight = 1
+Figure 5.Ablation on Q-value weighting factor λ.Performance
+comparison across λ∈ {0,0.25,0.5,0.75,1} .Solid linesdenote
+Epoch Success Rate, whiledashed linesindicate Cumulative Suc-
+cess Rate (CSR). The balanced setting ( λ= 0.5 ) achieves the
+optimal trade-off between relevance and helpfulness.
+where the monotonic widening gap indicates that the RL-
+driven value function effectively filters noisy memories and
+consolidates successful experiences.
+5.3.2. IMPACT OFQ-VALUEWEIGHTING
+To determine the optimal equilibrium between semantic
+grounding and value-based exploitation, we evaluate the
+Q-weighting factor λ∈ {0,0.25,0.5,0.75,1} . As shown
+in Figure 5, performance exhibits a clear concave trend
+peaking at λ= 0.5 . Deviating toward extremes degrades
+results: pure semantic retrieval (λ= 0 ) plateaus due to an
+inability to filter functional distractors, while excessive RL
+weight (λ→1 ) induces volatility and context detachment.
+This confirms that λ= 0.5 represents an effective balance,
+where semantic similarity guarantees content relevance and
+Q-value ensures its helpfulness.
+5.3.3. ABLATIONANALYSIS: CROSS-TASK VS.
+SINGLE-TASKOPTIMIZATION
+To investigate the source of our performance gains, we con-
+duct an ablation study in Table 3 by restricting the memory
+retrieval scope. We compare the full MEMRL (Cross-Task
+Retrieval) against an ablated setting that only utilizes feed-
+back from the single task instance, conceptually equivalent
+to Reflexion (Shinn et al., 2023). MEMRL demonstrates
+superior performance in structured environments, partic-
+ularly onOS-Agent( +9.0%) andALFWorld( +5.1%).
+These benchmarks exhibit high intra-dataset similarity, al-
+lowing MEMRL to effectively performhorizontal trans-
+fer—retrieving and adapting successful policies from se-
+mantically similar historical tasks. While on the HLE bench-
+mark, the single-task baseline (0.610) is tied with MEMRL
+(0.606). We attribute this to the HLE dataset’s low internal
+semantic similarity ( 0.186), as detailed in Appendix B.3.
+This prevents effective cross-task generalization, forcing the
+agent to rely solely on single feedback.
+6
+
+===== [MemRL] PAGE 7/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Table 1.Runtime Learning results.We compare MEMRL against various baselines over 10 epochs. The results are reported asLast
+Epoch Success Rate / Cumulative Success Rate (CSR). TheAveragecolumn indicates the mean performance across all benchmarks.
+BigCodeBench Lifelong Agent Bench ALFWorld HLE Average
+Method Code Gen
+(Last / CSR)
+OS Task
+(Last / CSR)
+DB Task
+(Last / CSR)
+Exploration
+(Last / CSR)
+Knowledge Frontier
+(Last / CSR) (Last / CSR)
+ModelGPT-4o GPT-4o-mini GPT-4o-mini GPT-5-mini Gemini-3-pro-
+No Memory 0.485 0.674 0.860 0.777 0.357 0.631
+Pass@10 – / 0.577 – / 0.756 – / 0.928 – / 0.928 – / 0.524 – / 0.743
+RAG 0.475 / 0.483 0.690 / 0.700 0.914 / 0.916 0.887 / 0.930 0.430 / 0.475 0.679 / 0.699
+Self-RAG 0.497 / 0.561 0.646 / 0.732 0.891 / 0.898 0.907 / 0.962 0.423 / 0.475 0.673 / 0.726
+Mem0 0.487 / 0.495 0.670 / 0.702 0.920 / 0.926 0.894 / 0.969 0.436 / 0.470 0.681 / 0.712
+MemP 0.578 / 0.602 0.736 / 0.7420.960/ 0.966 0.885 / 0.919 0.522 / 0.570 0.736 / 0.760
+MemRL (ours)0.595 / 0.627 0.788 / 0.804 0.960 / 0.972 0.949 / 0.981 0.570 / 0.606 0.772 / 0.798
+Table 2.Transfer Learning resultson BigCodeBench, Lifelong Agent Bench and ALFWorld. We compare MEMRL against various
+baselines using the best validation results. TheAveragecolumn represents the mean Success Rate across all benchmarks.
+BigCodeBench Lifelong Agent Bench ALFWorld Average
+Method Code Generation
+(Success Rate)
+OS Task
+(Success Rate)
+DB Task
+(Success Rate)
+Exploration
+(Success Rate) (Success Rate)
+ModelGPT-4o GPT-4o-mini GPT-4o-mini GPT-5-mini-
+No Memory 0.485 0.673 0.841 0.836 0.709
+RAG 0.479 0.713 0.920 0.950 0.765
+Self-RAG 0.500 0.653 0.881 0.950 0.746
+Mem0 0.485 0.686 0.935 0.950 0.764
+MemP 0.494 0.720 0.928 0.921 0.766
+MemRL (ours)0.508 0.746 0.942 0.979 0.794
+Table 3.Ablation on Retrieval Scope.We compare MEMRL
+against an ablated version restricted toSingle-Task Reflection.
+Setting BCB OS DB ALFWorld HLE Avg.
+Single-Task Reflection 0.614 0.714 0.938 0.9300.6100.761
+MEMRL (Cross-Task) 0.627 0.804 0.972 0.9810.6060.798
+5.3.4. SENSITIVITY TORETRIEVALSIZE(k 1 ANDk 2).
+To investigate the impact of retrieval bandwidth, we com-
+pare three memory density configurations on the HLE
+(CS/AI) subset benchmark: sparse (k1 = 3, k2 = 1), mod-
+erate ( k1 = 5, k2 = 3 ), and dense ( k1 = 10, k2 = 5 ).
+As shown in Figure 6, performance follows an inverted-
+U trajectory, illustrating the trade-off between information
+sufficiency and context noise. The sparse setting limits per-
+formance due to insufficient guidance, whereas the dense
+setting degrades success rate by introducing distractions into
+the reasoning context. Consequently, the moderate configu-
+ration (k1 = 5, k2 = 3) achieves the best result, effectively
+maximizing the signal-to-noise ratio of the retrieved context.
+5.4. Discussion
+In this section, we delve deeper into the mechanisms driving
+MEMRL’s performance, connecting empirical results to the
+challenge of balancing knowledge retention and adaptation.
+2 4 6 8 10
+Epoch
+35
+40
+45
+50
+55Success Rate (%)
+k1=3,k2=1 Epoch Success Rate
+k1=3,k2=1 Cumulative Success Rate (CSR)
+k1=5,k2=3 Epoch Success Rate
+k1=5,k2=3 Cumulative Success Rate (CSR)
+k1=10,k2=5 Epoch Success Rate
+k1=10,k2=5 Cumulative Success Rate (CSR)
+Figure 6.Ablation on Retrieval Size ( k1, k2).Performance com-
+parison on the HLE (CS/AI) subset across sparse (3/1), moderate
+(5/3), and dense (10/5) retrieval settings. The moderate setting
+achieves the optimal trade-off.
+5.4.1. PREDICTIVEPOWER OF THEQ CRITIC
+As shown in Figure 7a, the learned Q-values exhibit a strong
+positive correlation (Pearson r= 0.861 ) with empirical task
+success rates, rising from 21.5% in the lowest-confidence
+bin to 88.1% in the highest, which confirms the Critic’s
+ability to effectively rank memories by success likelihood.
+Beyond simple ranking, memory composition analysis (Fig-
+ure 7b) reveals that the agent retains a small fraction of
+“failure” memories (∼12% ) even in high-Q bins (0.9−1.0 ),
+suggesting that Q-values captureutility beyond binary out-
+comesby recognizing strategically useful near-misses. We
+7
+
+===== [MemRL] PAGE 8/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+0.2-0.3 0.3-0.4 0.4-0.5 0.5-0.6 0.6-0.7 0.7-0.8 0.8-0.9 0.9-1.0
+Q-Estimate Range
+0
+20
+40
+60
+80
+100Downstream T ask Success Rate (%)
+21.5%
+46.5%
+73.4%
+79.1%
+82.4% 84.3% 86.2% 88.1%Pearson r = 0.861
+(a)Success Rate vs. Q-Range
+0.2-0.3 0.3-0.4 0.4-0.5 0.5-0.6 0.6-0.7 0.7-0.8 0.8-0.9 0.9-1.0
+Q-Estimate Range
+0
+20
+40
+60
+80
+100Memory Proportion (%)
+22%
+78%
+47%
+53%
+73%
+27%
+79%
+21%
+82%
+18%
+84%
+16%
+86%
+14%
+88%
+12%
+Pool Avg: 74.6%
+SUCCESS Memory
+FAILURE Memory
+(b)Memory Composition
+Figure 7.Q-Value Analysis.(a) Pearson r= 0.861 confirms
+Critic’s predictive power. (b) Failure memories (∼12% ) in high
+Q-bins indicate latent strategic utility.
+further substantiate this with concrete case studies in Ap-
+pendix H. This indicates that the Critic prioritizes reusable
+guidance—including transferable procedural lessons from
+high-utility failures—rather than merely separating success
+from failure, thereby offering greater robustness than simple
+success-replay mechanisms.
+5.4.2. STABILITY OFMEMRL
+We analyze MEMRL through the lens of thestability-
+plasticity dilemma. The superior CSR (Table 1) confirms
+that MEMRL effectively expands the solution space, en-
+abling the agent to break through local optima. Furthermore,
+long-term dynamics (Figure 8) reveal a critical stability ad-
+vantage: while heuristic methods like MemP suffer from
+catastrophic forgetting—evidenced by a widening gap be-
+tween CSR and current Success Rate—MEMRL maintains
+synchronized growth. This is theoretically guaranteed by
+our stability analysis in Section 4.4, which constrains the
+policy to improve monotonically without drift.
+We quantitatively validate these insights using theForget-
+ting Rate, defined as F R=N lost/Nfail, where Nlost de-
+notes tasks transitioning from previous success to current
+failure and Nfail is the total number of failures in the current
+epoch (see Figure 9 in Appendix B.1 for the full trajectory).
+MEMRL achieves the lowest mean forgetting rate ( 0.041),
+2 4 6 8 10
+Epoch
+0.35
+0.40
+0.45
+0.50
+0.55
+0.60Success Rate
+MemP Epoch Success Rate
+MemRL Epoch Success Rate
+MemP Cumulative Success Rate (CSR)
+MemRL Cumulative Success Rate (CSR)
+pass@1
+pass@2
+pass@4
+pass@6
+pass@8
+pass@10
+Figure 8.Epoch Success Rate and Cumulative Success Rate (CSR)
+of MEMRL and MemP in HLE.
+outperforming MEMP ( 0.051). Additionally, ablation re-
+sults demonstrate that removing z-score normalization and
+similarity gating causes the rate to spike to 0.073. This
+confirms that strict filtering is essential to manage utility
+variance and ensure that self-evolution remains stable.
+5.4.3. EXTENDEDANALYSIS.
+We conduct further investigations to characterize the under-
+lying mechanisms and generalization of MEMRL. Specifi-
+cally, Appendix B analyzes MEMRL’s role as a structural
+trajectory verifier and the correlation between task simi-
+larity and performance gains. Additionally, evaluations
+of advanced capabilities—including cross-model memory
+transferability and modular multi-task merging—are de-
+tailed in Appendix C, demonstrating MEMRL’s versatility
+and its capacity for modular capability expansion. We also
+analyze the cost and efficiency of MEMRL in Appendix F.
+6. Limitations and Conclusion
+Limitations and Future Work.While MEMRL estab-
+lishes a foundation for non-parametric evolution, its runtime
+dynamics reveal several promising avenues. (i) The current
+step-wise update, though fast, may introduce high-variance
+noise in long-horizon trajectories, inspiring us to explore
+multi-step updates or periodic memory consolidation. (ii)
+Credit-assignment ambiguity during utility updates, espe-
+cially with multiple referenced experiences, raises the need
+for more precise attribution methods like Shapley meth-
+ods (Shapley et al., 1953) or value decomposition in multi-
+agent reinforcement learning (Rashid et al., 2020; Sunehag
+et al., 2017). (iii) While MEMRL improves with increasing
+task exposure, performance may drift toward reflection-
+like behavior when task similarity is low, highlighting the
+need for a sufficiently diverse yet relevant experience base;
+for industrial deployment, ensuring high task density and
+hierarchical abstraction may be crucial. Further detailed
+discussions on these and other challenges, including mem-
+ory security, dedicated domains, and multi-agent memory
+sharing, are provided in Appendix G.
+8
+
+===== [MemRL] PAGE 9/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Conclusion.We proposed MEMRL, a non-parametric ap-
+proach reconciling the stability-plasticity dilemma by treat-
+ing memory retrieval as a value-based decision process.
+Through the Intent-Experience-Utility triplet structure and
+Monte Carlo style updates, MEMRL enables agents to self-
+evolve and differentiate high-utility strategies from semantic
+noise without weight updates. Extensive evaluations con-
+firm MEMRL significantly outperforms baselines in both
+runtime adaptation and generalization. In a future where
+static training data becomes scarce, the interactive experi-
+ences generated by agents throughout their life cycle will
+become a new, vital source of knowledge. We hope this
+paradigm paves the way for building stable, continuously
+learning agents that efficiently adapt from interaction.
+Impact Statement
+This paper presents MEMRL, a value-reinforced memory re-
+trieval mechanism designed to enhance the long-term reason-
+ing capabilities of LLM Agents. From a broader perspective,
+our work contributes to the development of more efficient
+and reliable autonomous systems. By optimizing the mem-
+ory retrieval process, MEMRL reduces the computational
+overhead of large-scale agent deployments, potentially low-
+ering the environmental impact of AI infrastructure. Fur-
+thermore, as LLM agents become more integrated into daily
+workflows, research into robust memory mechanisms helps
+ensure these systems remain grounded and consistent in
+their actions. We do not foresee any immediate negative so-
+cial consequences specific to this algorithmic advancement,
+though we acknowledge that all autonomous systems should
+be deployed with appropriate human oversight to mitigate
+broader risks associated with AI decision-making.
+References
+Asai, A., Wu, Z., Wang, Y ., Sil, A., and Hajishirzi, H. Self-
+rag: Learning to retrieve, generate, and critique through
+self-reflection, 2023. URL https://arxiv.org/
+abs/2310.11511.
+Bellman, R. Dynamic programming.science, 153(3731):
+34–37, 1966.
+Chhikara, P., Khant, D., Aryan, S., Singh, T., and Ya-
+dav, D. Mem0: Building production-ready ai agents
+with scalable long-term memory, 2025. URL https:
+//arxiv.org/abs/2504.19413.
+Cuconasu, F., Trappolini, G., Siciliano, F., Filice, S., Cam-
+pagnano, C., Maarek, Y ., Tonellotto, N., and Silvestri,
+F. The power of noise: Redefining retrieval for rag sys-
+tems. InProceedings of the 47th International ACM
+SIGIR Conference on Research and Development in In-
+formation Retrieval, SIGIR 2024, pp. 719–729. ACM,
+July 2024. doi: 10.1145/3626772.3657834. URL http:
+//dx.doi.org/10.1145/3626772.3657834.
+Dempster, A. P., Laird, N. M., and Rubin, D. B. Maximum
+likelihood from incomplete data via the em algorithm.
+Journal of the Royal Statistical Society. Series B (Method-
+ological), 39(1):1–38, 1977. ISSN 00359246. URL
+http://www.jstor.org/stable/2984875.
+Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., and
+Kiela, D. Kto: Model alignment as prospect theoretic
+optimization.arXiv preprint arXiv:2402.01306, 2024.
+Fang, R., Liang, Y ., Wang, X., Wu, J., Qiao, S., Xie,
+P., Huang, F., Chen, H., and Zhang, N. Memp:
+Exploring agent procedural memory.arXiv preprint
+arXiv:2508.06433, 2025. URL https://arxiv.
+org/abs/2508.06433.
+Finn, C., Abbeel, P., and Levine, S. Model-agnostic meta-
+learning for fast adaptation of deep networks. InInterna-
+tional conference on machine learning, pp. 1126–1135.
+PMLR, 2017.
+Gan, C., Yang, D., Hu, B., Zhang, H., Li, S., Liu, Z.,
+Shen, Y ., Ju, L., Zhang, Z., Gu, J., Liang, L., and
+Zhou, J. Similarity is not all you need: Endow-
+ing retrieval augmented generation with multi layered
+thoughts.arXiv preprint arXiv:2405.19893, 2024. doi:
+10.48550/arXiv.2405.19893. URL https://arxiv.
+org/abs/2405.19893.
+Gao, Y ., Xiong, Y ., Gao, X., Jia, K., Pan, J., Bi, Y ., Dai, Y .,
+Sun, J., Wang, M., and Wang, H. Retrieval-augmented
+generation for large language models: A survey, 2024.
+URLhttps://arxiv.org/abs/2312.10997.
+Gick, M. L. and Holyoak, K. J. Analogical problem solving.
+Cognitive psychology, 12(3):306–355, 1980.
+Grossberg, S. Adaptive resonance theory: How a brain
+learns to consciously attend, learn, and recognize a chang-
+ing world.Neural networks, 37:1–47, 2013.
+Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R.,
+Zhu, Q., Ma, S., Wang, P., Bi, X., et al. Deepseek-r1: In-
+centivizing reasoning capability in llms via reinforcement
+learning.arXiv preprint arXiv:2501.12948, 2025.
+Hassabis, D. and Maguire, E. A. Deconstructing episodic
+memory with construction.Trends in cognitive sciences,
+11(7):299–306, 2007.
+Huang, Z., Tian, Z., Guo, Q., Zhang, F., Zhou, Y ., Jiang, D.,
+and Zhou, X. Licomemory: Lightweight and cognitive
+agentic memory for efficient long-term reasoning.arXiv
+preprint arXiv:2511.01448, 2025.
+9
+
+===== [MemRL] PAGE 10/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Javed, K., Shah, H., Sutton, R., and White, M. Online real-
+time recurrent learning using sparse connections and se-
+lective learning.Journal of Machine Learning Research,
+2023.
+Karpukhin, V ., Oguz, B., Min, S., Lewis, P. S., Wu, L.,
+Edunov, S., Chen, D., and Yih, W.-t. Dense passage
+retrieval for open-domain question answering. InEMNLP
+(1), pp. 6769–6781, 2020.
+Kirkpatrick, J., Pascanu, R., Rabinowitz, N., Veness, J., Des-
+jardins, G., Rusu, A. A., Milan, K., Quan, J., Ramalho, T.,
+Grabska-Barwinska, A., et al. Overcoming catastrophic
+forgetting in neural networks.Proceedings of the national
+academy of sciences, 114(13):3521–3526, 2017.
+Kumaran, D., Hassabis, D., and McClelland, J. L. What
+learning systems do intelligent agents need? complemen-
+tary learning systems theory updated.Trends in cognitive
+sciences, 20(7):512–534, 2016.
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V .,
+Goyal, N., K¨uttler, H., Lewis, M., Yih, W.-t., Rockt¨aschel,
+T., et al. Retrieval-augmented generation for knowledge-
+intensive nlp tasks.Advances in neural information pro-
+cessing systems, 33:9459–9474, 2020.
+Li, H., Ding, L., Fang, M., and Tao, D. Revisiting catas-
+trophic forgetting in large language model tuning.arXiv
+preprint arXiv:2406.04836, 2024.
+Li, L., Shi, D., Zhou, J., Wei, X., Yang, M., Jin, S.,
+and Yang, S. Retrieval feedback memory enhancement
+large model retrieval generation method.arXiv preprint
+arXiv:2508.17862, 2025a.
+Li, Z., Song, S., Wang, H., Niu, S., Chen, D., Yang, J., Xi,
+C., Lai, H., Zhao, J., Wang, Y ., et al. Memos: An operat-
+ing system for memory-augmented generation (mag) in
+large language models.arXiv preprint arXiv:2505.22101,
+2025b.
+Liang, J., He, R., and Tan, T. A comprehensive survey on
+test-time adaptation under distribution shifts.Interna-
+tional Journal of Computer Vision, 133(1):31–64, 2025.
+McClelland, J. L., McNaughton, B. L., and O’Reilly, R. C.
+Why there are complementary learning systems in the hip-
+pocampus and neocortex: insights from the successes and
+failures of connectionist models of learning and memory.
+Psychological review, 102(3):419–457, 1995.
+Metropolis, N. and Ulam, S. The monte carlo method.
+Journal of the American statistical association, 44(247):
+335–341, 1949.
+Nader, K., Schafe, G. E., and Le Doux, J. E. Fear memories
+require protein synthesis in the amygdala for reconsolida-
+tion after retrieval.Nature, 406(6797):722–726, 2000.
+Neal, R. M. and Hinton, G. E.A View of the Em Al-
+gorithm that Justifies Incremental, Sparse, and other
+Variants, pp. 355–368. Springer Netherlands, Dor-
+drecht, 1998. ISBN 978-94-011-5014-9. doi: 10.1007/
+978-94-011-5014-9 12. URL https://doi.org/
+10.1007/978-94-011-5014-9_12.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+et al. Training language models to follow instructions
+with human feedback.Advances in neural information
+processing systems, 35:27730–27744, 2022.
+Packer, C., Wooders, S., Lin, K., Fang, V ., Patil, S. G.,
+Stoica, I., and Gonzalez, J. E. Memgpt: Towards llms
+as operating systems, 2024. URL https://arxiv.
+org/abs/2310.08560.
+Parisi, G. I., Kemker, R., Part, J. L., Kanan, C., and Wermter,
+S. Continual lifelong learning with neural networks: A
+review.Neural networks, 113:54–71, 2019.
+Phan, L., Gatti, A., Han, Z., Li, N., Hu, J., Zhang, H., Zhang,
+C. B. C., Shaaban, M., Ling, J., Shi, S., et al. Humanity’s
+last exam, 2025. URL https://arxiv.org/abs/
+2501.14249.
+Pritzel, A., Uria, B., Srinivasan, S., Badia, A. P., Vinyals,
+O., Hassabis, D., Wierstra, D., and Blundell, C. Neural
+episodic control. InInternational conference on machine
+learning, pp. 2827–2836. PMLR, 2017.
+Puterman, M. L.Markov decision processes: discrete
+stochastic dynamic programming. John Wiley & Sons,
+2014.
+Rafailov, R., Sharma, A., Mitchell, E., Manning, C. D.,
+Ermon, S., and Finn, C. Direct preference optimiza-
+tion: Your language model is secretly a reward model.
+Advances in neural information processing systems, 36:
+53728–53741, 2023.
+Rashid, T., Samvelyan, M., De Witt, C. S., Farquhar, G.,
+Foerster, J., and Whiteson, S. Monotonic value function
+factorisation for deep multi-agent reinforcement learning.
+Journal of Machine Learning Research, 21(178):1–51,
+2020.
+Salama, R., Cai, J., Yuan, M., Currey, A., Sunkara, M.,
+Zhang, Y ., and Benajiba, Y . Meminsight: Autonomous
+memory augmentation for llm agents.arXiv preprint
+arXiv:2503.21760, 2025.
+Schacter, D. L. and Addis, D. R. On the constructive
+episodic simulation of past and future events.Behav-
+ioral and Brain Sciences, 30(3):331–332, 2007.
+10
+
+===== [MemRL] PAGE 11/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Schacter, D. L., Addis, D. R., Hassabis, D., Martin, V . C.,
+Spreng, R. N., and Szpunar, K. K. The future of memory:
+remembering, imagining, and the brain.Neuron, 76(4):
+677–694, 2012.
+Schick, T., Dwivedi-Yu, J., Dess`ı, R., Raileanu, R., Lomeli,
+M., Hambro, E., Zettlemoyer, L., Cancedda, N., and
+Scialom, T. Toolformer: Language models can teach
+themselves to use tools.Advances in Neural Information
+Processing Systems, 36:68539–68551, 2023.
+Shapley, L. S. et al. A value for n-person games. 1953.
+Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K., and
+Yao, S. Reflexion: Language agents with verbal rein-
+forcement learning.Advances in Neural Information
+Processing Systems, 36:8634–8652, 2023.
+Shridhar, M., Yuan, X., C ˆot´e, M.-A., Bisk, Y ., Trischler,
+A., and Hausknecht, M. Alfworld: Aligning text and
+embodied environments for interactive learning, 2021.
+URLhttps://arxiv.org/abs/2010.03768.
+Silver, D. and Sutton, R. S. Welcome to the era of experi-
+ence.Google AI, 1, 2025.
+Singh, J., Magazine, R., Pandya, Y ., and Nambi, A. Agentic
+reasoning and tool integration for llms via reinforcement
+learning.arXiv preprint arXiv:2505.01441, 2025. URL
+https://arxiv.org/abs/2505.01441.
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D., Lowe, R.,
+V oss, C., Radford, A., Amodei, D., and Christiano, P. F.
+Learning to summarize with human feedback.Advances
+in neural information processing systems, 33:3008–3021,
+2020.
+Sun, Y ., Wang, X., Liu, Z., Miller, J., Efros, A., and Hardt,
+M. Test-time training with self-supervision for generaliza-
+tion under distribution shifts. InInternational conference
+on machine learning, pp. 9229–9248. PMLR, 2020.
+Sunehag, P., Lever, G., Gruslys, A., Czarnecki, W. M., Zam-
+baldi, V ., Jaderberg, M., Lanctot, M., Sonnerat, N., Leibo,
+J. Z., Tuyls, K., et al. Value-decomposition networks
+for cooperative multi-agent learning.arXiv preprint
+arXiv:1706.05296, 2017.
+Sutton, R. S. Learning to predict by the methods of temporal
+differences.Machine learning, 3(1):9–44, 1988.
+Sutton, R. S. and Barto, A. G.Reinforcement
+Learning: An Introduction. MIT Press, 2 edition,
+2018. URL http://incompleteideas.net/
+book/the-book-2nd.html.
+Tulving, E. et al. Episodic and semantic memory.Organi-
+zation of memory, 1(381-403):1, 1972.
+Wang, D., Shelhamer, E., Liu, S., Olshausen, B., and Darrell,
+T. Tent: Fully test-time adaptation by entropy minimiza-
+tion.arXiv preprint arXiv:2006.10726, 2020.
+Wang, G., Xie, Y ., Jiang, Y ., Mandlekar, A., Xiao, C., Zhu,
+Y ., Fan, L., and Anandkumar, A. V oyager: An open-
+ended embodied agent with large language models.arXiv
+preprint arXiv:2305.16291, 2023.
+Watkins, C. J. and Dayan, P. Q-learning.Machine learning,
+8(3):279–292, 1992.
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,
+E., Le, Q. V ., Zhou, D., et al. Chain-of-thought prompting
+elicits reasoning in large language models.Advances in
+neural information processing systems, 35:24824–24837,
+2022.
+Wei, T., Sachdeva, N., Coleman, B., He, Z., Bei, Y ., Ning,
+X., Ai, M., Li, Y ., He, J., Chi, E. H., et al. Evo-memory:
+Benchmarking llm agent test-time learning with self-
+evolving memory.arXiv preprint arXiv:2511.20857,
+2025.
+Wu, T., Luo, L., Li, Y .-F., Pan, S., Vu, T.-T., and Haffari,
+G. Continual learning for large language models: A sur-
+vey, 2024. URL https://arxiv.org/abs/2402.
+01364.
+Xu, W., Liang, Z., Mei, K., Gao, H., Tan, J., and Zhang, Y .
+A-mem: Agentic memory for llm agents.arXiv preprint
+arXiv:2502.12110, 2025.
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+K. R., and Cao, Y . React: Synergizing reasoning and
+acting in language models. InThe Eleventh Interna-
+tional Conference on Learning Representations, ICLR
+2023, Kigali, Rwanda, May 1-5, 2023. OpenReview.net,
+2023. URL https://openreview.net/forum?
+id=WE_vluYUL-X.
+Ye, Y . Task memory engine: Spatial memory for robust
+multi-step llm agents.arXiv preprint arXiv:2505.19436,
+2025.
+Yu, Q., Zhang, Z., Zhu, R., Yuan, Y ., Zuo, X., Yue, Y ., Dai,
+W., Fan, T., Liu, G., Liu, L., et al. Dapo: An open-source
+llm reinforcement learning system at scale.arXiv preprint
+arXiv:2503.14476, 2025.
+Zhang, Z., Dai, Q., Li, R., Bo, X., Chen, X., and
+Dong, Z. Learn to memorize: Optimizing llm-based
+agents with adaptive memory framework.arXiv preprint
+arXiv:2508.16629, 2025.
+Zheng, J., Cai, X., Li, Q., Zhang, D., Li, Z., Zhang, Y .,
+Song, L., and Ma, Q. Lifelongagentbench: Evaluating
+llm agents as lifelong learners, 2025. URL https://
+arxiv.org/abs/2505.11942.
+11
+
+===== [MemRL] PAGE 12/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Zhou, H., Chen, Y ., Guo, S., Yan, X., Lee, K. H., Wang, Z.,
+Lee, K. Y ., Zhang, G., Shao, K., Yang, L., et al. Memento:
+Fine-tuning llm agents without fine-tuning llms.arXiv
+preprint arXiv:2508.16153, 2025a.
+Zhou, R., Yang, Y ., Wen, M., Wen, Y ., Wang, W., Xi, C.,
+Xu, G., Yu, Y ., and Zhang, W. TRAD: Enhancing llm
+agents with step-wise thought retrieval and aligned de-
+cision. InProceedings of the 47th International ACM
+SIGIR Conference on Research and Development in In-
+formation Retrieval (SIGIR), pp. 3–13. ACM, 2024. URL
+https://arxiv.org/abs/2403.06221.
+Zhou, R., Hua, W., Pan, L., Cheng, S., Wu, X., Yu, E., and
+Wang, W. Y . Rulearena: A benchmark for rule-guided rea-
+soning with llms in real-world scenarios. InProceedings
+of the 63rd Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers), 2025b.
+Zhuo, T. Y ., Vu, M. C., Chim, J., Hu, H., Yu, W., Widyasari,
+R., Yusuf, I. N. B., Zhan, H., He, J., Paul, I., Brun-
+ner, S., Gong, C., Hoang, T., Zebaze, A. R., Hong,
+X., Li, W.-D., Kaddour, J., Xu, M., Zhang, Z., Ya-
+dav, P., Jain, N., Gu, A., Cheng, Z., Liu, J., Liu, Q.,
+Wang, Z., Hui, B., Muennighoff, N., Lo, D., Fried, D.,
+Du, X., de Vries, H., and Werra, L. V . Bigcodebench:
+Benchmarking code generation with diverse function
+calls and complex instructions, 2025. URL https:
+//arxiv.org/abs/2406.15877.
+12
+
+===== [MemRL] PAGE 13/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+A. Theoretical Analysis and Proofs
+A.1. Stability Analysis
+We analyze the stability of MEMRL from a reinforcement learning perspective, focusing on the convergence behavior of the
+utility estimates stored in memory. MEMRL performs non-parametric runtime learning using a constant-step-size update.
+We show that under mild and realistic assumptions, the learned utility values converge in expectation to stable estimates of
+memory effectiveness, with bounded variance.
+Setup.At each time step t, the agent observes an intent state st, retrieves a memory item mt ∈ Mt, generates an output at,
+and receives a scalar reward rt ∈[−1,1] indicating task success or failure. The generation policy follows the decomposition
+defined in Eq. 1, whereµdenotes the retrieval policy andp LLM is a frozen inference policy.
+For each retrieved memory, MEMRL updates its utility using the exponential moving average rule as formulated in Eq. 4, with
+learning rate α∈(0,1] . For clarity in this analysis, we consider a fixed state–memory pair (s, m)and write Qt ≡Q t(s, m).
+Stationary Reward Assumption.We analyze the learning process on a fixed dataset and posit two key conditions that
+ensure the stability of the environment:
+1.Frozen Inference Policy.The parameters ofp LLM(y|s, m)and the evaluator’s criteria are fixed.
+2.Fixed Task Distribution.Taskssare drawn from a stationary distribution over a fixed dataset.
+These assumptions guarantee that the learning target is well-defined: the expected reward for any specific task-memory pair
+is time-invariant. Thus, we have:
+E[rt|st =s, m t =m] =β(s, m).(10)
+where the expectation is taken over the stochastic rewards resulting from the Inference Policyp LLM distribution.
+Expected Convergence of Utility Estimates.We now state the main stability result.
+Theorem A.1.Let {Qt} be updated according to the rule in Eq. 4 with constant step size α∈(0,1] . If Eq. 10 holds and
+the pair(s, m)is updated infinitely often, then:
+lim
+t→∞
+E[Qt] =E[r t|st =s, m t =m] =β(s, m).(11)
+Moreover, the convergence rate is exponential (Sutton & Barto, 2018):
+E[Qt]−β(s, m) = (1−α) t 
+Q0 −β(s, m)
+
+.(12)
+Proof.Define the estimation error et ≜Q t −β(s, m). Based on the update rule in Eq. 4, the error recurrence relation is:
+et+1 = (1−α)e t +α
+ 
+rt −β(s, m)
+
+.
+Taking conditional expectation given the historyF t and using Eq. 10, we obtain:
+E[et+1|Ft] = (1−α)e t.
+Taking full expectation yields:
+E[et+1] = (1−α)E[e t].
+Iterating the recursion givesE[e t] = (1−α) te0, which converges to zero ast→ ∞.□
+We provide the detailed derivation of the convergence proof in Appendix A.2.
+Bounded Variance and Stability.If the reward varianceVar(r t|s, m)<∞, then the variance ofQ t remains bounded:
+lim sup
+t→∞
+Var(Qt)≤ α
+2−α Var(rt|s, m).(13)
+Thus, constant-step-size updates do not induce unbounded oscillations; instead, they yield stable utility estimates that
+track expected memory effectiveness while filtering high-frequency noise. We explicitly derive the variance bounds to
+demonstrate the global stability of the estimator under task clustering in Appendix A.3.
+13
+
+===== [MemRL] PAGE 14/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Global Stability via EM Convergence.The stability of the local estimate (Theorem A.1) extends to the global memory
+utilityQ(m). By the linearity of expectation,Q(m)acts as a Monte Carlo integrator striving to converge to:
+lim
+t→∞
+E[Qt(m)] =E[r|m] =
+X
+s∈S(m)
+E[r|s, m]| {z }
+Stationary
+Pr(s|m)| {z }
+Retrieve-Dependent
+.(14)
+where S(m)≜{s∈ S|sim(s, zm)≥τ A} denotes theeffective support setfor memory m, comprising all task intents s
+sufficiently similar to the memory’s intent embeddingz m to satisfy the Phase-A retrieval criterion.
+A theoretical challenge arises here: the weighting term Pr(s|m) is a latent variable governed by the retrieval policy
+µ(m|s;M) , which itself shifts as Q-values evolve. To prove convergence despite this dependency, we analyze MEMRL as a
+Generalized Expectation-Maximization (GEM)process (Dempster et al., 1977; Neal & Hinton, 1998). From a variational
+perspective, the system performs coordinate ascent on a global objective function J(Q, µ)(the variational lower bound
+of expected reward): (i)E-Step (Policy Improvement):The Phase-B ranking updates the retrieval policy µ to align with
+current estimates, monotonically increasing J with respect to µ; (ii)M-Step (Value Update):The utility update (Eq. 4)
+increases J with respect to Q. By theMonotonic Improvement Theorem(Neal & Hinton, 1998), this alternating optimization
+guarantees that the system converges to a stationary point where the retrieve policy stabilizes (µt+1 ≈µ t). Consequently,
+the induced distribution Pr(s|m) becomes time-invariant, ensuring that Eq. 14 holds and effectively preventing catastrophic
+forgetting by anchoring updates to a stable policy. More details can be found in Appendix A.4.
+A.2. Proof of Theorem A.1: Convergence of EMA Estimation
+We aim to prove that for a fixed task-memory pair(s, m)with a stationary reward distribution, the Q-value estimateQt(s, m)
+converges in expectation to the true mean rewardβ(s, m).
+Assumptions.
+1. Stationary Reward.The reward rt at step t is drawn from a distribution induced by the stochastic action generation
+a∼p LLM (at|st, m), with a constant meanβ(s, m) =E[rt|s, m]and finite varianceσ2.
+2.Update Rule.The utility is updated via the linear EMA rule with learning rateα∈(0,1):
+Qt+1 = (1−α)Q t +αr t.
+Derivation of Error Dynamics.Let et ≜Q t −β(s, m) be the estimation error at time step t. Substituting Qt =
+et +β(s, m)into the update rule:
+et+1 +β(s, m) = (1−α)(e t +β(s, m)) +αrt
+et+1 = (1−α)e t + (1−α)β(s, m) +αr t −β(s, m)
+et+1 = (1−α)e t +β(s, m)−αβ(s, m)−β(s, m) +αrt
+et+1 = (1−α)e t +α(r t −β(s, m)).(15)
+Convergence Analysis.We define Ft as the filtration (history) up to time t. Since the reward rt depends on the action at
+sampled subsequently from the frozen LLM, taking the conditional expectation of Eq. 15 givenF t:
+E[et+1|Ft] = (1−α)e t +α(E[r t|Ft]| {z }
+β(s,m)
+−β(s, m)) = (1−α)et.
+By the Law of Iterated Expectations, taking the full expectation yields:
+E[et+1] =E[E[e t+1|Ft]] = (1−α)E[e t].
+14
+
+===== [MemRL] PAGE 15/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Iterating this recurrence relation fromt= 0:
+E[et] = (1−α) tE[e0].
+Since0< α <1, we have|1−α|<1. Consequently:
+lim
+t→∞
+E[et] =E[e 0]·lim
+t→∞
+(1−α) t = 0.(16)
+This proves that the estimator is unbiased in the limit, i.e.,lim t→∞ E[Qt] =β(s, m).□
+A.3. Bounded Variance and Global Stability
+In this section, we provide the formal derivation for the variance bound of the estimator Qt. We explicitly derive the
+finite-time variance formula via recursive unrolling and prove its asymptotic convergence, demonstrating how Phase-A
+clustering contributes to global stability.
+Derivation of the Variance Bound.Let σ2 ≜Var(r t|s, m)be the variance of the reward signal, assumed to be finite.
+The EMA update rule is given by:
+Qt+1 = (1−α)Q t +αr t.
+Since the reward rt (current noise) is statistically independent of the current estimate Qt (which is determined by history
+Ft−1), the variance of the sum is the sum of the variances:
+Var(Qt+1) = Var((1−α)Q t) + Var(αrt)
+= (1−α) 2Var(Qt) +α 2σ2.
+Letv t ≜Var(Q t). We obtain a linear recurrence relationv t+1 = (1−α) 2vt +α 2σ2.
+Recursive Unrolling.To solve forv t, we expand the recurrence relation backward from stept:
+vt = (1−α) 2vt−1 +α 2σ2
+= (1−α) 2 
+(1−α) 2vt−2 +α 2σ2
++α 2σ2
+= (1−α) 4vt−2 +α 2σ2 
+1 + (1−α) 2
+...
+= (1−α) 2tv0 +α 2σ2
+t−1X
+k=0
+ 
+(1−α) 2k
+.(17)
+Eq. 17 explicitly shows that the variance at time t consists of two components: the decayed initial variance (first term) and
+the accumulated noise variance (second term).
+Asymptotic Convergence.As t→ ∞, since the learning rate α∈(0,1) , the term (1−α) 2t vanishes. The summation
+term is a geometric series P∞
+k=0 rk = 1
+1−r with ratior= (1−α) 2. Thus:
+lim
+t→∞
+vt =α 2σ2 · 1
+1−(1−α) 2 .
+Evaluating the denominator:
+1−(1−α) 2 = 1−(1−2α+α 2) = 2α−α 2 =α(2−α).
+Substituting this back yields the tight variance bound:
+lim sup
+t→∞
+Var(Qt) = α2σ2
+α(2−α) = α
+2−α σ2.(18)
+15
+
+===== [MemRL] PAGE 16/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Connection to Phase-A Clustering.This result provides the theoretical justification for the stability of MEMRL. While
+tasks within a memory cluster S(m)≜{s|sim(s, z m)> τA} may vary, the Smoothness Assumption implies their rewards
+are drawn from a distribution with bounded variance σ2
+S(m). The derived bound α
+2−α σ2
+S(m) guarantees that the memory
+utility Q(m) will not diverge but will instead oscillate within a controlled range around the true expected utility. This
+mechanism effectively filters out high-frequency noise from diverse task instances while retaining the stable generalized
+value.
+A.4. Convergence via Variational Inference
+In this section, we provide a theoretical foundation for MEMRL, demonstrating that our retrieval strategy and update rules
+guarantee the convergence of value estimation.
+A.4.1. THECONVERGENCEOBJECTIVE
+Our ultimate goal is to ensure that the estimated utility Q(m) converges to the true expected return of memory m. This
+target value is defined as:
+lim
+t→∞
+E[Qt(m)] =E[r|m] =
+X
+s∈S(m)
+E[r|s, m]| {z }
+Stationary
+Pr(s|m)| {z }
+Retrieve-Dependent
+.(19)
+The challenge lies in the term Pr(s|m)—the probability that a specific state s triggers the retrieval of m. This distribution
+depends on the retrieval policy µt(m|s), which itself evolves during training, creating a circular dependency that threatens
+stability.
+A.4.2. VARIATIONALOBJECTIVE WITHTRUSTREGION
+To resolve this, we formulate the problem as maximizing aglobal variational objective J(µ, Q). This objective serves as a
+tractable lower bound for the global expected return defined in Eq. 19, balanced by a semantic trust region:
+J(µ, Q) =Es∼D
+
+
+X
+m∈S(s)
+µ(m|s)Q(s, m)
+| {z }
+Expected Utility≈E[Q t(m)]
+− 1
+β DKL
+
+µ(·|s)
+πsim(·|s)
+
+| {z }
+Semantic Trust Region
+
+
+(20)
+Here, the expectation is taken over the state distribution D. The first term directly corresponds to the expected utility
+E[Qt(m)] we aim to converge, while πsim represents the fixed semantic prior (derived from Phase-A). The KL-divergence
+term acts as a regularizer crucial for two reasons:
+1. Trust Region:It constrains the policy to the support set S, preventing the agent from retrieving high-Q but semantically
+irrelevant memories (out-of-distribution errors).
+2.Regularization:It stabilizes the learning dynamics during the “cold start” phase when Q-estimates are noisy.
+A.4.3. OPTIMIZATION VIAGENERALIZEDEXPECTATION-MAXIMIZATION(GEM)
+We treat the optimization ofJas a GEM process, alternating between policy improvement and value evaluation:
+E-Step (Policy Optimization).We assume the utility estimates Q(s, m)are fixed and seek the optimal retrieval policy µ∗
+that maximizes the global variational objective J(µ, Q). Since the expectation is taken over the state distribution D, we can
+maximize the objective for each statespointwise. The optimization problem for a specific statesis:
+max
+µ(·|s)
+
+ X
+m∈S(s)
+µ(m|s)Q(s, m)− 1
+β DKL
+
+µ(·|s)
+πsim(·|s)
+
+
+ (21)
+16
+
+===== [MemRL] PAGE 17/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+subject to the probability simplex constraint P
+m∈S(s) µ(m|s) = 1.
+Expanding the KL-divergence term, the objective function becomes:
+L(µ) =
+X
+m∈S(s)
+µ(m|s)
+
+Q(s, m) +1
+β log πsim(m|s)
+µ(m|s)
+
+.(22)
+To enforce the normalization constraint, we introduce the Lagrange multiplierλand construct the Lagrangian:
+L(µ, λ) =
+X
+m∈S(s)
+µ(m|s)
+
+Q(s, m) +1
+β log πsim(m|s)
+µ(m|s)
+
++λ
+
+1−
+X
+m∈S(s)
+µ(m|s)
+
+ .
+Taking the derivative with respect toµ(m|s)and setting it to zero:
+∂L
+∂µ(m|s) =Q(s, m) + 1
+β
+
+log πsim(m|s)
+µ(m|s) +µ(m|s)· µ(m|s)
+πsim(m|s) · −πsim(m|s)
+µ(m|s)2
+
+−λ
+=Q(s, m) + 1
+β
+
+log πsim(m|s)
+µ(m|s) −1
+
+−λ= 0.
+Rearranging terms to solve forµ(m|s):
+log πsim(m|s)
+µ(m|s) =βλ−βQ(s, m) + 1
+µ(m|s)
+πsim(m|s) = exp (βQ(s, m)−(βλ+ 1))
+µ(m|s) =π sim(m|s) exp(βQ(s, m))·exp(−(βλ+ 1)).
+Since exp(−(βλ+ 1)) is independent of m, it acts as a normalization constant 1/Z(s). Thus, we recover the closed-form
+Boltzmann distribution used in our Phase-B retrieval:
+µ∗(m|s) = πsim(m|s) exp(βQ(s, m))
+Z(s) ∝π sim(m|s) exp(βQ(s, m)).
+This derivation theoretically justifies our heuristic scoring function: the optimal retrieval policy naturally balances the
+semantic prior πsim and the learned utility Q. By taking the logarithm, we recover the specific scoring function used in our
+Phase-B Retrieval(Eq. 7):
+logµ ∗(m|s)∝logπ sim(m|s)| {z }
+≈sim(s,m)
++βQt(s, m)
+This proves that our heuristic combination of similarity and Q-value is mathematically equivalent to the optimal policy
+under the variational objective.
+M-Step (Policy Evaluation via Error Minimization).While the E-step improves the policy based on current estimates,
+the M-step ensures these estimates are grounded in reality. Fixing the policy µt+1, our goal is to align the variational
+parameter Q with the true environmental returns. We formulate this as minimizing the Mean Squared Error (MSE) between
+the estimated utility and the observed reward targety=r(in our Monte Carlo style modeling):
+min
+Q
+L(Q) =E τ∼µ t+1
+ 1
+2 (y−Q(s, m))2
+
+(23)
+Minimizing this error is critical because it tightens the variational bound: it ensures that the expectation term E[Q] in
+the global objective J (Eq. 20) converges to the true expected return E[r]. The update rule used in our approach (Eq. 4)
+corresponds exactly to a Stochastic Gradient Descent (SGD) step on this objective:
+Qt+1(s, m)←Q t(s, m)−α∇QL(Q) =Q t(s, m) +α(y−Q t(s, m))
+By iteratively minimizing L(Q), the M-step propagates the environmental feedback into the utility estimates, ensuring that
+the subsequent E-step optimization occurs on a reliable value landscape.
+17
+
+===== [MemRL] PAGE 18/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+A.4.4. PROOF OFCONVERGENCE
+By theMonotonic Improvement Theoremof GEM (Neal & Hinton, 1998), the sequence (µt, Qt) is guaranteed to converge
+to a stationary point (µ∗, Q∗). At stationarity, the policy stabilizes ( µt+1 ≈µ t), which implies that the inverse retrieval
+probabilityPr(s|m)becomestime-invariant:
+Pr(s|m) = µ∗(m|s) Pr(s)P
+s′ µ∗(m|s′) Pr(s′)
+Consequently, the “Retrieve-Dependent” term in Eq. 19 is anchored. With a fixed data distribution, the Qt(m) converges to
+the unique fixed point:
+lim
+t→∞
+Qt(m)→E µ∗ [r|m](24)
+Thus, our approach theoretically guarantees that the memory values converge to the true expected returns under the optimal
+retrieval policy.
+B. Extended Analysis and Insights
+B.1. Detailed Analysis of Forgetting Dynamics
+In the main text, we reported the mean forgetting rate to quantify the stability of our method. Here, we provide a detailed
+visual analysis of how the forgetting rate evolves throughout the learning process on the HLE benchmark.
+2.0 2.5 3.0 3.5 4.0 4.5 5.0
+Epoch
+0.02
+0.04
+0.06
+0.08
+0.10Forgetting Rate
+MemP
+MemRL w/o Norm_SimGate
+MemRL
+Figure 9.Forgetting Rate Trajectory on HLE.We compare the cumulative forgetting rate of the MEMRL against the strong baseline
+MemP and an ablated version of MEMRL (w/o Normalization & Gating). A lower curve indicates better stability (less catastrophic
+forgetting).
+As illustrated in Figure 9, MEMRL demonstrates superior stability compared to MemP. Specifically:
+• Stability vs. Plasticity:While MemP shows a gradual upward trend in forgetting rate as the number of episodes
+increases, MEMRL maintains a consistently low rate. This indicates that our dual-retrieval mechanism effectively
+balances the acquisition of new strategies without overwriting stable, high-utility memories.
+• Impact of Filtering:The ablation curve (denoted asw/o Norm & SimGate) exhibits significant higher overall forgetting
+rate (0.073 mean). The visible spikes in the curve suggest that without z-score normalization and similarity gating,
+the agent frequently retrieves and reinforces “noisy” strategies that work for specific instances but degrade general
+performance on previously mastered tasks.
+B.2. MEMRL as a Trajectory Verifier.
+Table 4 reveals a correlation between task structural complexity and performance gain. The gains are most profound in
+multi-step sequential tasks (e.g., ALFWorld +6.2% Points(pp)) compared to single-turn tasks (e.g., BigCodeBench +2.5%
+18
+
+===== [MemRL] PAGE 19/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Table 4.Impact of Task Structure.Comparison of Cumulative Success Rate (CSR) gains. Multi-step tasks benefit significantly more
+from MEMRL.
+Benchmark Interaction MemP (%) MEMRL (%) Gain (pp)
+ALFWorld Multi-step 91.998.1 +6.2
+OS Task Multi-step 74.280.4 +6.2
+HLE Single-step 57.0 60.6 +3.6
+BigCodeBench Single-step 60.2 62.7 +2.5
+pp). In sequential tasks, a retrieved memory must be valid for theentiretrajectory. Standard semantic retrieval often fetches
+memories that match the initial instruction but fail in later steps. By propagating the final reward backward to the memory
+utility Q, MEMRL effectively learns to verify thewhole trajectory, filtering out brittle policies that look correct only on the
+surface.
+This analysis indicates that MEMRL transcends the role of a simple retrieval enhancer to function as aTrajectory Verifier.
+Its value is maximized in tasks with complex temporal dependencies, where it learns to select memories that ensure the
+structural integrity of the entire interaction process.
+B.3. Impact of Task Similarity on Memory Efficacy
+To understand the underlying conditions where MEMRL thrives, we analyze the correlation between the intra-dataset
+semantic similarity (Simintra) and the absolute performance gain provided by our method ( ∆ =Success Rate MemRL −
+Success RateNoMem).
+0.15 0.20 0.25 0.30 0.35 0.40 0.45 0.50 0.55
+Query Similarity (mean cosine)
+0.050
+0.075
+0.100
+0.125
+0.150
+0.175
+0.200
+0.225
+Performance Gain (after - before)
+BigCodeBench LifeLongBench-OS
+LifeLongBench-DB
+AlfWorld
+HLE
+Linear fit
+Figure 10.Similarity-based Generalization.
+As illustrated in Figure 10, we analyze the correlation between intra-dataset semantic similarity and the absolute performance
+gain (∆) provided by MEMRL. The linear regression trend reveals a general positive correlation: environments with higher
+structural repetition allow the agent to retrieve and reuse optimal policies more effectively. At the upper extreme,ALFWorld
+(similarity 0.518) acts as a strong anchor point for this trend, exhibiting the highest repetition and a corresponding maximum
+performance boost (∆ = +0.172). This confirms that for highly repetitive procedural tasks, memory serves as an effective
+shortcut to optimal trajectories. Following the regression line, benchmarks with moderate similarity—such asLifelong-OS
+(0.390) andBigCodeBench( 0.308)—cluster in the middle region, showing steady improvements (∆≈+0.10∼+0.11 )
+where the agent successfully generalizes coding patterns or OS commands across related instructions.
+The HLE Anomaly: Generalization vs. Memorization.
+HLE presents a unique outlier. Despite having the lowest similarity ( 0.186) due to its diverse, multi-disciplinary nature,
+it exhibits a surprisingly high runtime gain (0.357→0.570,∆ = +0.213 ). This gain operates on a different mechanism
+than ALFWorld. In high-similarity benchmarks, MEMRL succeeds viaPositive Transfer—generalizing shared patterns
+to new instances. In contrast, the gain in HLE stems fromRuntime Memorization. Since HLE questions are distinct and
+domain-specific, the agent relies on the Runtime Learning phase to “memorize” specific solutions to difficult problems
+through repeated exposure. This distinction highlights MEMRL’s versatility: it supports bothpattern generalizationin
+19
+
+===== [MemRL] PAGE 20/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+structured domains andspecific knowledge acquisitionin diverse domains.
+C. Advanced Capabilities: Transfer and Merging
+C.1. Cross-Model Memory Transferability
+We investigate whether the procedural knowledge captured by MEMRL is specific to the training policy or if it generalizes
+across different architectures. To test this, we take a memory bank fully trained for 10 epochs on the HLE benchmark using
+our strongest agent, Gemini-3-pro, and directly transfer it—without any fine-tuning—to three distinct inference models:
+Qwen3-235B,GPT-5.2(High), andGemini-3-flash.
+As summarized in Table 5, the transferred memory yields substantial zero-shot performance gains across all models. Notably,
+smaller or distilled models experience the largest relative improvements; for instance, Qwen3-235B improves by over 3×
+(0.150→0.531 ) and Gemini-3-flash nearly doubles its success rate (0.347→0.583 ). Even GPT-5.2(High), a
+highly capable reasoning model, sees a significant boost (0.354→0.571).
+These results suggest that MEMRL capturesmodel-agnosticproblem-solving patterns—such as efficient code skeletons and
+reasoning templates—rather than model-specific artifacts. This effectively allows the memory bank to function as a portable
+knowledge base, enabling weaker models to “inherit” the capabilities of a stronger teacher model through simple retrieval.
+Table 5.Cross-Model Transfer Results on HLE.Performance of various agents using a frozen memory bank originally trained by
+Gemini-3-pro.∆denotes the absolute improvement over the base model.
+Inference Model Base Score Transfer Score Gain (∆)
+Qwen3-235B0.150 0.531+0.381
+Gemini-3-flash0.347 0.583 +0.236
+GPT-5.2(High)0.354 0.571 +0.217
+C.2. Multi-Task Memory Merging and Interference Analysis
+To evaluate the composability and robustness of MEMRL in multi-task scenarios, we conducted a memory merging
+experiment. Specifically, we aggregated the finalized memory banks learned from the last epoch of two distinct domains
+within the Lifelong Agent Bench: Operating System Control (MOS) and Database Management (MDB). The agent was
+then evaluated on each respective benchmark using this unified, heterogeneous memory bank (MU nif ied=M OS ∪M DB),
+without any further training or fine-tuning.
+As presented in Table 6, the results demonstrate that merging memories introduces negligible interference. The performance
+on the DB Task remains identical (0.960), while the OS Task exhibits only a marginal fluctuation (0.788→0.784 ). This
+robustness is intrinsic to ourTwo-Phase Retrievalmechanism. Since the semantic spaces of OS commands and SQL queries
+are largely orthogonal, the Phase-A similarity filter effectively acts as a semantic gate, automatically excluding irrelevant
+cross-task memories before they enter the value-based ranking stage. This confirms that MEMRL supports modular memory
+composition, allowing agents to scale capabilities by simply merging memory modules without suffering from negative
+transfer or catastrophic interference.
+Table 6.Memory Merging Results.Performance comparison between using task-specific individual memory banks versus a merged
+unified memory bank. The minimal delta confirms strong resistance to cross-task interference.
+Benchmark Task Individual Memory Merged Memory Performance Delta
+(Original) (M OS ∪M DB) (∆)
+Lifelong-OS (OS Task) 0.788 0.784 -0.004
+Lifelong-DB (DB Task) 0.960 0.960 0.000
+D. Baseline and Benchmark Details
+To ensure a rigorous evaluation, we compare MEMRL against a diverse set of baselines ranging from simple sampling
+strategies to advanced agentic memory systems. All baselines are evaluated under aunified frozen-backbone settingto
+20
+
+===== [MemRL] PAGE 21/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+isolate the contribution of the memory and retrieval mechanisms.
+D.1. Baselines
+We categorize the baselines into three groups based on their interaction with memory and environment:
+I. Test-Time Scaling Strategy
+• Pass@k:This is a standard sampling-based baseline. It generates k independent candidate solutions for a given query
+and selects the best one based on the benchmark’s verifier (if available) or reports the success rate if at least one
+candidate passes. This baseline serves as a measure of the inherent capability of the frozen LLM without any memory
+persistence.
+II. Retrieval-Augmented Generation (RAG) Approaches
+• RAG (Lewis et al., 2020):Represents the standard semantic retrieval paradigm. It utilizes an embedding model to
+encode the current query and retrieves the top-k most semantically similar past experiences (or documents) from the
+external memory. These retrieved contexts are then prepended to the prompt to guide the LLM’s generation.
+• Self-RAG (Asai et al., 2023):An advanced RAG variant that incorporates a self-critique mechanism. Unlike standard
+RAG, Self-RAG performs selective retrieval and uses a critique model (or self-prompting) to verify the relevance and
+factual correctness of the retrieved content before integrating it into the generation process.
+III. Agentic Memory Systems
+• Mem0 (Chhikara et al., 2025):A recently proposed memory layer for LLMs that manages memory through structured
+operations. It employs specific APIs for adding, retrieving, and updating memory, aiming to maintain a personalized
+and persistent context across interactions.
+• MemP (Fang et al., 2025):A framework focused on procedural memory. It distills past successful trajectories into
+reusable, procedure-like memory entries. MemP maintains a memory repository using a build-retrieve-update cycle,
+allowing the agent to recall high-level plans rather than raw trajectory data.
+D.2. Benchmark Datasets
+We evaluate performance across four benchmarks selected to cover diverse domains: code generation, OS interactions,
+embodied decision-making, and multidisciplinary reasoning.
+• BigCodeBench (Zhuo et al., 2025):A challenging benchmark for library-oriented code generation that requires
+agents to implement complex functionalities using diverse third-party libraries. Unlike traditional benchmarks focused
+on algorithmic snippets, BigCodeBench emphasizes practical software engineering capabilities. We evaluate on the
+BigCodeBench-Instruct (Full)split, which tasks the agent with synthesizing complete functional code from natural
+language instructions across the full range of difficulty levels.
+• Lifelong Agent Bench (Zheng et al., 2025):Designed to evaluate agents in a continuous learning setting involving
+Operating System (OS) and Database (DB) interactions. It tests the agent’s capacity to adapt to new tools and commands
+over a long horizon without forgetting previous skills.
+• ALFWorld (Shridhar et al., 2021):An embodied navigation and manipulation benchmark. It requires the agent to
+solve textual logic puzzles within a simulated household environment (e.g., “put a clean apple in the fridge”). This tests
+the agent’s ability to learn and retrieve multi-step plans.
+• Humanity’s Last Exam (HLE) (Phan et al., 2025):A rigorous multidisciplinary reasoning benchmark featuring
+hard problems from mathematics, humanities, and sciences. It serves as a stress test for the agent’s general reasoning
+capability and its ability to retrieve relevant knowledge for disparate tasks.
+21
+
+===== [MemRL] PAGE 22/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+E. Implementation and Reproducibility Details
+To facilitate reproducibility, we provide the exact model versions, hyperparameter settings, and environmental configurations
+used in our experiments.
+E.1. Model Specifications
+All LLM reasoning and generation tasks were performed using the models listed in Table 7. We used the official APIs with
+a fixed temperature to ensure deterministic evaluation where possible.
+Table 7.Model and API Configurations.
+Component Configuration / Version Notes
+Backbone LLMGPT-4oUsed for BigCodeBench
+GPT-4o-miniUsed for Lifelong Bench
+GPT-5-miniUsed for ALFWorld
+Gemini-3-proUsed for HLE
+Embedding ModelText-Embedding-3-LargeUsed for Intent and Query encoding
+Generation ParamsTemperature= 0.0General (Greedy decoding)
+Temperature= 0.6Specific for HLE (gemini-3-pro)
+Top-p= 1.0Default
+E.2. Hyperparameter Settings
+Table 8 details the specific hyperparameters used for MEMRL and the baselines. The similarity threshold δ is adaptive to the
+dataset density; specifically, we determine δ by calculating the pairwise cosine similarity distribution of task descriptions
+within each benchmark and selecting the threshold at the top 20% quantile. This ensures that only the most relevant historical
+experiences are considered for retrieval.
+Table 8.Hyperparameter Settings across Benchmarks.
+Benchmark Setting
+Parameter Description BigCodeBench Lifelong Bench (OS) Lifelong Bench (DB) ALFWorld HLE
+MEMRL(Ours)
+αLearning Rate (Eq. 4) 0.3 0.3 0.3 0.3 0.3
+λQ-Weight Balance (Eq. 7) 0.5 0.5 0.5 0.5 0.5
+δSimilarity Threshold 0.38 0.50 0.37 0.62 0.25
+k1 Phase-A Recall Size 10 10 10 5 5
+k2 Phase-B Select Size 5 5 5 3 3
+Qinit Initial Q-value 0.0 0.0 0.0 0.0 0.0
+Baselines
+kRAG Retrieval Top-k 5 5 5 3 3
+kSelf RAG Retrieval Top-k 5 5 5 3 3
+kM em0 Retrieval Top-k 5 5 5 3 3
+kM emP Retrieval Top-k 5 5 5 3 3
+E.3. Data Partitioning
+To evaluate the effectiveness of MEMRL, we categorize our experiments intoRuntime LearningandTransfer Learning
+settings. Table 9 summarizes the dataset sizes and partitioning strategies used for each benchmark.
+22
+
+===== [MemRL] PAGE 23/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Table 9.Summary of Data Partitioning and Dataset Sizes.
+Benchmark Runtime Learning Transfer Learning Split / Note
+HLE 2,500 tasks – Full set (Runtime only)
+Lifelong Agent (OS) 500 tasks 500 tasks 7:3 Split (Seed 42)
+Lifelong Agent (DB) 500 tasks 500 tasks 7:3 Split (Seed 42)
+BigCodeBench-I (Full) 1,140 tasks 1,140 tasks 7:3 Split (Seed 42)
+ALFWorld 3,553 tasks 140 tasksvalid seen(Novel instances) †
+† For ALFWorld Transfer Learning, the agent uses the same 3,553 tasks as memory context but is evaluated on 140 novel instances of seen task types.
+For benchmarks utilizing random splits ( OS, DB, and BCB), we use a fixed random seed of 42 to ensure reproducibility.
+In ALFWorld, theTransfer Learningphase specifically tests generalization to new instances within known categories,
+ensuring the agent learns procedural patterns rather than specific trajectories.
+E.4. Model Selection and Performance Analysis
+We select the backbone model for each benchmark to ensure avalid learning signalrelative to task complexity. Since
+MemRLrelies on high-value trajectories to perform utility update over retrieved memories, extremely low initial competence
+can make the feedback effectively unusable. For instance, on challenging benchmarks such as HLE, weaker models may
+start at ≈4% success rate (e.g., GPT-4o-mini), yielding too few successful trajectories for stable utility estimation; in this
+scenario, environmental feedback is dominated by noise, which can prevent meaningful learning and hinder convergence.
+At the other extreme, using the strongest available models on simpler benchmarks can causeperformance saturation(ceiling
+effects), leaving little headroom to quantify the marginal gains attributable to the memory mechanism. Therefore, we match
+model capability to each task’s difficulty to avoid both theno-signal situation(insufficient successes) and theceiling effect
+(insufficient headroom). This design choice enables a more faithful evaluation of improvements that are intrinsic toMemRL
+rather than artifacts of an ill-posed performance condition.
+Importantly, our evaluation spans backbones of different scales—from “mini” to “pro” tiers (Table 7)—to test whether
+MemRLremains effective across capability levels. The resulting performance trends support thescale-invariant robustness
+ofMemRL. Moreover, the cross-model transfer results (Table 5) further indicate that the procedural knowledge captured
+in memory is portable across backbones, suggesting that the learned utility over memories generalizes beyond any single
+model’s inherent strength.
+To further explore the generality ofMemRLacross different model capabilities and task complexities, we also deployed the
+GPT-4o-mini model in the ALFWorld benchmark. This model is identical to the backbone used in the Lifelong Agent
+Bench, allowing for a direct comparison of its performance across environments with varying exploration intensities. As
+an exploration-intensive environment, ALFWorld poses significant demands on the base model’s reasoning and planning
+capabilities. The Table 10 and Table 11 present the runtime learning and knowledge transfer abilities ofGPT-4o-mini.
+Table 10.Runtime Learning Performance ofGPT-4o-miniAcross Benchmarks
+Method Lifelong Agent (OS) Lifelong Agent (DB) ALFWorld Average
+Last Epoch SR CSR Last Epoch SR CSR Last Epoch SR CSR Last Epoch SR CSR
+No Memory 0.674 N/A 0.860 N/A 0.278 N/A 0.604 N/A
+Pass@10 N/A 0.756 N/A 0.928 N/A 0.462 N/A 0.715
+MemP 0.736 0.7420.9600.966 0.299 0.413 0.665 0.707
+MEMRL0.788 0.804 0.960 0.972 0.440 0.680 0.730 0.819
+These results, using GPT-4o-mini as a consistent backbone, unequivocally demonstrate MEMRL’s superior and general-
+ized effectiveness across all benchmarks. In runtime learning (Table 10), MEMRL achieves the highest average Last Epoch
+Success Rate and Cumulative Success Rate, showing significant gains: its average Last Epoch SR is 12.6% points higher
+than “No Memory”, and its average CSR surpasses MemP by11.2% points. This advantage is particularly pronounced in the
+challenging ALFWorld environment. Similarly, in transfer learning (Table 11), MEMRL secures the highest average Success
+Rate, 10.6% points higher than “No Memory” and 6.1% points higher than MemP. These consistent improvements across
+23
+
+===== [MemRL] PAGE 24/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Table 11.Transfer Learning Performance ofGPT-4o-miniAcross Benchmarks
+Method Lifelong Agent (OS) Lifelong Agent (DB) ALFWorld Average
+No Memory 0.673 0.841 0.314 0.609
+MemP 0.720 0.928 0.314 0.654
+MEMRL0.746 0.942 0.457 0.715
+tasks and learning paradigms confirm that MEMRL effectively enhances the GPT-4o-mini backbone’s decision-making
+capabilities, leveraging learned utility over memories for more robust performance.
+F. Cost and Efficiency Analysis
+Real-world deployment of autonomous agents requires balancing performance gains with computational costs. In this
+section, we analyze the token consumption and runtime latency of MEMRL compared to the strong baseline MemP on the
+compute-intensiveHumanity’s Last Exam (HLE)benchmark.
+F.1. Token Consumption
+Since MEMRL operates as a non-parametric approach without gradient-based fine-tuning, the primary cost arises from LLM
+API calls. We compare the average token usage per question (Q) across the entire learning trajectory (10 epochs).
+MEMRL’s token consumption is comparable to that of MemP, as both methods utilize identical interaction loops (reasoning
++ summarization). On the HLE benchmark, the average total token consumption per question for MEMRL is approximately
+32K. This similarity in token usage is because the complexity of MEMRL lies inhowmemories are retrieved and updated
+(via Q-values), not inhow muchcontext is fed to the LLM. Therefore, the significant performance gains of MEMRL reported
+in the main text are achieved without increasing the inference budget.
+F.2. Runtime Latency and Stability
+A common concern with two-stage retrieval and reinforcement learning components is the potential for increased latency.
+We empirically validate the wall-clock time required to complete each epoch (2,500 questions) in Figure 11.
+1 2 3 4 5 6 7 8 9 10
+Epoch (2500 questions)
+10
+20
+30
+40
+50
+60
+70Time Cost (hours)
+MemRL
+Memp
+Figure 11.Wall-Clock Time per Epoch on HLE.The x-axis represents learning epochs (2,500 questions per epoch), and the y-axis
+represents the total time in hours. MEMRL exhibits a stable runtime profile, confirming that the algorithmic overhead is negligible
+compared to system variances (e.g., network latency).
+Negligible Algorithmic Overhead.Figure 11 demonstrates that the runtime of MEMRL is commensurate with, and
+often more stable than, that of MemP. The fluctuations observed (e.g., the spikes in the MemP curve at Epochs 4 and 6) are
+attributed to external factors such as API network latency and throughput variability, rather than algorithmic complexity.
+Specifically, the additional components in MEMRL introduce minimal computational cost:
+•Dual-Stage Retrieval:This involves basic vector dot-products and scalar score weighting, operating in milliseconds.
+•RL Update:The Q-value update in a Monte Carlo style on scalars, which is anO(1)operation.
+24
+
+===== [MemRL] PAGE 25/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Compared to the hours required for LLM generation over 2,500 questions, these millisecond-level operations are virtually
+imperceptible. The stability of the MEMRL curve further suggests that our method does not introduce complex blocking
+operations that would exacerbate network-induced delays.
+G. Extended Limitations and Future Work
+This appendix provides a more detailed discussion on the limitations of MEMRL and outlines promising avenues for future
+research, building upon the foundations established in the main paper.
+G.1. Update Protocols and Memory Consolidation
+The current step-wise update protocol of MEMRL, while enabling rapid adaptation, can introduce high-variance noise in
+long-horizon trajectories. This presents a challenge for stabilizing value estimation over extended sequences. A valuable
+future direction involves exploring more robust multi-step update mechanisms, which could offer slower but more stable
+learning. Furthermore, combining these with periodic consolidation of similar intentions and experiences within the memory
+bank could significantly improve the spatial efficiency of the memory, reducing redundancy and enhancing retrieval quality.
+G.2. Precise Credit Assignment in Multi-Memory Updates
+A significant challenge arises from the credit-assignment ambiguity encountered when multiple experiences from the
+memory are referenced and updated simultaneously. Determining the precise contribution of each referenced memory to the
+final outcome is complex and affects the efficiency of learning. Future research could investigate methods for more precise
+experience attribution, drawing inspiration from techniques like Shapley values (Shapley et al., 1953), commonly used in
+cooperative game theory, or value decomposition methods prevalent in multi-agent reinforcement learning (Rashid et al.,
+2020; Sunehag et al., 2017). Such approaches could lead to more accurate updates and faster convergence.
+G.3. Task Similarity and Generalization
+MEMRL’s effectiveness is observed to improve with the number of encountered tasks, aligning well with the characteristics
+of runtime learning. This is because the algorithm leverages past experiences, and a richer, more diverse set of similar
+experiences directly enhances its ability to retrieve relevant knowledge. However, when task similarity in the experience base
+is low, the method may inherently degrade into a less efficient reflection-like behavior, as direct experience transfer is limited.
+This is not a deficiency of the method but rather a characteristic of its reliance on learned utility from memory. For industrial
+deployment and real-world applications, this implies that maintaining a sufficiently high “task similarity density” within the
+agent’s operating environment or its collected memory is crucial. Strategies to achieve this could include active curriculum
+learning, environment design that promotes diverse yet related tasks, or techniques that facilitate hierarchical abstraction to
+enable generalization beyond direct, low-level experience matches. Enhancing retrieval mechanisms to proactively identify
+and adapt to novel task structures, or integrating hierarchical abstraction, are key for improving cross-task generalization.
+G.4. Memory Security and Robustness to Attack
+MEMRL is sensitive to the quality of feedback, particularly vulnerable to “reward hacking” if the verifier produces false
+positives. Incorrectly learned high Q-values from spurious feedback can quickly solidify and propagate erroneous behavioral
+patterns, leading to systemic failures. This highlights a critical challenge: memory security. A maliciously injected sample
+into the memory bank could rapidly diffuse pollution, potentially causing an intelligent agent to collapse. Future research
+must address the safety and trustworthiness of agent memories. Fortunately, the mutable nature of experience offers a silver
+lining: once contamination or attack is identified, polluted experiences can be swiftly pruned, allowing for recovery without
+disrupting the utility of previously learned valid experiences.
+G.5. Multi-Agent Collaboration and Shared Memory
+As many enterprises transition from single agents to multi-agent clusters (swarms), the question of “shared memory”
+becomes important. Does the MEMRL approach support knowledge sharing, allowing lessons learned and updated Q-values
+from one agent to immediately benefit others? We’ve explored scenarios where the memory, treated as a persistent resource,
+can indeed be shared among different models or agents (Appendix C.1). Furthermore, adopting a multi-agent paradigm,
+akin to distributed parameter updates, could be highly beneficial. Each agent could accumulate experience and save it
+25
+
+===== [MemRL] PAGE 26/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+as memory during its operation, contributing to a large, collective memory pool. This would enable different agents to
+implicitly leverage each other’s learned experiences, fostering a more collaborative and efficient learning ecosystem.
+Beyond this collective pooling, a significant and promising frontier involves investigating the selective nature of such
+knowledge diffusion through the lens of transfer learning. As the number of agents increases, particularly beyond simple
+pairings, the challenge of ”what to share” and ”with whom to share” becomes a critical research direction. Future work
+could explore mechanisms that differentiate between universally applicable procedural insights and task-specific noise,
+ensuring that memory transfer remains contextually relevant and avoids the risks of negative transfer. Navigating these
+trade-offs between global collective intelligence and targeted knowledge distribution will be essential for building scalable,
+self-evolving swarms.
+G.6. Dedicated Domains and Hybrid Architectures
+While this work strongly advocates for freezing large language models (LLMs) to prevent catastrophic forgetting, a question
+arises regarding highly specialized domains where the base model may not comprehend foundational terminology. Is
+MEMRL alone sufficient in such cases? We anticipate a future hybrid model where companies periodically fine-tune
+foundational models (e.g., annually) to update their core vocabulary and understanding, while simultaneously leveraging
+MEMRL for daily behavioral adaptation and runtime learning. This approach requires the base model to possess a relatively
+high level of “intelligence” to initially grasp and subsequently learn new terms through interaction and feedback.
+H. Case Study: High-Utility Failure Analysis (Near-Misses)
+This appendix section provides qualitative case studies of high-value near-miss memories mined from the 10-epoch OS-
+Interaction run. CS denotesCase Study. Each box below contains: origin task, retrieved reflection memory, a short
+explanation, and the target task where it was retrieved.
+Case Study 1 (CS1)
+Utility.selected=19, success=19 (100.0%).
+Origin task.
+Update the SSH daemon configuration using sed to set: Port=2222, PermitRootLogin=no
+, X11Forwarding=no, ClientAliveInterval=300, ClientAliveCountMax=2,
+MaxAuthTries=2, MaxSessions=2, PasswordAuthentication=no, AllowUsers=’user1
+user2’, UseDNS=no, and Protocol=2.
+Retrieved reflection memory.
+- #1: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Update the SSH daemon configuration using sed to set: Port=2222, PermitRootLogin=no
+, X11Forwarding=no, ClientAliveInterval=300, ClientAliveCountMax=2,
+MaxAuthTries=2, MaxSessions=2, PasswordAuthentication=no, AllowUsers=’user1
+user2’, UseDNS=no, and Protocol=2.
+[REFLECTION]
+- ROOT CAUSE: The ‘sed‘ command did not modify the commented lines in the
+configuration file, which is why the new settings were not applied as expected.
+- PATTERN TO AVOID: Avoid assuming that ‘sed‘ will replace commented lines without
+explicitly handling them.
+- CORRECT APPROACH: Use ‘sed‘ to either uncomment the lines before replacing them
+or add the new configurations if they are commented out.
+26
+
+===== [MemRL] PAGE 27/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Explanation.This reflection captures a subtle config-edit pitfall: naive sed replacement may miss commented defaults.
+The transferable lesson is to explicitly handle commented lines (uncomment-or-append), which generalizes across
+configuration-editing tasks.
+Target task(retrieval rank 1; run outcome: correct).
+Modify the SSH daemon configuration file at /etc/ssh/sshd_config to change the port
+to 2222, disable root login, set max sessions to 2, and set client alive
+interval to 300. Create a backup file before making changes.
+Case Study 2 (CS2)
+Utility.selected=20, success=20 (100.0%).
+Origin task.
+Replace ’DEBUG=True’ with ’DEBUG=False’ in /app/settings.cfg, append ’LOG_LEVEL=
+INFO’ after the modified line, and create a backup file.
+Retrieved reflection memory.
+- #2: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Replace ’DEBUG=True’ with ’DEBUG=False’ in /app/settings.cfg, append ’LOG_LEVEL=
+INFO’ after the modified line, and create a backup file.
+[REFLECTION]
+- ROOT CAUSE: The ‘sed‘ command added the line ‘LOG_LEVEL=INFO‘ twice due to the
+way it was structured to append after the modified ‘DEBUG‘ line.
+- PATTERN TO AVOID: Avoid using multiple ‘-e‘ options in ‘sed‘ that can lead to
+unintended duplications when appending lines.
+- CORRECT APPROACH: Instead, use a single ‘sed‘ command that ensures the line is
+only added once, or check for the existence of the line before appending it.
+Explanation.The originating attempt nearly completes the edit but fails due to a non-idempotent text transformation
+(duplicating an appended line). The memory teaches an idempotent editing pattern (single-pass edit or existence check),
+which transfers to many file-edit tasks.
+Target task(retrieval rank 2; run outcome: correct).
+Replace ’DEBUG=True’ with ’DEBUG=False’ in /app/settings.cfg, append ’LOG_LEVEL=
+INFO’ after the modified line, and create a backup file.
+Case Study 3 (CS3)
+Utility.selected=48, success=44 (91.7%).
+Origin task.
+27
+
+===== [MemRL] PAGE 28/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Create a user ’testuser’ with a home directory, set password expiration policy (max
+60 days, min 7 days, warning 7 days), add to ’testgroup’, create ’/home/
+testuser/private’ with 770 permissions, create ’/shared’ directory accessible
+only by ’testgroup’, add ’export PATH=$PATH:/custom’ to .bashrc, and create ’.
+hushlogin’ file with 644 permissions.
+Retrieved reflection memory.
+- #4: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Create a user ’testuser’ with a home directory, set password expiration policy (max
+60 days, min 7 days, warning 7 days), add to ’testgroup’, create ’/home/
+testuser/private’ with 770 permissions, create ’/shared’ directory accessible
+only by ’testgroup’, add ’export PATH=$PATH:/custom’ to .bashrc, and create ’.
+hushlogin’ file with 644 permissions.
+[REFLECTION]
+- ROOT CAUSE: The output of the commands was empty, indicating successful execution
+without any visible confirmation or errors.
+- PATTERN TO AVOID: Relying solely on silent execution without feedback can lead to
+uncertainty about whether tasks were completed successfully.
+- CORRECT APPROACH: Always check the status of commands using conditional
+statements or output messages to confirm successful execution and provide
+clarity on the task’s completion.
+Explanation.This memory highlights a common near-miss failure mode: assuming silent command output implies
+completion without verification. The transferable practice is to add explicit post-checks (exit codes, file/permission/own-
+ership checks) after critical steps.
+Target task(retrieval rank 4; run outcome: correct).
+Create a user ’testuser’ with a home directory, set password expiration policy (max
+60 days, min 7 days, warning 7 days), add to ’testgroup’, create ’/home/
+testuser/private’ with 770 permissions, create ’/shared’ directory accessible
+only by ’testgroup’, add ’export PATH=$PATH:/custom’ to .bashrc, and create ’.
+hushlogin’ file with 644 permissions.
+Case Study 4 (CS4)
+Utility.selected=26, success=23 (88.5%).
+Origin task.
+Run a sleep process in the background for 3 seconds, log its start and end times (
+in epoch format) to ’/var/log/sleep.log’, store the process ID in ’/tmp/
+sleep_pid’, and ensure the PID file is removed after the process completes.
+Retrieved reflection memory.
+28
+
+===== [MemRL] PAGE 29/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+- #1: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Run a sleep process in the background for 3 seconds, log its start and end times (
+in epoch format) to ’/var/log/sleep.log’, store the process ID in ’/tmp/
+sleep_pid’, and ensure the PID file is removed after the process completes.
+[REFLECTION]
+- ROOT CAUSE: The PID file was not created because the command to capture the PID
+may not have executed correctly, leading to multiple executions of the sleep
+process without proper PID storage.
+- PATTERN TO AVOID: Avoid executing commands in a loop or without proper checks,
+which can lead to unintended repeated executions and failures to capture
+necessary outputs.
+- CORRECT APPROACH: Implement a structured approach with error handling and
+verification after each critical command to ensure that each step completes
+successfully before proceeding to the next.
+Explanation.The failure comes from missing control/verification around process management (PID capture and
+cleanup), which leads to repeated execution and missing artifacts. The memory transfers as a general recipe: capture
+PID once, verify artifacts, and sequence commands with error handling.
+Target task(retrieval rank 1; run outcome: correct).
+Run a sleep process in the background for 3 seconds, log its start and end times (
+in epoch format) to ’/var/log/sleep.log’, store the process ID in ’/tmp/
+sleep_pid’, and ensure the PID file is removed after the process completes.
+Case Study 5 (CS5)
+Utility.selected=94, success=88 (93.6%).
+Origin task.
+Create a secure configuration file ’/etc/appconfig/settings.conf’ using vi, set
+ownership to root:configgroup, permissions to 660, and add ’appuser’ to ’
+configgroup’. Ensure the file contains ’# Configuration file’ and ’key=value’
+lines.
+Retrieved reflection memory.
+29
+
+===== [MemRL] PAGE 30/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+- #2: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Create a secure configuration file ’/etc/appconfig/settings.conf’ using vi, set
+ownership to root:configgroup, permissions to 660, and add ’appuser’ to ’
+configgroup’. Ensure the file contains ’# Configuration file’ and ’key=value’
+lines.
+[REFLECTION]
+- ROOT CAUSE: The initial assumption that the group ‘configgroup‘ and the user ‘
+appuser‘ already existed led to errors when attempting to set ownership and
+modify group membership.
+- PATTERN TO AVOID: Avoid making assumptions about the existence of users or groups
+in the system without verifying first.
+- CORRECT APPROACH: Always check for the existence of necessary users and groups
+before performing operations that depend on them, and create them if they do
+not exist.
+Explanation.This reflection encodes a high-frequency near-miss: assuming required users/groups exist. The
+transferable heuristic is to preflight environment state (e.g., id/getent) and create prerequisites before applying owner-
+ship/permission changes.
+Target task(retrieval rank 2; run outcome: correct).
+Create a configuration file ’/etc/appconfig/settings.conf’ using ’vi’ containing
+the lines ’SERVER_IP=192.168.1.100’ and ’DEBUG_MODE=false’, set its group
+ownership to ’appgroup’, and permissions to 640.
+Case Study 6 (CS6)
+Utility.selected=59, success=55 (93.2%).
+Origin task.
+Create a user ’testuser’, add them to group ’testgroup’, configure ’/data’ with
+group ownership ’testgroup’ and permissions 770, create ’/data/notes.txt’ using
+’vi’ with content ’Hello from vi’, and create an executable script ’/check.sh’
+using ’vi’ to verify group ownership of ’/data’.
+Retrieved reflection memory.
+30
+
+===== [MemRL] PAGE 31/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+- #5: [MEMORY TYPE] FAILURE_REFLECTION
+[TASK]
+Create a user ’testuser’, add them to group ’testgroup’, configure ’/data’ with
+group ownership ’testgroup’ and permissions 770, create ’/data/notes.txt’ using
+’vi’ with content ’Hello from vi’, and create an executable script ’/check.sh’
+using ’vi’ to verify group ownership of ’/data’.
+[REFLECTION]
+- ROOT CAUSE: The output being empty does not indicate a failure, but rather that
+the commands executed successfully without any output.
+- PATTERN TO AVOID: Assuming that an empty output signifies an error can lead to
+misunderstandings about command execution results.
+- CORRECT APPROACH: Always verify the success of commands by checking their exit
+status or using logging to confirm that actions were completed as intended.
+Explanation.The lesson is that empty output usually signals success, not failure; therefore success should be validated
+via exit status and direct state checks. This reduces false negatives across shell automation tasks.
+Target task(retrieval rank 5; run outcome: correct).
+Create a file ’/shared/config/settings.conf’ containing ’USER=testuser’ and ’GROUP=
+testgroup’, then programmatically create a user and group using the values from
+the file. Finally, ensure ’/shared/data’ is owned by the group with 770
+permissions.
+I. Prompts
+We provide the exact prompt strings and message templates used by our MEMRL implementation across all benchmarks. To
+minimize ambiguity, we separate prompts used to summarize experiences into memories from prompts used at task time for
+generation/inference.
+I.1. Experience Summarization Prompts
+HLE: Experience Summarization Prompts
+Trajectory serialization (stored as the episode trajectory).
+QUESTION
+{question}
+SOLUTION
+{model_output_stripped}
+High-level script generation prompt.
+31
+
+===== [MemRL] PAGE 32/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Analyze the following detailed task trajectory and create a concise,
+high-level script that captures the essential steps and decision points.
+The script should be:
+1. Generic enough to apply to similar tasks
+2. Specific enough to provide useful guidance
+3. 3-5 high-level steps maximum
+4. Focus on the strategy and key decisions, not detailed actions
+Trajectory:
+{trajectory}
+High-level script:
+Failure reflection prompt.
+Task: {task_description}
+Failed trajectory:
+{failed_trajectory}
+This task failed. Analyze what went wrong and suggest improvements for future
+similar tasks.
+Focus on:
+1. Incorrect assumptions
+2. Steps to improve
+3. What to avoid next time
+Provide a brief reflection:
+Stored memory content templates.
+# Successful memory
+Task: {task_description}
+SCRIPT:
+{script}
+TRAJECTORY:
+{trajectory}
+# Failure memory
+TASK REFLECTION:
+Task: {task_description}
+What went wrong:
+{reflection}
+Failed approach:
+{failed_trajectory}
+32
+
+===== [MemRL] PAGE 33/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+ALFWorld: Experience Summarization Prompts
+Trajectory serialization (stored as the episode trajectory).
+The full ALFWorld dialogue history is stored as the trajectory:
+List[{"role": ..., "content": ...}, ...]
+When interpolated into the summarization prompts, it is treated as a string
+representation.
+High-level script generation prompt.
+Analyze the following detailed task trajectory and create a concise,
+high-level script that captures the essential steps and decision points.
+The script should be:
+1. Generic enough to apply to similar tasks
+2. Specific enough to provide useful guidance
+3. 3-5 high-level steps maximum
+4. Focus on the strategy and key decisions, not detailed actions
+Trajectory:
+{trajectory}
+High-level script:
+Failure reflection prompt.
+Task: {task_description}
+Failed trajectory:
+{failed_trajectory}
+This task failed. Analyze what went wrong and suggest improvements for future
+similar tasks.
+Focus on:
+1. Incorrect assumptions
+2. Steps to improve
+3. What to avoid next time
+Provide a brief reflection:
+Stored memory content templates.
+33
+
+===== [MemRL] PAGE 34/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+# Successful memory
+Task: {task_description}
+SCRIPT:
+{script}
+TRAJECTORY:
+{trajectory}
+# Failure memory
+TASK REFLECTION:
+Task: {task_description}
+What went wrong:
+{reflection}
+Failed approach:
+{failed_trajectory}
+BCB (BigCodeBench): Experience Summarization Prompts
+Trajectory serialization (stored as the episode trajectory).
+[BCB] epoch={epoch} phase={phase} task_id={task_id}
+[PROMPT]
+{bcb_task_prompt}
+[GENERATED CODE]
+‘‘‘python
+{model_code}
+‘‘‘
+[EVAL]
+{"status": "...", "error": "..."}
+High-level script generation prompt.
+Analyze the following detailed task trajectory and create a concise,
+high-level script that captures the essential steps and decision points.
+The script should be:
+1. Generic enough to apply to similar tasks
+2. Specific enough to provide useful guidance
+3. 3-5 high-level steps maximum
+4. Focus on the strategy and key decisions, not detailed actions
+Trajectory:
+{trajectory}
+High-level script:
+Failure reflection prompt.
+34
+
+===== [MemRL] PAGE 35/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Task: {task_description}
+Failed trajectory:
+{failed_trajectory}
+This task failed. Analyze what went wrong and suggest improvements for future
+similar tasks.
+Focus on:
+1. Incorrect assumptions
+2. Steps to improve
+3. What to avoid next time
+Provide a brief reflection:
+Stored memory content templates.
+# Successful memory
+Task: {task_description}
+SCRIPT:
+{script}
+TRAJECTORY:
+{trajectory}
+# Failure memory
+TASK REFLECTION:
+Task: {task_description}
+What went wrong:
+{reflection}
+Failed approach:
+{failed_trajectory}
+LLB (LifelongAgentBench): Experience Summarization Prompts
+Trajectory serialization (stored as the episode trajectory).
+{role_1}: {content_1}
+{role_2}: {content_2}
+...
+High-level script generation prompt.
+35
+
+===== [MemRL] PAGE 36/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Analyze the following detailed task trajectory and create a concise,
+high-level script that captures the essential steps and decision points.
+The script should be:
+1. Generic enough to apply to similar tasks
+2. Specific enough to provide useful guidance
+3. 3-5 high-level steps maximum
+4. Focus on the strategy and key decisions, not detailed actions
+Trajectory:
+{trajectory}
+High-level script:
+Failure reflection prompt.
+Task: {task_description}
+Failed trajectory:
+{failed_trajectory}
+This task failed. Analyze what went wrong and suggest improvements for future
+similar tasks.
+Focus on:
+1. Incorrect assumptions
+2. Steps to improve
+3. What to avoid next time
+Provide a brief reflection:
+Stored memory content templates.
+# Successful memory
+Task: {task_description}
+SCRIPT:
+{script}
+TRAJECTORY:
+{trajectory}
+# Failure memory
+TASK REFLECTION:
+Task: {task_description}
+What went wrong:
+{reflection}
+Failed approach:
+{failed_trajectory}
+36
+
+===== [MemRL] PAGE 37/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+I.2. Generation and Inference Prompts
+HLE: Generation and Inference Prompts
+System prompt (exact-match).
+Your response should be in the following format:
+Explanation: {your explanation for your final answer}
+Exact Answer: {your succinct, final answer}
+Confidence: {your confidence score between 0% and 100% for your answer}
+System prompt (multiple-choice).
+Your response should be in the following format:
+Explanation: {your explanation for your answer choice}
+Answer: {your chosen answer}
+Confidence: {your confidence score between 0% and 100% for your answer}
+Retrieved memory injection (system message).
+=== Successful Memories ===
+{memory_full_content_1}
+{memory_full_content_2}
+=== Failed Memories (for caution) ===
+{memory_full_content_3}
+...
+Optional repeat-attempt reflection note (system message).
+You attempted this question before.
+Result: {CORRECT|INCORRECT}
+Question: {question}
+Previous attempt (solution only):
+{solution_only}
+Reflect on mistakes or gaps, then solve the problem again with a better solution.
+User message text block (when images exist).
+Now solve the following question:
+[Image IDs: {question_image_ids}]
+{question}
+Attached images:
+1. [{img_id_1}] ({source_1})
+2. [{img_id_2}] ({source_2})
+...
+Message ordering.
+37
+
+===== [MemRL] PAGE 38/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+1) system: exact-match OR multiple-choice format prompt
+2) system: optional reflection note (if enabled)
+3) system: optional retrieved memory context
+4) user: question content (text + optional images)
+ALFWorld: Generation and Inference Prompts
+Base system prompt (ReAct format + action space).
+Interact with a household to solve a task. Imagine you are an intelligent agent in
+a household environment and your target is to perform actions to complete the
+task goal. At the beginning of your interactions, you will be given the
+detailed description of the current environment and your goal to accomplish.
+For each of your turn, you will be given the observation of the last turn. You
+should first think about the current condition and plan for your future actions,
+and then output your action in this turn. Your output must strictly follow
+this format:"Thought: your thoughts.\nAction: your next action".
+The available actions are:
+1. go to {recep}
+2. take {obj} from {recep}
+3. move {obj} to {recep}
+4. open {recep}
+5. close {recep}
+6. use {obj}
+7. clean {obj} with {recep}
+8. heat {obj} with {recep}
+9. cool {obj} with {recep}
+where {obj} and {recep} correspond to objects and receptacles.
+After your each turn, the environment will give you immediate feedback based on
+which you plan your next few steps. if the envrionment output "Nothing happened
+", that means the previous action is invalid and you should try more options.
+Your response should use the following format:
+Thought: <your thoughts>
+Action: <your next action>
+Retrieved memory injection (system message).
+In addition to the example, you have the following memories from your own past
+experiences. Use them to help you if they are relevant:
+--- SUCCESSFUL MEMORIES (Examples to follow) ---
+{formatted_success_memories_joined}
+--- FAILED MEMORIES (Examples to avoid or learn from) ---
+{formatted_failed_memories_joined}
+Current task prompt (user message).
+38
+
+===== [MemRL] PAGE 39/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+Now, it’s your turn to solve a new task.
+{task_description}
+Per-step observation prompt (user message).
+Observation: {observation}
+Message ordering (high level).
+1) system: base ALFWorld system prompt
+2) user/assistant: selected few-shot example dialogue (sequence of messages)
+3) system: optional retrieved memory context
+4) user: new task prompt
+5) loop: append user Observation: ..., model replies with Thought/Action
+BCB (BigCodeBench): Generation and Inference Prompts
+Retrieved memory injection (system message).
+[Retrieved Memory Context]
+### Memory 1 (id={mem_id_1}, sim={similarity_1})
+{memory_content_1}
+### Memory 2 (id={mem_id_2}, sim={similarity_2})
+{memory_content_2}
+...
+Dataset-provided task prompt selection (user message).
+if split == "instruct":
+return task["instruct_prompt"]
+if split == "complete":
+return task["complete_prompt"]
+Message ordering.
+1) system: optional [Retrieved Memory Context] ...
+2) user: {bcb_task_prompt}
+LLB (LifelongAgentBench): Generation and Inference Prompts
+Base system prompt.
+39
+
+===== [MemRL] PAGE 40/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+You are an execution-focused AI agent solving database and operating-system tasks.
+You may receive a [Retrieved Memory Context] block with past experiences from
+similar problems.
+These are **references for learning **, not guaranteed solutions:
+- [MEMORY TYPE] SUCCESS_PROCEDURE: A successful approach from a similar task learn
+the pattern.
+- [MEMORY TYPE] FAILURE_REFLECTION: A failed attempt with lessons avoid similar
+mistakes.
+Use the memories as inspiration, but always analyze your current task independently
+and
+adapt your approach based on its specific requirements.
+Strict output constraint (DB tasks).
+STRICT OUTPUT FORMAT (LLB:DB, do not violate):
+1) After your reasoning, include exactly ONE action line:
+- Action: Operation
+- Action: Answer
+2) If Action: Operation, put exactly ONE SQL statement in the FIRST fenced code
+block using ‘‘‘sql, on a single line. Do not add any extra text after that
+block.
+3) If Action: Answer, include ‘Final Answer: ...‘ on the next line and do not add
+extra text after that.
+Strict output constraint (OS tasks).
+STRICT OUTPUT FORMAT (LLB:OS, do not violate):
+1) After your reasoning, include exactly ONE action line:
+- Act: bash
+- Act: finish
+2) If Act: bash, the next lines MUST be a ‘‘‘bash fenced code block with your Bash
+commands. Do not include any other code blocks.
+3) If Act: finish, it must be the last line (no code blocks, no extra text).
+4) Do NOT use ‘Action:‘ in OS tasks (use ‘Act:‘ only).
+Retrieved memory injection block.
+[Retrieved Memory Context]
+=== SUCCESSFUL EXPERIENCES (Learn from these) ===
+[SUCCESS 1] [TYPE: {mem_type}]
+{content}
+=== FAILED EXPERIENCES (Avoid these mistakes) ===
+[FAILURE 1] [TYPE: {mem_type}]
+{content}
+Prompt assembly ordering (system prompt).
+40
+
+===== [MemRL] PAGE 41/41 =====
+MemRL: Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory
+1) base system prompt
+2) optional [Retrieved Memory Context] ...
+3) strict output format block appended at the end (task-aligned)
+41
