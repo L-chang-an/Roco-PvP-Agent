@@ -1,19 +1,28 @@
 """组队：把玩家意图（`TeamPick`）校验通过后变成引擎唯一认识的 roster spec。
 
-**血脉在 E0 的语义（说清楚，不假装实现）**：E0 的 14 个技能全是「普通」系，而克制表
-要到 E2 才存在，所以血脉在 E0 **对战斗没有任何影响**。它做三件真实的事：
-① 被校验（必须是该精灵的合法血脉）；② 拓宽可学技能池；③ 进 roster 与
-`--team-report` 输出。E2 起它改写 `Unit.types`，从而通过克制表影响伤害。
+数据源：
+- **E0**（教学数据）：行为与 E0a 原版**逐字节一致**——血脉必须在该精灵的合法
+  `bloodlines` 列表内、选血脉才拓宽可学池。同名精灵允许重复入队（判断 3）。
+- **FULL**（真实数据）：三条新规则生效（负责人 2026-08-24 指定）——
+  ① 同一家族只能入队一只（家族 = evolution 链首精灵的编号一致）；
+  ② 血脉技能（`skills.血脉`）的系别必须等于玩家所选血脉系别（无血脉禁带血脉技能）；
+  ③ 首领形态（`is_boss`）不可入队。
+- **VALID**（E3）：精灵表同 FULL（全部 593 只），技能池只保留**已实装效果的** P1∪P2
+  白名单（`valid_skills.json`）——三条规则同样生效，非白名单技能给「效果未实装」文案。
 
-判断 3（来自环境计划）：同名精灵**允许**重复入队——E0 只有 6 只精灵、3 个槽位，
-禁止重复会让组队空间小到无趣。因此本模块**不**做重复校验。
+roster spec 是数据层与引擎之间唯一的一层缝，形状两源一致。
+
+**系别与血脉的职责（负责人 2026-08-25 澄清）**：`types` 恒为精灵**自身系别**——它是克制/STAB
+的依据；血脉系别**不改写** types，只决定可携带的血脉技能是哪个系（规则 2）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .dataset import STAT_KEYS, load_skills, load_spirits
+from .dataset import (
+    DEFAULT_SOURCE, DataSource, STAT_KEYS, load_skills, load_spirits, load_types,
+)
 from .rules import DEFAULT_RULES, E0_ITEMS, BattleRules
 from .statline import calc_combat_stats, is_valid_nature
 
@@ -22,42 +31,57 @@ from .statline import calc_combat_stats, is_valid_nature
 class TeamPick:
     """一只精灵的组队意图。这是**玩家侧**的输入形状。"""
 
-    spirit: str                       # 精灵名，必须在 e0_spirits.json 里
-    skills: list[str]                 # 1–rules.skill_slots 个（至少 1、至多 3），都在该精灵可学池内
-    bloodline: str = ""               # 血脉（系别）；见模块 docstring 的语义说明
+    spirit: str                       # 精灵名，必须在数据表里（E0 教学 / FULL 真实）
+    skills: list[str]                 # 1–rules.skill_slots 个（至少 1、至多 4），都在该精灵可学池内
+    bloodline: str = ""               # 血脉（系别）；FULL/VALID 下由玩家自定义，任意 18 系
     nature: str = "坦率"
     iv: dict[str, int] = field(default_factory=dict)   # 每项 0–iv_max，最多 3 个维度有投入，缺省 0
 
 
-def learnable_skills(spirit: str, bloodline: str = "") -> list[str]:
-    """该精灵的可学技能池 = `skills.默认` ∪（选了**合法**血脉才并上 `skills.血脉`）。
+def learnable_skills(spirit: str, bloodline: str = "",
+                     source: DataSource = DEFAULT_SOURCE) -> list[str]:
+    """该精灵的可学技能池。
 
-    非法的血脉选择不给任何好处——`validate_team` 会单独报「血脉不在合法列表」，这里
-    只把它当成"没选血脉"处理，于是非法血脉偷渡血脉技能的事在结构上不可能发生。
+    E0：`skills.默认` ∪（选了**合法**血脉才并上 `skills.血脉`）。
+    FULL：`默认 ∪ 技能石 ∪ 传说` +（选了血脉则并上 `skills.血脉` 里**系别 == 血脉**
+    的技能；无血脉 → 不带任何血脉技能）。
+    VALID：FULL 池再 ∩ **已实装效果**的技能（只保留可对战的）。
     精灵名不存在 → 直接 KeyError（`validate_team` 会先拦住精灵名，这里不兜）。
     """
-    sp = load_spirits()[spirit]
-    pool = list(sp.skills_default)
-    if bloodline and bloodline in sp.bloodlines:
-        pool.extend(sp.skills_bloodline)
+    sp = load_spirits(source)[spirit]
+    if source is DataSource.E0:
+        pool = list(sp.skills_default)
+        if bloodline and bloodline in sp.bloodlines:
+            pool.extend(sp.skills_bloodline)
+        return pool
+    pool = list(sp.skills_default) + list(sp.skills_stone) + list(sp.skills_legend)
+    if bloodline:
+        skills = load_skills(source)
+        pool += [n for n in sp.skills_bloodline if n in skills and skills[n].type == bloodline]
+    if source is DataSource.VALID:
+        valid = set(load_skills(DataSource.VALID))
+        pool = [n for n in pool if n in valid]
     return pool
 
 
 def validate_team(picks: list[TeamPick], items: list[str],
-                  rules: BattleRules = DEFAULT_RULES) -> list[str]:
+                  rules: BattleRules = DEFAULT_RULES,
+                  source: DataSource = DEFAULT_SOURCE) -> list[str]:
     """返回全部错误（中文），空列表 = 合法。
 
     **一次报全部错误，不是遇到第一个就返回**——组队是人在填表，一次看清所有问题
     比来回试八次强。
 
-    校验项：队伍规模 == rules.team_size；每只技能数 1–rules.skill_slots（至少 1、至多 3）；
-    技能不在可学池；技能名不存在；精灵名不存在；血脉不在该精灵的血脉列表；
-    性格未知；个体值键不是六维之一 / 值越界（0–iv_max）/ 有投入的维度 > 3；
+    公共校验：队伍规模 == rules.team_size；每只技能数 1–rules.skill_slots；
+    技能不存在 / 不在可学池；精灵名不存在；性格未知；个体值键/值/维度数；
     道具名不存在 / 道具重复。
+    FULL/VALID 新增三条：首领形态不可入队；血脉技能系别必须等于所选血脉（含无血脉禁带）；
+    同一家族（evolution 链首编号一致）只能入队一只。VALID 另：非白名单技能给「效果未实装」文案。
     """
     errors: list[str] = []
-    spirits = load_spirits()
-    skills = load_skills()
+    spirits = load_spirits(source)
+    skills = load_skills(source)
+    full = source in (DataSource.FULL, DataSource.VALID)
 
     if len(picks) != rules.team_size:
         errors.append(f"队伍规模必须为 {rules.team_size} 只，实际 {len(picks)} 只。")
@@ -70,20 +94,47 @@ def validate_team(picks: list[TeamPick], items: list[str],
 
         sp = spirits[pick.spirit]
 
-        if pick.bloodline and pick.bloodline not in sp.bloodlines:
-            errors.append(
-                f"{label}：血脉「{pick.bloodline}」不在「{pick.spirit}」的合法血脉列表 "
-                f"{list(sp.bloodlines)} 内。"
-            )
+        # ── 血脉：E0 校验合法性列表；FULL 校验是合法系别（玩家自定义 18 系任一）──
+        if full:
+            if pick.bloodline and pick.bloodline not in load_types(source):
+                errors.append(f"{label}：血脉「{pick.bloodline}」不是合法系别"
+                              f"（{sorted(load_types(source))}）。")
+        else:
+            if pick.bloodline and pick.bloodline not in sp.bloodlines:
+                errors.append(
+                    f"{label}：血脉「{pick.bloodline}」不在「{pick.spirit}」的合法血脉列表 "
+                    f"{list(sp.bloodlines)} 内。"
+                )
 
+        # ── 规则 3（FULL）：首领形态不可入队 ──
+        if full and sp.is_boss:
+            errors.append(f"{label}：首领形态不可入队。")
+
+        # ── 技能：数量 + 可学池（FULL 对血脉技能走规则 2 的更明确文案）──
         if not 1 <= len(pick.skills) <= rules.skill_slots:
             errors.append(
                 f"{label}：技能数必须为 1–{rules.skill_slots} 个，实际 {len(pick.skills)} 个。"
             )
-        pool = learnable_skills(pick.spirit, pick.bloodline)
+        pool = learnable_skills(pick.spirit, pick.bloodline, source)
         for skill_name in pick.skills:
             if skill_name not in skills:
-                errors.append(f"{label}：技能「{skill_name}」不存在。")
+                if full and skill_name in load_skills(DataSource.FULL):
+                    errors.append(
+                        f"{label}：技能「{skill_name}」效果未实装（P1∪P2 白名单外），当前不可携带。"
+                    )
+                else:
+                    errors.append(f"{label}：技能「{skill_name}」不存在。")
+                continue
+            if full and skill_name in sp.skills_bloodline:
+                # 规则 2：血脉技能必须匹配所选血脉系别（优先于通用「不在可学池」）
+                if not pick.bloodline:
+                    errors.append(f"{label}：血脉技能「{skill_name}」需要先选择血脉系别。")
+                elif pick.bloodline in load_types(source) and skills[skill_name].type != pick.bloodline:
+                    errors.append(
+                        f"{label}：血脉技能「{skill_name}」系别为「{skills[skill_name].type}」，"
+                        f"与所选血脉「{pick.bloodline}」不符。"
+                    )
+                continue  # 匹配的血脉技能已在池内；不匹配/无血脉的已由规则 2 报掉
             elif skill_name not in pool:
                 errors.append(
                     f"{label}：技能「{skill_name}」不在「{pick.spirit}」"
@@ -106,6 +157,20 @@ def validate_team(picks: list[TeamPick], items: list[str],
                 f"{label}：最多 3 个维度可加个体值，实际 {len(ev_dims)} 个维度（{ev_dims}）。"
             )
 
+    # ── 规则 1（FULL）：同一家族只能入队一只 ──
+    if full:
+        fam: dict[str | None, list[str]] = {}
+        for i, pick in enumerate(picks, start=1):
+            key = spirits[pick.spirit].family_key if pick.spirit in spirits else None
+            if key is not None:
+                fam.setdefault(key, []).append(f"第{i}只「{pick.spirit}」")
+        for key, holders in fam.items():
+            if len(holders) > 1:
+                errors.append(
+                    f"同一家族只能入队一只：{'、'.join(holders)} 同属一个家族"
+                    f"（进化链最低阶编号 {key}）。"
+                )
+
     if len(set(items)) != len(items):
         errors.append(f"道具列表含重复项：{items}。")
     for item in items:
@@ -115,36 +180,44 @@ def validate_team(picks: list[TeamPick], items: list[str],
     return errors
 
 
-def build_roster(picks: list[TeamPick]) -> list[dict]:
+def build_roster(picks: list[TeamPick], source: DataSource = DEFAULT_SOURCE,
+                 rules: BattleRules = DEFAULT_RULES) -> list[dict]:
     """校验通过后产出 roster spec —— 引擎唯一认识的形状（E0b 的 build_unit 吃它）。
 
     E3 的真实数据加载器产出**同一个形状**，所以 E0b 的引擎测试到 E3 一条都不用改。
     这里做防御性再校验：不合法的意图在此抛 ValueError，而不是带病产出。
+
+    `rules`：管理员（E3 battle_config）可传自定义 team_size/lives，build_roster 按它校验
+    （默认 DEFAULT_RULES，E0/FULL 行为不变）。
 
     roster spec 的形状：
         {"name": "迪莫",
          "types": ["光"],
          "stats": {...},      # 已经是 calc_combat_stats 的输出
          "skills": ["抓挠1", "加物攻"],
-         "nature": "坦率", "bloodline": "", "iv": {}}
+         "nature": "坦率", "bloodline": "", "iv": {},
+         "trait": "最好的伙伴"}   # 特性名（build_unit 据此绑定 TraitState）
     """
-    errors = validate_team(picks, items=[])
+    errors = validate_team(picks, items=[], rules=rules, source=source)
     if errors:
         raise ValueError("组队不合法：" + "；".join(errors))
 
-    spirits = load_spirits()
+    spirits = load_spirits(source)
     roster: list[dict] = []
     for pick in picks:
         sp = spirits[pick.spirit]
         roster.append(
             {
                 "name": sp.name,
+                # 系别**恒为精灵自身系别**（影响克制/STAB）——血脉系别不改写 types，
+                # 它只决定可携带的血脉技能是哪个系（规则 2 校验，见 validate_team）。
                 "types": list(sp.types),
                 "stats": calc_combat_stats(sp.stats, pick.iv, pick.nature),
                 "skills": list(pick.skills),
                 "nature": pick.nature,
                 "bloodline": pick.bloodline,
                 "iv": dict(pick.iv),
+                "trait": sp.trait_name,
             }
         )
     return roster

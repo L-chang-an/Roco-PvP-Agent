@@ -1,7 +1,14 @@
-"""14 个技能的**显式效果表**（`SkillEffect`）。引擎永不读 `desc`。
+"""14 个技能的**显式效果表**（`SkillEffect`）+ **P1 效果编译器**（batch-P1.json 125 技能）。
 
-这是「不做 DSL 编译器」的代价与边界：14 条手写，553 条时才需要编译器。
-效果参数**只**从本表读——引擎里出现正则就是设计事故（参考项目的
+引擎永不读 `desc`。两条效果来源：
+- `E0_EFFECTS`：14 条手写教学效果（`SkillEffect`）。
+- `P1_EFFECTS`：由 `compile_p1_effect` 从 P1 批次技能 desc 的**固定模式**编译生成——
+  纯伤害 / 纯防御 / 纯六维状态（P1 全部 125 条都应命中）。
+`battle_ready(name)` = 教学 ∪ P1（可对战白名单）。
+
+这是「不做 DSL 编译器」的代价与边界：教学 14 条手写，P1 125 条用固定模式编译，
+553 条时的任意 desc 仍不支持（`compile_p1_effect` 返回 None，battle_ready=False）。
+效果参数**只**从效果表读——引擎里出现正则就是设计事故（参考项目的
 `re.search(r"(\\d+)%")` 写进了 engine.py，减伤比例从 power 反推）。
 
 三条从 `mydocs/E0_skills.json` 读出来、必须落进代码的事实：
@@ -15,10 +22,13 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
-from .dataset import load_skills
+from .dataset import DataSource, RawSkill, load_skills
 
 
 class SkillCategory(str, Enum):
@@ -38,22 +48,65 @@ KIND_TO_CATEGORY: dict[str, SkillCategory] = {
 
 
 @dataclass(frozen=True)
+class SkillStatEffect:
+    """状态系一条目标效果（P1/P2）：目标 + 维度 + 模式 + 有符号层数。
+
+    层数沿用「1 层 = 10%(pct) 或 +10(flat)」记账单位；负层 = 减益。
+    `stat` 除六维外还可为特殊维度：
+      - "combo"：连击数buff（flat 1 层 = +1 连击；pct 1 层 = +10%）
+      - "lifesteal"：吸血buff（flat 1 层 = +100% 吸血）
+      - "energy_cost"：全技能能耗（正值 = 能耗+N → 内部 EnergyCostMod 层 -N）
+    """
+
+    target: str        # "self" | "foe"
+    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost
+    mode: str          # "pct" | "flat"
+    layers: int        # 有符号（-6 = -60% 等）
+
+
+@dataclass(frozen=True)
 class SkillEffect:
     """一个技能的全部结构化效果。引擎永不读 `desc`——desc 只用于展示与将来的提示词。
 
     注意防御系的减伤**本身就是应对效果**：`应对攻击时，减伤70%` 意味着对手没出攻击
     就什么也不发生。所以 `reduction_pct` 只在 `counter_vs` 命中时生效。
+
+    P2 连击/先手/资源扩展：
+      - `hits`：基础连击数（显式「N连击」；默认 1）。
+      - `combo_eligible`：是否受连击数buff加成——**带有连击描述的技能**才为 True
+        （负责人规则：常规连击数buff 1 层 = +1 连击；特性连击 buff 以特性描述为准，P2 无）。
+      - `priority`：先手修正（先手+N → 出手优先级 +N，常规技能为 0；同优先级比速度）。
+      - `self_energy_gain`/`energy_gain`：自己回复 N 能量（伤害后 / 状态后）。
+      - `heal_pct_self`：自己回复 X% 生命。
+      - `lifesteal_pct`：本次伤害吸血 X%。
+      - `steal_energy`：偷取敌方 N 能量。
+      - `bench_energy_gain`：场下（自己队伍后备）每只回复 N 能量。
+      - `buff_effects`：一次性目标效果（连击数/吸血/能耗 buff 或减益）。
+    `stat_effects`（P1/P2）：状态系每连击应用的目标效果列表；为空则走 E0 的
+    单 `stat/mode/layers` 旧字段（教学技能）。
     """
 
     category: SkillCategory
-    self_energy_gain: int = 0                # 抓挠系：自己回复 1 能量
-    reduction_pct: float = 0.0               # 防御系：应对命中时的减伤比例
-    stat: str = ""                           # 状态系：作用于哪个属性
-    mode: str = ""                           # "pct"（每层 10%）| "flat"（每层 +10）
-    layers: int = 0                          # 基础层数
+    hits: int = 1
+    combo_eligible: bool = False          # 受连击数buff加成（显式「N连击」描述）
+    combo_per_team_skill: str = ""        # 虫鸣类：队伍中每携带 1 个该技能，基础连击 +1
+    priority: int = 0                     # 先手修正（先手+N）
+    self_energy_gain: int = 0             # 伤害后自己回复 N 能量
+    energy_gain: int = 0                  # 状态后自己回复 N 能量
+    heal_pct_self: int = 0                # 自己回复 X% 生命
+    lifesteal_pct: int = 0                # 本次伤害吸血 X%
+    steal_energy: int = 0                 # 偷取敌方 N 能量
+    bench_energy_gain: int = 0            # 场下每只回复 N 能量
+    energy_foe_cost_ratio: float = 0.0    # 雾气环绕：回复 = 敌方当前在场精灵全部技能能耗 × 该比例（0.5）
+    reduction_pct: float = 0.0            # 防御系：应对命中时的减伤比例
+    stat: str = ""                        # 状态系：作用于哪个属性（旧单条路径）
+    mode: str = ""                        # "pct"（每层 10%）| "flat"（每层 +10）
+    layers: int = 0                       # 基础层数
     counter_vs: SkillCategory | None = None  # 应对哪一类
     counter_damage_mult: float = 1.0         # 攻击系应对成功时的伤害乘子
     counter_extra_layers: int = 0            # 状态系应对成功时的额外层数
+    stat_effects: tuple[SkillStatEffect, ...] = ()   # 状态系每连击应用
+    buff_effects: tuple[SkillStatEffect, ...] = ()   # 一次性目标效果（连击/吸血/能耗）
 
 
 E0_EFFECTS: dict[str, SkillEffect] = {
@@ -119,3 +172,283 @@ E0_EFFECTS: dict[str, SkillEffect] = {
 def category_of(skill) -> SkillCategory:
     """按 kind 推类别。效果表的键集合 == 技能表的键集合由测试钉死（双向包含）。"""
     return KIND_TO_CATEGORY[skill.kind]
+
+
+# ── P1 效果编译器（batch-P1.json：纯伤害 / 纯防御 / 纯六维状态）──────────────────
+P1_SKILLS_FILE = Path(__file__).resolve().parent / "data" / "p1_skills.json"
+
+# 属性名 → 英文 key。双攻/双防是复合（_expand_stats 里展开）。
+_STAT_NAMES: dict[str, str] = {
+    "物攻": "atk",
+    "魔攻": "sp_atk",
+    "物防": "def",
+    "魔防": "sp_def",
+    "速度": "speed",
+}
+
+
+def _expand_stats(text: str) -> tuple[str, ...]:
+    """属性名序列 → 英文 key 元组。容忍「物攻和魔攻」「魔攻魔防」「双攻」等写法。
+
+    先把 双攻/双防 展开，剥掉 和/，再贪心按 2 字符统计名扫描。
+    """
+    text = text.replace("双攻", "物攻魔攻").replace("双防", "物防魔防")
+    text = text.replace("和", "").replace("，", "").replace("、", "").replace(" ", "")
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        two = text[i:i + 2]
+        if two in _STAT_NAMES:
+            out.append(_STAT_NAMES[two])
+            i += 2
+        else:
+            raise ValueError(f"P1/P2 状态 desc 里未知属性名「{text[i:]}」。")
+    return tuple(out)
+
+
+def _stat_effect_from_value(stat: str, target: str, value: str) -> SkillStatEffect:
+    """`+140%` → pct +14 层；`-30`（无%）→ flat -3 层。P1/P2 数值全是 10 的倍数。"""
+    m = re.fullmatch(r"([+-])(\d+)(%?)", value)
+    if m is None:
+        raise ValueError(f"非法数值 token「{value}」。")
+    sign = 1 if m.group(1) == "+" else -1
+    num = int(m.group(2))
+    if num % 10:
+        raise ValueError(f"数值「{value}」不是 10 的倍数，无法换算成层数。")
+    mode = "pct" if m.group(3) == "%" else "flat"
+    return SkillStatEffect(target=target, stat=stat, mode=mode, layers=sign * num // 10)
+
+
+def _parse_stat_specs(content: str, target: str) -> list[SkillStatEffect]:
+    """解析 desc 去掉前缀后的部分，如「物攻和魔攻+140%」「物防+140%和速度-30」「魔攻魔防+10%，速度+10」。
+
+    以值 token（`[+-]\\d+%?`）为界：值之前的文字是该规格的统计名（可 和/，连接），
+    每个统计名 × 该值生成一条 SkillStatEffect。
+    """
+    effects: list[SkillStatEffect] = []
+    pos = 0
+    for m in re.finditer(r"[+-]\d+%?", content):
+        stats_text = content[pos:m.start()].strip("和，、 ")
+        for stat in _expand_stats(stats_text):
+            effects.append(_stat_effect_from_value(stat, target, m.group()))
+        pos = m.end()
+    return effects
+
+
+def compile_p1_effect(skill: RawSkill) -> SkillEffect | None:
+    """P1 效果编译器：识别固定模式 → SkillEffect；未命中 → None（未支持）。
+
+    三个模式（P1 全部技能都应命中其一）：
+      - 纯伤害：desc 恰为「对敌方精灵造成物理/魔法伤害。」
+      - 纯防御：「减伤X%，应对攻击」
+      - 纯六维状态：「自己获得 / 敌方获得 …」（多目标/多维度经 stat_effects）
+    desc 推得的类别与 kind 矛盾（数据异常）→ None，不编译。
+    """
+    desc = skill.desc.strip().rstrip("。")
+    if desc in ("对敌方精灵造成物理伤害", "对敌方精灵造成魔法伤害"):
+        effect = SkillEffect(category=SkillCategory.ATTACK)
+    elif re.fullmatch(r"减伤\d+%，应对攻击", desc) is not None:
+        m = re.fullmatch(r"减伤(\d+)%，应对攻击", desc)
+        effect = SkillEffect(category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+                             reduction_pct=int(m.group(1)) / 100)
+    elif desc.startswith("自己获得") or desc.startswith("敌方获得"):
+        target = "self" if desc.startswith("自己获得") else "foe"
+        content = desc[len("自己获得"):] if target == "self" else desc[len("敌方获得"):]
+        stat_effects = _parse_stat_specs(content, target)
+        if not stat_effects:
+            return None
+        effect = SkillEffect(category=SkillCategory.STATUS, stat_effects=tuple(stat_effects))
+    else:
+        return None
+    expected = KIND_TO_CATEGORY.get(skill.kind)
+    if expected is not None and expected != effect.category:
+        return None   # desc 与 kind 矛盾：不编译（数据异常）
+    return effect
+
+
+# ── P2 效果编译器（连击 / 先手 / 吸血 / 能量 / 场下 / 每连击状态）─────────────────
+_DMG = r"(?:物伤|魔伤|物理伤害|魔法伤害)"
+
+
+def _finalize(effect: SkillEffect, skill: RawSkill) -> SkillEffect | None:
+    """desc 推得的类别与 kind 矛盾（数据异常）→ None，不编译。"""
+    expected = KIND_TO_CATEGORY.get(skill.kind)
+    if expected is not None and expected != effect.category:
+        return None
+    return effect
+
+
+def _attack(skill: RawSkill, **kw) -> SkillEffect | None:
+    return _finalize(SkillEffect(category=SkillCategory.ATTACK, **kw), skill)
+
+
+def _status(skill: RawSkill, **kw) -> SkillEffect | None:
+    return _finalize(SkillEffect(category=SkillCategory.STATUS, **kw), skill)
+
+
+def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
+    """处理所有含「连击」描述的技能：连击伤害 / 连击buff / 每连击状态 / 虫鸣；歧义 → None。"""
+    # 虫鸣：队伍中每携带 1 个 X，本次技能连击数 +1
+    m = re.fullmatch(rf"造成{_DMG}，队伍中的精灵每携带1个(.+?)，本次技能连击数\+1", desc)
+    if m is not None:
+        return _attack(skill, hits=1, combo_eligible=True, combo_per_team_skill=m.group(1))
+    # 连击伤害：造成X，N连击
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True)
+    # 伤害 + 敌方连击数-N
+    m = re.fullmatch(rf"造成{_DMG}，敌方获得连击数([+-]\d+)", desc)
+    if m is not None:
+        return _attack(skill, buff_effects=(SkillStatEffect("foe", "combo", "flat", int(m.group(1))),))
+    # 状态：N连击，每次连击X（花炮 / 冰捆缚）
+    m = re.fullmatch(r"(\d+)连击，每次连击(.+)", desc)
+    if m is not None:
+        hits, per = int(m.group(1)), m.group(2)
+        if per.startswith("敌方获得全技能能耗"):
+            mm = re.fullmatch(r"敌方获得全技能能耗([+-]\d+)", per)
+            return _status(skill, hits=hits, combo_eligible=True,
+                           stat_effects=(SkillStatEffect("foe", "energy_cost", "flat", int(mm.group(1))),))
+        target = "self" if per.startswith("自己获得") else "foe"
+        content = per[len("自己获得"):] if target == "self" else per[len("敌方获得"):]
+        se_list = _parse_stat_specs(content, target)
+        if not se_list:
+            return None
+        return _status(skill, hits=hits, combo_eligible=True, stat_effects=tuple(se_list))
+    # 连击数buff：获得连击数+N%（暴风眼，无自己前缀）
+    m = re.fullmatch(r"获得连击数([+-]\d+)%", desc)
+    if m is not None:
+        return _status(skill, buff_effects=(SkillStatEffect("self", "combo", "pct", int(m.group(1)) // 10),))
+    # 连击数buff：自己获得连击数+N（热身运动）
+    m = re.fullmatch(r"自己获得连击数([+-]\d+)", desc)
+    if m is not None:
+        return _status(skill, buff_effects=(SkillStatEffect("self", "combo", "flat", int(m.group(1))),))
+    # 连击数buff：敌方获得连击数-N（耀眼）
+    m = re.fullmatch(r"敌方获得连击数([+-]\d+)", desc)
+    if m is not None:
+        return _status(skill, buff_effects=(SkillStatEffect("foe", "combo", "flat", int(m.group(1))),))
+    # 状态：自己获得X，N连击（三连破）——每连击应用 stat_effects，吃连击数buff（人工裁决 2026-08-25）
+    m = re.fullmatch(r"自己获得(.+?)，(\d+)连击", desc)
+    if m is not None:
+        return _status(skill, hits=int(m.group(2)), combo_eligible=True,
+                       stat_effects=tuple(_parse_stat_specs(m.group(1), "self")))
+    # 状态：敌方获得X，N连击（电离爆破）——每连击应用，吃连击数buff（人工裁决 2026-08-25）
+    m = re.fullmatch(r"敌方获得(.+?)，(\d+)连击", desc)
+    if m is not None:
+        return _status(skill, hits=int(m.group(2)), combo_eligible=True,
+                       stat_effects=tuple(_parse_stat_specs(m.group(1), "foe")))
+    return None
+
+
+def compile_effect(skill: RawSkill) -> SkillEffect | None:
+    """效果编译器（P1 ∪ P2）：识别固定模式 → SkillEffect；未命中 → None（未支持）。
+
+    含「连击」的 desc 走 P2 连击路径（含歧义拦截）；其余先试 P2 非连击模式（先手 /
+    吸血 / 能量 / 场下 / 每连击…），再兜底 P1 模式（纯伤害 / 纯防御 / 纯六维状态）。
+    """
+    desc = skill.desc.strip().rstrip("。")
+    if "连击" in desc:
+        return _compile_combo_effect(skill, desc)
+
+    # ── P2 非连击模式 ──
+    # 伤害 + 先手
+    m = re.fullmatch(rf"造成{_DMG}，先手([+-]\d+)", desc)
+    if m is not None:
+        return _attack(skill, priority=int(m.group(1)))
+    # 伤害 + 吸血
+    m = re.fullmatch(rf"造成{_DMG}，并吸血(\d+)%", desc)
+    if m is not None:
+        return _attack(skill, lifesteal_pct=int(m.group(1)))
+    # 伤害 + 自己回复 N 能量
+    m = re.fullmatch(rf"造成{_DMG}，自己回复(\d+)能量", desc)
+    if m is not None:
+        return _attack(skill, self_energy_gain=int(m.group(1)))
+    # 伤害 + 自己回复 N% 生命
+    m = re.fullmatch(rf"造成{_DMG}，自己回复(\d+)%生命", desc)
+    if m is not None:
+        return _attack(skill, heal_pct_self=int(m.group(1)))
+    # 伤害 + 为场下所有精灵回复 N 能量
+    m = re.fullmatch(rf"造成{_DMG}，为场下所有精灵回复(\d+)能量", desc)
+    if m is not None:
+        return _attack(skill, bench_energy_gain=int(m.group(1)))
+    # 状态：自己回复 N 能量 和 M% 生命，并获得 X（缓一缓）
+    m = re.fullmatch(r"自己回复(\d+)能量和(\d+)%生命，并获得(.+)", desc)
+    if m is not None:
+        return _status(skill, energy_gain=int(m.group(1)), heal_pct_self=int(m.group(2)),
+                       stat_effects=tuple(_parse_stat_specs(m.group(3), "self")))
+    # 状态：自己回复 N 能量，并获得 X（氧输送）
+    m = re.fullmatch(r"自己回复(\d+)能量，并获得(.+)", desc)
+    if m is not None:
+        return _status(skill, energy_gain=int(m.group(1)),
+                       stat_effects=tuple(_parse_stat_specs(m.group(2), "self")))
+    # 状态：自己回复 N% 生命 和 M 能量（根吸收）
+    m = re.fullmatch(r"自己回复(\d+)%生命和(\d+)能量", desc)
+    if m is not None:
+        return _status(skill, heal_pct_self=int(m.group(1)), energy_gain=int(m.group(2)))
+    # 状态：自己回复 N 能量（徒长）
+    m = re.fullmatch(r"自己回复(\d+)能量", desc)
+    if m is not None:
+        return _status(skill, energy_gain=int(m.group(1)))
+    # 状态：自己回复 N% 生命（休息回复）
+    m = re.fullmatch(r"自己回复(\d+)%生命", desc)
+    if m is not None:
+        return _status(skill, heal_pct_self=int(m.group(1)))
+    # 状态：为场下每个精灵回复 N 能量（富养化）
+    m = re.fullmatch(r"为场下每个精灵回复(\d+)能量", desc)
+    if m is not None:
+        return _status(skill, bench_energy_gain=int(m.group(1)))
+    # 状态：自己获得 N% 吸血（贪婪；1 层 = 100%）
+    m = re.fullmatch(r"自己获得(\d+)%吸血", desc)
+    if m is not None:
+        return _status(skill, buff_effects=(SkillStatEffect("self", "lifesteal", "flat", int(m.group(1)) // 100),))
+    # 状态：偷取敌方 N 能量（勾魂）
+    m = re.fullmatch(r"偷取敌方(\d+)能量", desc)
+    if m is not None:
+        return _status(skill, steal_energy=int(m.group(1)))
+    # 状态：回复能量 = 敌方当前在场精灵全部技能能耗的一半（雾气环绕；人工裁决 2026-08-25）
+    m = re.fullmatch(r"回复能量，回复值等于敌方技能总能耗的一半", desc)
+    if m is not None:
+        return _status(skill, energy_foe_cost_ratio=0.5)
+
+    # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
+    return compile_p1_effect(skill)
+
+
+def _load_p1_names() -> frozenset[str]:
+    """p1_skills.json（batch-P1 拷贝）的技能名集合——P1 批次的唯一锚点。"""
+    raw = json.loads(P1_SKILLS_FILE.read_text(encoding="utf-8"))
+    return frozenset(item["name"] for item in raw["skills"])
+
+
+# P1/P2 效果表：对批次里每个技能（技能数据取 FULL 权威表）用 compile_effect 编译；
+# P1 全命中 125、P2 命中 51（3 条歧义 desc 返回 None，测试钉死）。
+P1_EFFECTS: dict[str, SkillEffect] = {}
+for _name in sorted(_load_p1_names()):
+    _skill = load_skills(DataSource.FULL).get(_name)
+    if _skill is None:
+        continue
+    _effect = compile_effect(_skill)
+    if _effect is not None:
+        P1_EFFECTS[_name] = _effect
+
+P2_SKILLS_FILE = Path(__file__).resolve().parent / "data" / "p2_skills.json"
+
+
+def _load_p2_names() -> frozenset[str]:
+    """p2_skills.json（batch-P2 拷贝）的技能名集合——P2 批次的唯一锚点。"""
+    raw = json.loads(P2_SKILLS_FILE.read_text(encoding="utf-8"))
+    return frozenset(item["name"] for item in raw["skills"])
+
+
+P2_EFFECTS: dict[str, SkillEffect] = {}
+for _name in sorted(_load_p2_names()):
+    _skill = load_skills(DataSource.FULL).get(_name)
+    if _skill is None:
+        continue
+    _effect = compile_effect(_skill)
+    if _effect is not None:
+        P2_EFFECTS[_name] = _effect
+
+
+def battle_ready(name: str) -> bool:
+    """可对战白名单：教学效果表 ∪ P1 效果表 ∪ P2 效果表都覆盖的技能名。"""
+    return name in E0_EFFECTS or name in P1_EFFECTS or name in P2_EFFECTS

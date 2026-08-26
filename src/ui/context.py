@@ -9,7 +9,7 @@ import threading
 from collections import OrderedDict
 from uuid import uuid4
 
-from ..agent import ChatAgent
+from rock_pvp_agent.agent import ChatAgent
 
 MAX_SESSIONS = 64
 

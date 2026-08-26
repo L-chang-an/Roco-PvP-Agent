@@ -5,6 +5,10 @@
 - SSE 只支持 GET → message/session_id 走 query params（EventSource 无法带 body）。
 - 后台 daemon 线程跑 agent，事件经 queue.Queue 送回，asyncio.to_thread 阻塞读不堵事件循环。
 - 事件顺序契约：meta → thinking* → tool* → reply → done（meta 由本服务补发）。
+- 组队页：`/team` 静态页 + `/api/team/*` REST（见 routes_team.py）。
+
+注意：本包已提级为顶层 `ui`（原 `rock_pvp_agent.ui`），依赖 `rock_pvp_agent` 的
+agent/config 层走绝对导入。
 """
 
 import asyncio
@@ -19,9 +23,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..agent import EVENT_DONE, EVENT_REPLY, ChatAgent
-from ..config import Settings, get_settings
+from rock_pvp_agent.agent import EVENT_DONE, EVENT_REPLY, ChatAgent
+from rock_pvp_agent.config import Settings, get_settings
 from .context import ChatContext
+from .routes_battle import router as battle_router
+from .routes_team import router as team_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -160,10 +166,24 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/team")
+    def team_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "team.html")
+
+    @app.get("/battle")
+    def battle_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "battle.html")
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # ---------- 组队模式（精灵搜索 + 校验 + 队伍持久化，见 routes_team.py） ----------
+    app.include_router(team_router)
+
+    # ---------- 对战模式（人类 vs LLM，见 routes_battle.py） ----------
+    app.include_router(battle_router)
 
     return app
 
 
-# 模块底部实例：`uvicorn rock_pvp_agent.ui.server:app` 或 `python -m rock_pvp_agent.ui` 直接可用。
+# 模块底部实例：`uvicorn ui.server:app` 或 `python -m ui` 直接可用。
 app = create_chat_app(get_settings())

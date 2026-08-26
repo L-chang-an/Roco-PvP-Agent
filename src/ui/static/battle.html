@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- ============================================================
+  对战页（/battle）— 服务端直出静态页（见 ui/server.py 的 GET /battle）。
+  职责：人类玩家 vs LLM（测试期 = 固定回复 + 随机动作的假LLM）的交互对战。
+  结构：
+    - header：标题 + 顶部导航（聊天/组队/对战）
+    - #screen-build：准备阶段——选已存队伍（复用 /api/team/* 组队模块）+ 对局配置
+    - #screen-battle：战斗阶段——我方全量 / 敌方迷雾（血量%、能量、系别、特性、技能???）
+      + 行动面板（技能/换人/聚能/道具）+ 事件日志（含假LLM 回复行）+ 结果横幅
+    - #screen-records：对战记录（battles/ 目录）——加载轨迹 + 重放验证（逐回合 hash 比对）
+  数据来自 /api/team/*（组队复用）与 /api/battle/*（ui/routes_battle.py）；
+  迷雾口径由服务端 view/filter 决定，前端只渲染收到的字段。
+  脚本顺序：app.js（DOM 助手 escapeHtml）→ battle.js（对战逻辑）。
+============================================================ -->
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>对战 · Rock PVP Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>⚔️ 人机对战</h1>
+    <nav class="top-nav" aria-label="页面导航">
+      <a class="top-link" href="/">💬 聊天</a>
+      <a class="top-link" href="/team">🧩 组队</a>
+      <a class="top-link active" href="/battle">⚔️ 对战</a>
+    </nav>
+  </header>
+
+  <main id="battle-app">
+    <!-- ── 准备阶段：选队伍 + 配置 ── -->
+    <section id="screen-build">
+      <h2>准备对战</h2>
+      <div id="setup-grid">
+        <div class="panel" id="setup-a">
+          <h3>我方队伍</h3>
+          <select id="team-a-select" title="已保存的队伍（teams/ 目录）"></select>
+          <div id="team-a-preview" class="mini-roster"></div>
+          <a class="ghost" href="/team">去组队页新建 / 编辑队伍 →</a>
+        </div>
+        <div class="panel" id="setup-b">
+          <h3>对手（LLM）</h3>
+          <label class="radio"><input type="radio" name="opp" value="preset" checked> 固定预设（测试用）</label>
+          <label class="radio"><input type="radio" name="opp" value="saved"> 已存队伍</label>
+          <select id="team-b-select" disabled title="已保存的队伍（teams/ 目录）"></select>
+          <div id="team-b-preview" class="mini-roster"></div>
+          <div class="muted dim" id="preset-note">测试期 LLM 采用固定队伍配置（跨家族真数据队，规模随你选）。</div>
+        </div>
+        <div class="panel" id="setup-config">
+          <h3>对局配置</h3>
+          <div class="cfg-row"><label>规模</label><select id="team-size-select" title="每方可携带精灵数 3–6"></select></div>
+          <div class="cfg-row"><label>命数</label><select id="lives-select" title="每方命数 1..规模−1"></select></div>
+          <div class="cfg-row"><label>回合上限</label><input id="max-turns-input" type="number" value="20" min="1"></div>
+          <div class="cfg-row"><label>种子</label><input id="seed-input" placeholder="留空自动生成" title="同种子同轨迹，可复现"></div>
+          <button id="start-btn" class="primary">开始对战</button>
+          <div id="start-error" class="validate-box"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 战斗阶段 ── -->
+    <section id="screen-battle" class="hidden">
+      <div id="battle-toolbar">
+        <span id="battle-meta"></span>
+        <span id="phase-badge"></span>
+        <button id="quit-btn" class="ghost" title="返回准备阶段（当前对局保留在记录里）">返回准备</button>
+      </div>
+      <div id="battle-banner" class="hidden"></div>
+      <div id="battle-field">
+        <div class="team-panel" id="team-panel-a">
+          <h3>我方 <small class="muted">全量信息</small></h3>
+          <div class="side-info" id="side-info-a"></div>
+          <div id="units-a"></div>
+        </div>
+        <div class="team-panel foe" id="team-panel-b">
+          <h3>敌方（LLM）<small class="muted">迷雾：血量% · 能量 · 特性 · 已揭示技能</small></h3>
+          <div class="side-info" id="side-info-b"></div>
+          <div id="units-b"></div>
+        </div>
+      </div>
+      <div id="action-panel"></div>
+      <div id="battle-log" class="battle-log"></div>
+    </section>
+
+    <!-- ── 对战记录：轨迹 + 重放 ── -->
+    <section id="screen-records">
+      <h2>对战记录 <small class="muted">battles/ 目录，随机性可复现</small></h2>
+      <ul id="record-list" class="record-list"></ul>
+      <div id="record-detail"></div>
+    </section>
+  </main>
+
+  <div id="notice" class="notice" role="status"></div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/battle.js"></script>
+</body>
+</html>

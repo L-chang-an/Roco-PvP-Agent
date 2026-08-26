@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- ============================================================
+  组队页（/team）— 服务端直出静态页（见 ui/server.py 的 GET /team）。
+  职责：选将组队 + 技能池配置 + 血脉/个体值/性格 + 校验 + 保存/加载。
+  结构：
+    - header：标题 + 顶部导航（聊天/组队）+ 队伍规模选择 + 校验按钮
+    - #build-layout：三栏 #catalog-panel（精灵目录）/ #team-panel（槽位+编辑器+保存）
+      / #skill-panel（当前精灵技能池）
+  数据全部来自 /api/team/*（ui/routes_team.py），前端不自行计算规则；
+  脚本顺序：app.js（DOM 助手 escapeHtml）→ team.js（组队逻辑）。
+============================================================ -->
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>组队 · Rock PVP Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🧩 精灵组队</h1>
+    <nav class="top-nav" aria-label="页面导航">
+      <a class="top-link" href="/">💬 聊天</a>
+      <a class="top-link active" href="/team">🧩 组队</a>
+      <a class="top-link" href="/battle">⚔️ 对战</a>
+    </nav>
+    <div class="team-controls">
+      <label class="control-label">队伍规模
+        <select id="team-size-select" title="每方可携带精灵数（3–6，管理员规则）"></select>
+      </label>
+      <span id="team-count" class="muted"></span>
+      <button id="btn-validate" class="ghost" title="校验整队合法性（保存的闸门）">校验队伍</button>
+    </div>
+  </header>
+
+  <main id="build-layout">
+    <!-- 左：精灵目录（客户端过滤；BOSS 禁选；同家族冲突标黄） -->
+    <aside id="catalog-panel">
+      <h2>精灵目录 <small id="spirit-count"></small></h2>
+      <input id="spirit-search" type="search" placeholder="搜索名称 / 编号 / 系别…">
+      <div id="spirit-list" class="catalog-list"></div>
+    </aside>
+
+    <!-- 中：队伍槽位 + 槽位编辑器 + 校验结果 + 保存/加载 -->
+    <section id="team-panel">
+      <div id="roster-slots"></div>
+      <div id="slot-editor"></div>
+      <div id="validate-result" class="validate-box"></div>
+      <div id="save-panel">
+        <input id="save-path" type="text" placeholder="保存文件名（如 我的队伍.json）或绝对路径">
+        <button id="btn-save" class="primary" title="校验通过后保存">保存队伍</button>
+      </div>
+      <div id="load-panel">
+        <select id="saved-list" title="已保存的队伍（teams/ 目录）"></select>
+        <button id="btn-load" class="ghost">加载</button>
+        <button id="btn-delete" class="ghost" title="删除选中的已存队伍">删除</button>
+      </div>
+    </section>
+
+    <!-- 右：当前选中精灵的可学技能池（未实装置灰不可选） -->
+    <aside id="skill-panel">
+      <h2>技能池 <small id="skill-count"></small></h2>
+      <input id="skill-search" type="search" placeholder="搜索技能名…">
+      <div id="skill-list" class="catalog-list"></div>
+    </aside>
+  </main>
+
+  <div id="notice" class="notice" role="status"></div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/team.js"></script>
+</body>
+</html>

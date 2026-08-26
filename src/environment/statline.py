@@ -81,8 +81,10 @@ def calc_combat_stats(base: dict[str, int], iv: dict[str, int] | None = None,
         生命：    (1.7 × (种族值 + 个体值×3) + 70) × 性格修正 + 100
         其他五维：(1.1 × (种族值 + 个体值×3) + 50) × 性格修正 + 50
 
-    性格修正：命中提升项 ×1.20、命中降低项 ×0.90、其余 ×1.0；
-    未知性格（含「坦率」）回退中性而不抛。逐项 int() 向下取整。
+    输入：base=种族值六维（英文 key 的 int）；iv=个体值（缺省 0，每点 +3）；
+    nature=性格名（未知 → 中性不抛）。输出：最终六维 dict[str, int]（含 hp）。
+    结算顺序（负责人 2026-08-25 口径）：`raw` **先向下取整**，再乘性格修正（提升 ×1.20 /
+    降低 ×0.90 / 其余 ×1.0）、加平值（100/50），最后整体取整。
     """
     iv = iv or {}
     plus, minus = NATURE_BONUS.get(nature, ("", ""))
@@ -95,6 +97,7 @@ def calc_combat_stats(base: dict[str, int], iv: dict[str, int] | None = None,
         else:
             raw = _STAT_GROWTH_FACTOR * growth_value + _STAT_GROWTH_BASE
             flat = _STAT_FLAT_BASE
+        raw = int(raw)
         if key == plus:
             raw *= _NATURE_BONUS_RATE
         elif key == minus:
