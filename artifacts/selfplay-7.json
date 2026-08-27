@@ -1,0 +1,577 @@
+{
+  "version": 1,
+  "battle_id": "selfplay-7",
+  "saved_at": "step",
+  "seed": 7,
+  "players": {
+    "a": "fake_llm",
+    "b": "random"
+  },
+  "rules": {
+    "team_size": 3,
+    "skill_slots": 4,
+    "iv_max": 10,
+    "lives": 2,
+    "energy_max": 10,
+    "energy_start": 10,
+    "recharge_amount": 5,
+    "max_turns": 20,
+    "switch_priority": 99,
+    "item_priority": 99,
+    "item_before_main_action": true,
+    "stat_pct_per_layer": 0.1,
+    "stat_flat_per_layer": 10,
+    "stat_layer_cap": 99,
+    "damage_coefficient": 0.9,
+    "min_damage": 1
+  },
+  "team_a": [
+    {
+      "name": "迪莫",
+      "types": [
+        "光"
+      ],
+      "stats": {
+        "hp": 374,
+        "atk": 188,
+        "sp_atk": 188,
+        "def": 215,
+        "sp_def": 215,
+        "speed": 201
+      },
+      "skills": [
+        "闪光",
+        "猛烈撞击",
+        "防御",
+        "魔法增效"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "最好的伙伴"
+    },
+    {
+      "name": "喵喵",
+      "types": [
+        "草"
+      ],
+      "stats": {
+        "hp": 280,
+        "atk": 172,
+        "sp_atk": 172,
+        "def": 153,
+        "sp_def": 200,
+        "speed": 136
+      },
+      "skills": [
+        "休息回复",
+        "抓挠",
+        "棘突",
+        "扫尾"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "氧循环"
+    },
+    {
+      "name": "火花",
+      "types": [
+        "火"
+      ],
+      "stats": {
+        "hp": 289,
+        "atk": 192,
+        "sp_atk": 140,
+        "def": 161,
+        "sp_def": 147,
+        "speed": 185
+      },
+      "skills": [
+        "火苗",
+        "猛烈撞击",
+        "力量增效",
+        "火焰切割"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "助燃"
+    }
+  ],
+  "team_b": [
+    {
+      "name": "水蓝蓝",
+      "types": [
+        "水"
+      ],
+      "stats": {
+        "hp": 297,
+        "atk": 138,
+        "sp_atk": 183,
+        "def": 161,
+        "sp_def": 186,
+        "speed": 156
+      },
+      "skills": [
+        "拍击",
+        "防御",
+        "甩水",
+        "气泡"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "浸润"
+    },
+    {
+      "name": "鸭吉吉（蓬松的样子）",
+      "types": [
+        "普通"
+      ],
+      "stats": {
+        "hp": 401,
+        "atk": 204,
+        "sp_atk": 138,
+        "def": 160,
+        "sp_def": 149,
+        "speed": 215
+      },
+      "skills": [
+        "力量增效",
+        "猛烈撞击",
+        "扫尾",
+        "防御"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "挺起胸脯"
+    },
+    {
+      "name": "板板壳",
+      "types": [
+        "水"
+      ],
+      "stats": {
+        "hp": 283,
+        "atk": 130,
+        "sp_atk": 179,
+        "def": 170,
+        "sp_def": 189,
+        "speed": 149
+      },
+      "skills": [
+        "肥皂泡",
+        "防御",
+        "魔法增效",
+        "气泡"
+      ],
+      "nature": "坦率",
+      "bloodline": "",
+      "iv": {},
+      "trait": "缩壳"
+    }
+  ],
+  "winner": "a",
+  "done": true,
+  "turns": [
+    {
+      "turn": 1,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "1b322c3d7929648cef0ff1e6d2b20a32ba80fd757dfda03595757e13e292999f"
+    },
+    {
+      "turn": 2,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 2
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "36521a1db03c5767b047acc5573a11f1fd61738176a001c7681be7637c4d6fe7"
+    },
+    {
+      "turn": 3,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": "草魔法"
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "0bf41e5d12cd979e41e5241fe48999ac04ca86f7b534f25ad11d8781ca10c57a"
+    },
+    {
+      "turn": 4,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "recharge"
+        },
+        "item": "草魔法"
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "d4629eecee32898a3d54f55bdf57ea8374388e55cc322c638044f3d8e22aca1e"
+    },
+    {
+      "turn": 5,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "e00f5cd7c6a8ea60911f146d0ac39deba17b15aa3c008540a4afd89f19f5a729"
+    },
+    {
+      "turn": 6,
+      "decision_a": {
+        "action": {
+          "type": "recharge"
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "a9a5c6b3a86c94e67f81b64402f76f54706df9e8518cd06b45a015658c35db77"
+    },
+    {
+      "turn": 7,
+      "decision_a": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 0
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "fe79276c5f8476c6e8388e4ed4037fa85c2fa1eaa63d6a8cdd670e35c0735499"
+    },
+    {
+      "turn": 8,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 0
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "07960ba39d17ecc3cd8ff09d157af2b895eb58c46fa57e8cd66571675dbbd47d"
+    },
+    {
+      "turn": 9,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 2
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "14fb0e036b4b67d7570442c66d7aee8783f10505e3ea8e4c939c252cb3d75488"
+    },
+    {
+      "turn": 10,
+      "decision_a": {
+        "action": {
+          "type": "switch",
+          "value": 2
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "c514e4b0fbc2ba7001433f0e3c4e13569d228549748e0551ed9d3acac2eaa87b"
+    },
+    {
+      "turn": 11,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 0
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 0
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "1111c68c6ef774784e8075ecdbbce7602a634f48d220e1bb527e367050e1c8d2"
+    },
+    {
+      "turn": 12,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 2
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "d03d2d8995668e6f41a95c5357d4a75118a7710c3f7a939e3c1d3d6169c1b9d7"
+    },
+    {
+      "turn": 13,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 0
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "75c8b8d99cbe21f02a58fbffa43c9e81d757d18c060aa98d72b6673c99e50264"
+    },
+    {
+      "turn": 14,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "81d9629435a9fc0044076468fcb35d30beda5c74da118a34d5e86fccac7a9733"
+    },
+    {
+      "turn": 15,
+      "decision_a": {
+        "action": {
+          "type": "switch",
+          "value": 0
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "96072bc3eb55064a9f354118348c60de575712ba347ef9abea8c5a875dd758f3"
+    },
+    {
+      "turn": 16,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "400c8078c605390271076c16ee3e7c69ad3a2aaf73469a7485cd401a52ae27ee"
+    },
+    {
+      "turn": 17,
+      "decision_a": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 2
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "268828294a2ba0faa00b056278918e686071516c17f8b675074514e94f4bb031"
+    },
+    {
+      "turn": 18,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 1
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "0d0bdec7c4b80faafe647ccb3b32123c45cc569877851afce5a37e6a55fa9f65"
+    },
+    {
+      "turn": 19,
+      "decision_a": {
+        "action": {
+          "type": "recharge"
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "switch",
+          "value": 1
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "e81f34d92e98e1f826d40ca2ee605d5c06885909ab8e6ba4a8dca8c013011ab9"
+    },
+    {
+      "turn": 20,
+      "decision_a": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "decision_b": {
+        "action": {
+          "type": "skill",
+          "value": 3
+        },
+        "item": ""
+      },
+      "replace_a": null,
+      "replace_b": null,
+      "state_hash": "d60584cb56b8df095e542ff5e7856773b7bd350fb2e52edc94460baa5a3ef477"
+    }
+  ]
+}

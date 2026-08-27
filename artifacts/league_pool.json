@@ -1,0 +1,36 @@
+{
+  "builds": [
+    {
+      "name": "build-mirror-v0",
+      "prototype": "mirror",
+      "spirits": [
+        "迪莫",
+        "喵喵",
+        "火花"
+      ]
+    },
+    {
+      "name": "build-fast_attack-v0",
+      "prototype": "fast_attack",
+      "spirits": [
+        "火花",
+        "护主犬",
+        "电咩咩"
+      ]
+    }
+  ],
+  "payoff": {
+    "names": [
+      "build-mirror-v0",
+      "build-fast_attack-v0"
+    ],
+    "wins": {
+      "0:0": 0.5,
+      "1:1": 0.5
+    },
+    "games": {
+      "0:0": 1,
+      "1:1": 1
+    }
+  }
+}
