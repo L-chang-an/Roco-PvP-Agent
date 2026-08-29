@@ -272,5 +272,7 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | **反应管道 + 回合边界事件（2026-08-30）**：`pipeline.run` fixpoint 循环（Frame.domain_events 回传）；TurnStarted（携预估）/ TurnEnded | pipeline.py / domain.py / engine.py |
 | **印记与天气效果层（2026-08-30）**：MarkState/WeatherState 字段**零变更**（全复用 v2 落地字段）；marks.py/weather.py 效果目录 + 读钩子接线；印记槽规则（同种叠加/异种顶替/独立空间） | marks.py / weather.py / primitives.py |
 | **印记/天气技能入口（2026-08-30）**：MW_EFFECTS 白名单 24 条（P1∪P2∪MW = 203）；valid_skills.json 重新生成（`scripts/build_valid_skills.py`，check 口径改动态） | skillbook.py / scripts/ |
+| **DOT 结算（2026-08-30 拍板）**：六状态层施加与结算（statuses.py 单一事实源）；属性免疫（火免疫灼烧/草免疫寄生/毒免疫中毒，施加层拦截，**中毒印记不受影响**）；灼烧（火）/中毒（毒）/引电（电）伤害吃属性克制、寄生真实伤害吸血；灼烧减半向下取整归零移除；引电达 2 层即时 25% 扣 2 留余 | statuses.py / reducer.py |
+| **DOT 技能入口（2026-08-30）**：ST_EFFECTS 白名单 14 条（P1∪P2∪MW∪ST = 217）；valid_skills.json 重新生成 | skillbook.py / scripts/ |
 
 **待负责人确认**：① 六维公式口径（`_STAT_GROWTH_BASE` 10 vs 50）；② roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
