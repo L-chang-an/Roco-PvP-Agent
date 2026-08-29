@@ -406,8 +406,10 @@ def end_of_turn(state) -> list[dict]:
     """回合末时段执行点（v3 骨架 2026-08-30）：构造 TurnEnded → 反应管道。
 
     属于当前回合的结算时段（在 `turn += 1` **之前**）；TurnEnded 反应收集序 =
-    天气（暴风雪/雷鸣）→ 印记（光合/中毒），效果先结算、再天气递减过期
-    （`weather.tick`）。DOT 造成回合末阵亡的补位由 resolve_turn 开场兜底处理。
+    **DOT（中毒→灼烧→寄生）→ 印记（光合/中毒）→ 天气（暴风雪/雷鸣）**（2026-08-30
+    拍板：保持印记先于天气，DOT 插到最前；见 triggers.collect_reactions），效果先
+    结算、再天气递减过期（`weather.tick`）。DOT 造成回合末阵亡的补位由 resolve_turn
+    开场兜底处理。
     """
     frame = Frame()
     events, _domain = run(state, [], frame, unit=None,

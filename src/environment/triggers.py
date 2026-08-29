@@ -28,18 +28,20 @@ def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
                       energy_max: int = 10) -> list["Atom"]:
     """输入：DomainEvent + 施法者（+ 可选特性静态定义）；输出：新 Atom 列表。
 
-    **多源收集（2026-08-30 印记/天气批）**：特性（SKILL_RESOLVE，现状）→
-    印记（marks.collect：双方阵营按事件收集）→ 天气（weather.collect：TurnEnded）。
-    印记/天气收集需要 state（`state=None` 时跳过——测试 emit 直调兼容）。
-    `unit` 可为 None（TURN_END 等无单一施法者的事件）。
+    **多源收集**：特性（SKILL_RESOLVE）→ DOT（statuses）→ 印记（marks）→ 天气
+    （weather）——TURN_END 固定序 = DOT → 印记 → 天气（2026-08-30 拍板：保持印记
+    先于天气，DOT 插到最前）。印记/天气收集需要 state（`state=None` 时跳过——测试
+    emit 直调兼容）。`unit` 可为 None（TURN_END 等无单一施法者的事件）。
     """
     atoms: list["Atom"] = []
     if isinstance(event, SkillResolved) and unit is not None:
         atoms += _trait_atoms(state, event, unit, trait_defs, energy_max)
     if state is not None:
         from .marks import collect as collect_marks
+        from .statuses import collect as collect_statuses
         from .weather import collect as collect_weather
 
+        atoms += collect_statuses(state, event)
         atoms += collect_marks(state, event)
         atoms += collect_weather(state, event)
     return atoms

@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING
 
 from .atom import (
     AddModifier, ApplyMark, BenchEnergy, ConsumeMarkLayers, DealDamage,
-    FoeCostGain, GainEnergy, HealPct, Lifesteal, LoseEnergy, LoseHp,
-    RevealSkill, SetWeather, SpendEnergy, StealEnergy, TraitGain,
+    FoeCostGain, GainEnergy, HealFlat, HealPct, Lifesteal, LoseEnergy, LoseHp,
+    RevealSkill, SetModLayers, SetWeather, SpendEnergy, StealEnergy, TraitGain,
 )
 from .damage import apply_heal, apply_hp_loss
 from .domain import (DamageApplied, EnergyChanged, HpChanged, MarkChanged,
@@ -39,6 +39,7 @@ from .primitives import (
     apply_energy_cost_mod, apply_energy_gain, heal_pct, lifesteal_bonus,
 )
 from .models import StatModifier
+from .statuses import is_immune
 
 if TYPE_CHECKING:
     from .atom import Atom
@@ -135,6 +136,9 @@ def _add_stat_layers(unit, stat: str, mode: str, layers: int,
 
 def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
     u = atom.unit
+    if is_immune(u, atom.stat):
+        return []   # 属性免疫（2026-08-30 拍板）：火免疫灼烧/草免疫寄生/毒免疫中毒——
+    # 不落层、不发事件；中毒印记走 marks 路径不受影响
     if atom.stat == "energy_cost":
         total = apply_energy_cost_mod(u, layers=atom.layers, permanent=False,
                                       trait=False, source=atom.source)
@@ -251,16 +255,52 @@ def _reduce_set_weather(state, atom: SetWeather, frame: Frame) -> list[dict]:
 
 
 def _reduce_lose_hp(state, atom: LoseHp, frame: Frame) -> list[dict]:
-    """印记/天气伤害：max_hp × pct% 经 apply_hp_loss 唯一漏斗；已阵亡跳过。"""
+    """印记/天气/DOT 伤害：max_hp × pct% × 克制（skill_type 非空时）经 apply_hp_loss
+    唯一漏斗，出口 int() 一次；已阵亡跳过。"""
     u = atom.unit
     if u.fainted:
         return []
-    amount = int(u.max_hp * atom.pct / 100)
+    eff = 1.0
+    if atom.skill_type:
+        from .types import type_effectiveness
+
+        eff = type_effectiveness(atom.skill_type, u.types)
+    amount = int(u.max_hp * atom.pct / 100 * eff)
     loss = apply_hp_loss(state, u, amount, source=atom.source)
     frame.domain_events.append(HpChanged(u.id, u.current_hp + loss.applied,
                                          u.current_hp, atom.source))
     return [ev("damage", atom.side, attacker=atom.source, skill=atom.source,
                target=u.name, damage=loss.applied, target_hp_left=u.current_hp)]
+
+
+def _reduce_heal_flat(state, atom: HealFlat, frame: Frame) -> list[dict]:
+    """固定数值回复（寄生吸血）：apply_heal 漏斗（阵亡→0，applied=0 时静默）。"""
+    u = atom.unit
+    hr = apply_heal(state, u, atom.amount, source=atom.source)
+    if hr.applied == 0:
+        return []
+    frame.domain_events.append(HpChanged(u.id, u.current_hp - hr.applied,
+                                         u.current_hp, atom.source))
+    return [ev("heal", atom.side, unit=u.name, applied=hr.applied, overflow=hr.overflow,
+               hp=u.current_hp, source=atom.source)]
+
+
+def _reduce_set_mod_layers(state, atom: SetModLayers, frame: Frame) -> list[dict]:
+    """把 (stat, mode, 非永久) 记录设为指定层数，≤0 移除；发 StatModChanged
+    领域事件（引电链式触发读 total_layers）、不发展示事件。"""
+    u = atom.unit
+    for i, m in enumerate(u.stat_mods):
+        if m.stat == atom.stat and m.mode == atom.mode and not m.permanent:
+            if atom.layers <= 0:
+                del u.stat_mods[i]
+                frame.domain_events.append(StatModChanged(
+                    u.id, atom.stat, atom.mode, 0, 0, atom.source))
+            else:
+                m.layers = atom.layers
+                frame.domain_events.append(StatModChanged(
+                    u.id, atom.stat, atom.mode, 0, m.layers, atom.source))
+            return []
+    return []
 
 
 def _reduce_lose_energy(state, atom: LoseEnergy, frame: Frame) -> list[dict]:
@@ -301,6 +341,8 @@ _DISPATCH: dict[type, object] = {
     LoseHp: _reduce_lose_hp,
     LoseEnergy: _reduce_lose_energy,
     ConsumeMarkLayers: _reduce_consume_mark,
+    HealFlat: _reduce_heal_flat,
+    SetModLayers: _reduce_set_mod_layers,
 }
 
 

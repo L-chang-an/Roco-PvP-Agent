@@ -165,11 +165,40 @@ class SetWeather:
 
 @dataclass(frozen=True)
 class LoseHp:
-    """按 max_hp 百分比失去生命（印记/天气伤害，经 apply_hp_loss 唯一漏斗）。"""
+    """按 max_hp 百分比失去生命（印记/天气/DOT 伤害，经 apply_hp_loss 唯一漏斗）。
+
+    `skill_type`：非空 = 伤害吃属性克制抵抗（中毒/灼烧/引电）；空串 = 真实伤害（寄生）。
+    """
 
     side: str
     unit: "Unit"
     pct: int            # 百分比整数（如 3 = 失去 3% max_hp）
+    source: str
+    skill_type: str = ""    # 伤害系别（吃克制）；"" = 真实伤害
+
+
+@dataclass(frozen=True)
+class HealFlat:
+    """按固定数值回复（寄生吸血：回复量 = 固定扣血量，不吃克制）。"""
+
+    side: str
+    unit: "Unit"
+    amount: int
+    source: str
+
+
+@dataclass(frozen=True)
+class SetModLayers:
+    """把一条 stat_mods 记录设为指定层数（≤0 → 移除）。
+
+    灼烧减半 / 引电扣层用；发 StatModChanged 领域事件、**不发展示事件**（层数变化
+    经 view.stat_mods 可见，与 TraitGain 同口径）。
+    """
+
+    unit: "Unit"
+    stat: str
+    mode: str
+    layers: int
     source: str
 
 
@@ -213,4 +242,5 @@ Atom: TypeAlias = (
     SpendEnergy | RevealSkill | DealDamage | HealPct | AddModifier
     | GainEnergy | BenchEnergy | Lifesteal | StealEnergy | FoeCostGain | TraitGain
     | ApplyMark | SetWeather | LoseHp | LoseEnergy | ConsumeMarkLayers
+    | HealFlat | SetModLayers
 )
