@@ -86,12 +86,13 @@ def test_is_valid_nature() -> None:
 # ── 属性公式（真实公式；_BASE 为迪莫种族值，FULL 与 E0 逐字节一致）──
 _BASE = {"hp": 120, "atk": 80, "sp_atk": 80, "def": 105, "sp_def": 105, "speed": 92}
 
-# 手算口径：中性（iv 全 0、中性性格）下的公式值。
+# 手算口径：中性（iv 全 0、中性性格）下的公式值（⚠️ 2026-08-29：实现 _STAT_GROWTH_BASE=10，
+# docstring 写 50，待负责人拍板；以下按实现 10 计算）。
 #   hp: 1.7×120+70=274, +100 → 374
-#   atk/sp_atk: 1.1×80+50=138, +50 → 188
-#   def/sp_def: 1.1×105+50=165.5, +50 → 215（int(215.5)）
-#   speed: 1.1×92+50=151.2, +50 → 201（int(201.2)）
-_NEUTRAL_STATS = {"hp": 374, "atk": 188, "sp_atk": 188, "def": 215, "sp_def": 215, "speed": 201}
+#   atk/sp_atk: 1.1×80+10=98, +50 → 148
+#   def/sp_def: 1.1×105+10=125.5, +50 → 175
+#   speed: 1.1×92+10=111.2, +50 → 161
+_NEUTRAL_STATS = {"hp": 374, "atk": 148, "sp_atk": 148, "def": 175, "sp_def": 175, "speed": 161}
 
 
 def test_calc_neutral_formula() -> None:
@@ -101,19 +102,19 @@ def test_calc_neutral_formula() -> None:
 
 
 def test_calc_iv_adds_points() -> None:
-    """个体值每点折合 +3：atk = 1.1×(80+10×3)+50+50 = 221.0 → 221。"""
+    """个体值每点折合 +3：atk = 1.1×(80+10×3)+10 +50 = 131+50 = 181。"""
     out = calc_combat_stats(_BASE, iv={"atk": 10})
-    assert out["atk"] == 221
+    assert out["atk"] == 181
     assert out["hp"] == 374  # 其余项不受影响
 
 
 def test_calc_nature_changes_values() -> None:
     out = calc_combat_stats(_BASE, nature="加攻击减速度")  # 升 atk +20%、降 speed −10%
-    # 口径（负责人 2026-08-25 改公式：先对 raw 取整，再乘性格修正、加平值，最后再取整）：
-    #   atk: int(int(1.1×80+50)×1.2)+50 = int(138×1.2)+50 = 165+50... 实际 int(165.6+50)=215
-    #   speed: int(int(1.1×92+50)×0.9)+50 = int(151×0.9)+50 = int(135.9+50) = 185
-    assert out["atk"] == 215
-    assert out["speed"] == 185
+    # 口径（实现：先对 raw 取整，再乘性格修正、加平值，最后再取整；_STAT_GROWTH_BASE=10）：
+    #   atk: int(int(1.1×80+10)×1.2)+50 = int(117.6)+50 = 167
+    #   speed: int(int(1.1×92+10)×0.9)+50 = int(100.08)+50 = 149
+    assert out["atk"] == 167
+    assert out["speed"] == 149
     assert out["hp"] == 374     # 中性项不变
 
 

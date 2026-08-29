@@ -73,7 +73,7 @@ def test_e3_whiteboard_trait_spirit_fields() -> None:
         rng=BattleRng(7), rules=replace(rules, team_size=1),
     )
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert units["迪莫"].stat_mods == [] and units["迪莫"].energy_cost_mods == []
+    assert units["迪莫"].stat_mods == [] and units["迪莫"].trait.gains == []
     assert any(e["type"] == "damage" for e in events)
 
 

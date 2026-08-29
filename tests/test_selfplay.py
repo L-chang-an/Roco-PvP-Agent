@@ -33,8 +33,8 @@ from fakes import AlwaysToolLLM
 from rosters import spec
 
 # E4 敌方单位白名单（view.py 口径）：其余一律屏蔽。
-FOG_WHITELIST = {"name", "types", "hp_pct", "energy", "fainted", "trait", "skills",
-                 "stat_mods", "energy_cost_mods"}
+FOG_WHITELIST = {"id", "name", "types", "hp_pct", "energy", "fainted", "trait", "skills",
+                 "stat_mods"}
 
 
 # ---------- 自博弈 ----------

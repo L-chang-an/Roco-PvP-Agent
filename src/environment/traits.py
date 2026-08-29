@@ -60,8 +60,8 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
         name="浸润",
         bindings=(
             EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_water", effects=(
-                # 使用水系技能后，全技能能耗 −1（可叠层，非永久离场清除）
-                Effect("energy_cost_mod", layers=1, trait=True, permanent=False),
+                # 使用水系技能后，全技能能耗 −1（层数 = 能耗修正值 -1，可叠层，非永久离场清除）
+                Effect("energy_cost_mod", layers=-1, trait=True, permanent=False),
             )),
         ),
     ),

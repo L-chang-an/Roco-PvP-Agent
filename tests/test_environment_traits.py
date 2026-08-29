@@ -17,7 +17,7 @@ from environment.dataset import DataSource
 from environment.engine import execute_turn
 from environment.hooks import Hook, emit
 from environment.models import (
-    BattleRng, BattleState, EnergyCostMod, SideState, Skill, TraitState, Unit,
+    BattleRng, BattleState, SideState, SkillInstance, StatModifier, TraitState, Unit,
     _unit_from_dict, _unit_to_dict, build_unit,
 )
 from environment.primitives import apply_energy_cost_mod, dispel_gains, skill_energy_cost
@@ -29,17 +29,28 @@ from environment.traits import (
 )
 
 
-def _skill(name: str, s_type: str, *, power: int = 60, cost: int = 3) -> Skill:
-    return Skill(name=name, kind="物攻", type=s_type, power=power, energy_cost=cost,
-                 effect=SkillEffect(category=SkillCategory.ATTACK))
+def _skill(name: str, s_type: str, *, power: int = 60, cost: int = 3) -> SkillInstance:
+    """构造 SkillInstance（数据协议 v2：Unit.skills 存五要素）。
+
+    引擎按技能名查 P1∪P2 效果表（name 必须是 battle_ready 真实技能），但 power/cost 取
+    current_skills 的自定义值——所以这里用真实系别技能名 + 自定义数值即可精确控制。
+    """
+    return SkillInstance(name=name, desc="", type=s_type, kind="物攻", power=power, energy_cost=cost)
+
+
+def _equip(u: Unit, *skills: SkillInstance) -> None:
+    """给直构 Unit 装上技能（skills 基线 + current_skills 当前视图同步）。"""
+    u.skills = list(skills)
+    u.current_skills = list(skills)
 
 
 def _unit(name: str = "测试", s_type: str = "普通", *, hp: int = 100,
           energy: int = 10, trait: str | None = None) -> Unit:
+    stats = {"hp": hp, "atk": 80, "sp_atk": 80, "def": 80, "sp_def": 80, "speed": 80}
     return Unit(
-        name=name, types=[s_type],
-        stats={"hp": hp, "atk": 80, "sp_atk": 80, "def": 80, "sp_def": 80, "speed": 80},
-        skills=[], max_hp=hp, current_hp=hp, energy=energy,
+        id=f"a-0-{name}", name=name, types=[s_type],
+        base_stats=dict(stats), stats=dict(stats),
+        skills=[], current_skills=[], max_hp=hp, current_hp=hp, energy=energy,
         trait=TraitState(name=trait) if trait else None,
     )
 
@@ -91,22 +102,23 @@ def test_trait_defs_for_none_and_unknown() -> None:
 def test_zhuran_fire_skill_buffs_both_attacks() -> None:
     u = _unit("火花", "火", trait="助燃")
     _emit_skill(u, "火")
-    mods = {m.stat: m for m in u.stat_mods}
-    assert mods["atk"].layers == 2 and mods["sp_atk"].layers == 2
-    assert mods["atk"].mode == "pct" and mods["atk"].trait is True and mods["atk"].permanent is False
+    gains = {m.stat: m for m in u.trait.gains}
+    assert gains["atk"].layers == 2 and gains["sp_atk"].layers == 2
+    assert gains["atk"].mode == "pct" and gains["atk"].trait is True and gains["atk"].permanent is False
+    assert u.stat_mods == []                     # 特性增益在 trait.gains，不污染 stat_mods
 
 
 def test_zhuran_stacks_layers() -> None:
     u = _unit("火花", "火", trait="助燃")
     _emit_skill(u, "火")
     _emit_skill(u, "火")          # 叠层：单次 20% × 2
-    assert sum(m.layers for m in u.stat_mods if m.stat == "atk") == 4
+    assert sum(m.layers for m in u.trait.gains if m.stat == "atk") == 4
 
 
 def test_zhuran_ignores_other_types() -> None:
     u = _unit("火花", "火", trait="助燃")
     _emit_skill(u, "草")
-    assert u.stat_mods == []
+    assert u.trait.gains == [] and u.stat_mods == []
 
 
 # ── 喵喵·氧循环：用草系技能后 回复10%生命 ──
@@ -136,8 +148,9 @@ def test_yangxunhuan_ignores_non_grass() -> None:
 def test_jinrun_adds_cost_mod_after_water() -> None:
     u = _unit("水蓝蓝", "水", trait="浸润")
     _emit_skill(u, "水")
-    assert [m.layers for m in u.energy_cost_mods] == [1]
-    assert u.energy_cost_mods[0].trait is True and u.energy_cost_mods[0].permanent is False
+    cost_mods = [m for m in u.trait.gains if m.stat == "energy_cost"]
+    assert [m.layers for m in cost_mods] == [-1]          # 能耗修正值 −1 = 能耗−1
+    assert cost_mods[0].trait is True and cost_mods[0].permanent is False
     assert skill_energy_cost(u, 3) == 2
 
 
@@ -152,27 +165,29 @@ def test_jinrun_stacks_and_clamps_to_zero() -> None:
 def test_jinrun_ignores_non_water() -> None:
     u = _unit("水蓝蓝", "水", trait="浸润")
     _emit_skill(u, "火")
-    assert u.energy_cost_mods == []
+    assert u.trait.gains == []
 
 
 # ── 驱散 scope 覆盖能耗减益 ──
 def test_dispel_scopes_cover_energy_cost_mods() -> None:
     u = _unit("水蓝蓝", "水")
-    apply_energy_cost_mod(u, layers=1, trait=True, source="浸润")
-    apply_energy_cost_mod(u, layers=2, trait=False, source="水冷")
-    assert dispel_gains(u, scope="regular") == 2              # 只清常规 2 层
-    assert [m.layers for m in u.energy_cost_mods] == [1]
-    assert dispel_gains(u, scope="all") == 1                  # 连特性一起清
-    assert u.energy_cost_mods == []
+    apply_energy_cost_mod(u, layers=-1, trait=True, source="浸润")
+    apply_energy_cost_mod(u, layers=-2, trait=False, source="水冷")
+    assert dispel_gains(u, scope="regular") == -2             # 只清常规 2 层（能耗负层）
+    cost_mods = [m for m in u.stat_mods if m.stat == "energy_cost"]
+    assert [m.layers for m in cost_mods] == [-1]              # 特性标记的保留
+    assert dispel_gains(u, scope="all") == -1                 # 连特性一起清
+    assert [m for m in u.stat_mods if m.stat == "energy_cost"] == []
 
 
 # ── 序列化往返 / 旧快照 ──
-def test_energy_cost_mods_roundtrip() -> None:
+def test_trait_gain_energy_cost_roundtrip() -> None:
     u = _unit("水蓝蓝", "水", trait="浸润")
-    apply_energy_cost_mod(u, layers=3, trait=True, source="浸润")
+    u.trait.gains.append(StatModifier(stat="energy_cost", mode="flat", layers=-1,
+                                      permanent=False, trait=True, source="浸润"))
     r = _unit_from_dict(_unit_to_dict(u))
-    assert r.energy_cost_mods[0].layers == 3
-    assert r.energy_cost_mods[0].trait is True
+    gains = [m for m in r.trait.gains if m.stat == "energy_cost"]
+    assert gains[0].layers == -1 and gains[0].trait is True
     assert r.trait.name == "浸润"
 
 
@@ -186,7 +201,8 @@ def test_legacy_snapshot_no_energy_cost_mods() -> None:
         # 无 "energy_cost_mods" 键（旧快照）
     }
     u = _unit_from_dict(d)
-    assert u.energy_cost_mods == []
+    assert [m for m in u.stat_mods if m.stat == "energy_cost"] == []
+    assert u.trait is None
 
 
 # ── roster → build_unit 的特性绑定 ──
@@ -243,31 +259,31 @@ def _battle(a: Unit, b: Unit, *, team_size: int = 1) -> BattleState:
 
 
 def test_engine_zhuran_fires_after_fire_skill() -> None:
-    fire = _skill("火苗", "火", power=10, cost=2)   # 低威力：不让沙包回合内阵亡，回合正常继续
+    fire = _skill("炎息", "火", power=10, cost=2)   # 真实火系 battle_ready；低威力不让沙包阵亡
     a = _unit("火花", "火", trait="助燃")
-    a.skills = [fire]
+    _equip(a, fire)
     b = _unit("沙包", "草")
     s = _battle(a, b)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    mods = {m.stat: m for m in a.stat_mods}
-    assert mods["atk"].layers == 2 and mods["sp_atk"].layers == 2
+    gains = {m.stat: m for m in a.trait.gains}
+    assert gains["atk"].layers == 2 and gains["sp_atk"].layers == 2
 
 
 def test_engine_zhuran_not_other_type() -> None:
-    grass = _skill("藤鞭", "草", cost=2)
+    grass = _skill("飞叶", "草", cost=2)
     a = _unit("火花", "火", trait="助燃")
-    a.skills = [grass]
+    _equip(a, grass)
     b = _unit("沙包", "水")
     s = _battle(a, b)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert a.stat_mods == []
+    assert a.trait.gains == []
 
 
 def test_engine_yangxunhuan_heals_after_grass_skill() -> None:
-    grass = _skill("藤鞭", "草", power=10, cost=2)   # 草打水被抵抗，低威力更稳
+    grass = _skill("飞叶", "草", power=10, cost=2)   # 草打水被抵抗，低威力更稳
     a = _unit("喵喵", "草", hp=100, trait="氧循环")
     a.current_hp = 50
-    a.skills = [grass]
+    _equip(a, grass)
     b = _unit("沙包", "水")
     s = _battle(a, b)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
@@ -275,33 +291,34 @@ def test_engine_yangxunhuan_heals_after_grass_skill() -> None:
 
 
 def test_engine_jinrun_reduces_next_skill_cost() -> None:
-    water = _skill("水枪", "水", power=10, cost=3)   # 低威力：两回合内沙包不阵亡，能量才是被测量
+    water = _skill("泡沫", "水", power=10, cost=3)   # 真实水系 battle_ready；低威力两回合不阵亡
     a = _unit("水蓝蓝", "水", energy=10, trait="浸润")
-    a.skills = [water]
+    _equip(a, water)
     b = _unit("沙包", "火")
     s = _battle(a, b)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert a.energy == 7                       # 第一发无减益，全价 3
-    assert a.energy_cost_mods[0].layers == 1
+    cost_mods = [m for m in a.trait.gains if m.stat == "energy_cost"]
+    assert cost_mods[0].layers == -1           # 浸润：能耗修正 −1
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert a.energy == 5                       # 第二发 3−1=2
 
 
 def test_engine_jinrun_opens_energy_gate() -> None:
-    water = _skill("水枪", "水", cost=3)
+    water = _skill("泡沫", "水", cost=3)
     a = _unit("水蓝蓝", "水", energy=2, trait="浸润")
-    a.skills = [water]
+    _equip(a, water)
     b = _unit("沙包", "火")
     s = _battle(a, b)
-    apply_energy_cost_mod(a, layers=1, trait=True, source="浸润")   # 能耗 3→2
+    apply_energy_cost_mod(a, layers=-1, trait=True, source="浸润")   # 能耗 3→2
     assert skill_block_reason(s, a, 0) is None                      # 2 ≥ 2 放行
 
 
 def test_engine_switch_clears_energy_cost_mods() -> None:
-    water = _skill("水枪", "水", cost=3)
+    water = _skill("泡沫", "水", cost=3)
     rules = replace(DEFAULT_RULES, team_size=2)
     a0 = _unit("水蓝蓝", "水", trait="浸润")
-    a0.skills = [water]
+    _equip(a0, water)
     a1 = _unit("候补", "普通")
     b0 = _unit("沙包", "火")
     b1 = _unit("沙包2", "火")
@@ -309,13 +326,14 @@ def test_engine_switch_clears_energy_cost_mods() -> None:
                     side_b=SideState(units=[b0, b1], lives=2),
                     rng=BattleRng(7), rules=rules)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert a0.energy_cost_mods[0].layers == 1
+    cost_mods = [m for m in a0.trait.gains if m.stat == "energy_cost"]
+    assert cost_mods[0].layers == -1
     events = execute_turn(s, Decision(switch_action(1)), Decision(recharge_action()))
-    assert a0.energy_cost_mods == []                  # 非永久随离场清除
+    assert [m for m in a0.trait.gains if m.stat == "energy_cost"] == []   # 非永久随离场清除
     sw = [e for e in events if e["type"] == "switch"][0]
-    assert sw["cleared_layers"] == 1
+    assert sw["cleared_layers"] == -1               # 清掉的是能耗修正 −1 层
     execute_turn(s, Decision(switch_action(0)), Decision(recharge_action()))
-    assert a0.energy_cost_mods == []                  # 清掉的不回来
+    assert [m for m in a0.trait.gains if m.stat == "energy_cost"] == []   # 清掉的不回来
 
 
 def test_trait_does_not_break_markov() -> None:
@@ -327,9 +345,9 @@ def test_trait_does_not_break_markov() -> None:
     """
     from environment.engine import step
 
-    scratch = _skill("抓挠", "普通", cost=2)   # 名字在 E0 技能表 → clone 可重建
+    scratch = _skill("抓挠", "普通", cost=2)   # 真实普通系 battle_ready → clone 可重建
     a = _unit("火花", "火", trait="助燃")
-    a.skills = [scratch]
+    _equip(a, scratch)
     b = _unit("沙包", "草")
     s = _battle(a, b)
     h = s.state_hash()
@@ -340,25 +358,25 @@ def test_trait_does_not_break_markov() -> None:
 
 # ── 白板特性的战斗行为（零效果）──
 def test_default_trait_produces_no_effects_in_battle() -> None:
-    """装白板的单位打满一回合：无任何特性增益（stat_mods / energy_cost_mods 全空）。"""
-    fire = _skill("火苗", "火", power=10, cost=2)
+    """装白板的单位打满一回合：无任何特性增益（stat_mods / trait.gains 全空）。"""
+    fire = _skill("炎息", "火", power=10, cost=2)
     a = _unit("未实现特性精灵", "火", trait=DEFAULT_TRAIT_NAME)
-    a.skills = [fire]
+    _equip(a, fire)
     b = _unit("沙包", "草")
     s = _battle(a, b)
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert a.stat_mods == [] and a.energy_cost_mods == []
-    assert b.stat_mods == [] and b.energy_cost_mods == []
+    assert a.stat_mods == [] and a.trait.gains == []
+    assert b.stat_mods == [] and (b.trait.gains if b.trait else []) == []
 
 
 def test_default_trait_matches_no_trait_behaviour() -> None:
     """白板 vs 无特性实例：战斗行为完全一致（白板只是显式占位）。"""
     def _run(trait_name):
-        fire = _skill("火苗", "火", power=10, cost=2)
+        fire = _skill("炎息", "火", power=10, cost=2)
         a = _unit("甲", "火", trait=trait_name)
         if trait_name is None:
             a.trait = None
-        a.skills = [fire]
+        _equip(a, fire)
         b = _unit("乙", "草")
         s = _battle(a, b)
         events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
@@ -381,7 +399,7 @@ def test_real_data_spirit_traits_equipped() -> None:
     # 迪莫(光)用闪光(光)打 喵喵(草)：eff 0.5 非克制 → 特性不触发 → 零增益
     s = _battle(units[0], units[1])
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert units[0].stat_mods == [] and units[0].energy_cost_mods == []
+    assert units[0].stat_mods == [] and units[0].trait.gains == []
 
 
 def test_default_trait_roundtrips() -> None:
@@ -393,9 +411,9 @@ def test_default_trait_roundtrips() -> None:
 # ── 迪莫「最好的伙伴」（S3）：造成克制伤害后 攻防速+20% 并回复 2 能量 ──
 def _dimo_battle(b_type: str):
     """迪莫(光)·最好的伙伴 用 闪光(光) 打 指定系别对手（1v1）。"""
-    light = _skill("闪光", "光", power=10, cost=1)
+    light = _skill("闪光", "光", power=10, cost=1)   # 真实光系 battle_ready
     a = _unit("迪莫", "光", energy=5, trait="最好的伙伴")
-    a.skills = [light]
+    _equip(a, light)
     b = _unit("靶子", b_type)
     s = _battle(a, b)
     return s, a, b
@@ -407,9 +425,10 @@ def test_dimo_trait_fires_on_counter_damage() -> None:
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     d = [e for e in events if e["type"] == "damage"][0]
     assert d["eff"] == 2.0
-    mods = {m.stat: m.layers for m in a.stat_mods}
+    mods = {m.stat: m.layers for m in a.trait.gains}
     assert mods == {"atk": 2, "sp_atk": 2, "def": 2, "sp_def": 2, "speed": 2}
-    assert all(m.trait for m in a.stat_mods)      # 特性增益（免疫常规驱散）
+    assert all(m.trait for m in a.trait.gains)      # 特性增益（免疫常规驱散）
+    assert a.stat_mods == []                        # 特性增益不污染 stat_mods
     assert a.energy == 5 - 1 + 2                  # 先付能耗 1，特性回 2
 
 
@@ -417,18 +436,18 @@ def test_dimo_trait_not_on_non_counter() -> None:
     """非克制伤害（eff 0.5）→ 特性不触发。"""
     s, a, _ = _dimo_battle("草")          # 光 打 草 → eff 0.5
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert a.stat_mods == [] and a.energy == 4   # 只付能耗，不触发
+    assert a.trait.gains == [] and a.energy == 4   # 只付能耗，不触发
 
 
 def test_dimo_trait_not_on_status_skill() -> None:
     """非攻击技能（聚能/状态）不可能造成克制伤害 → 不触发。"""
     light = _skill("闪光", "光", power=10, cost=1)
     a = _unit("迪莫", "光", energy=5, trait="最好的伙伴")
-    a.skills = [light]
+    _equip(a, light)
     b = _unit("靶子", "幽")
     s = _battle(a, b)
     execute_turn(s, Decision(recharge_action()), Decision(recharge_action()))   # 迪莫聚能
-    assert a.stat_mods == [] and a.energy == 10
+    assert a.trait.gains == [] and a.energy == 10
 
 
 def test_dimo_trait_stacks() -> None:
@@ -436,7 +455,7 @@ def test_dimo_trait_stacks() -> None:
     s, a, b = _dimo_battle("幽")
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
-    assert all(m.layers == 4 for m in a.stat_mods)   # 2 次 × 2 层
+    assert all(m.layers == 4 for m in a.trait.gains)   # 2 次 × 2 层
     # 换人 → 非永久特性增益离场清除
     rules = replace(DEFAULT_RULES, team_size=2)
     bench = _unit("候补", "普通")
@@ -445,4 +464,4 @@ def test_dimo_trait_stacks() -> None:
                      rng=BattleRng(7), rules=rules)
     s2.side_a.active = 0
     execute_turn(s2, Decision(switch_action(1)), Decision(recharge_action()))
-    assert a.stat_mods == []                     # 非永久增益随离场清除
+    assert a.trait.gains == []                   # 非永久特性增益随离场清除

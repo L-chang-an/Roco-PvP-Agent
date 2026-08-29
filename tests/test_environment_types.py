@@ -155,25 +155,24 @@ def test_bloodline_skill_type_must_match_bloodline() -> None:
 def test_e2_eff_and_stab_in_engine() -> None:
     """引擎按 unit.types/skill.type 算克制/STAB：火系精灵用火系技能打草系 → eff 2.0 + stab 1.25。
 
-    真实技能尚无效果表（P1 才做），这里手造 Skill 直接构造状态，白盒验证引擎计算。
+    数据协议 v2：Unit.skills 是 SkillInstance（五要素），引擎按名查 P1∪P2 效果表——
+    用真实 battle_ready 技能「火苗」（火系物攻）白盒验证引擎计算。
     """
     from dataclasses import replace
 
     from environment.actions import Decision, skill_action
     from environment.engine import execute_turn
     from environment.models import BattleState, BattleRng  # noqa: F401
-    from environment.models import SideState, Skill, Unit
+    from environment.models import SideState, SkillInstance, Unit
     from environment.rules import DEFAULT_RULES
-    from environment.skillbook import SkillCategory, SkillEffect
 
-    fire = Skill(name="测试火袭", kind="物攻", type="火", power=100, energy_cost=2,
-                 effect=SkillEffect(category=SkillCategory.ATTACK))
+    fire = SkillInstance(name="火苗", desc="", type="火", kind="物攻", power=100, energy_cost=2)
 
     def mk(name: str, types: list[str]) -> Unit:
         return Unit(name=name, types=types,
                     stats={"hp": 300, "atk": 100, "sp_atk": 100,
                            "def": 100, "sp_def": 100, "speed": 100},
-                    skills=[fire], max_hp=300, current_hp=300, energy=10)
+                    skills=[fire], current_skills=[fire], max_hp=300, current_hp=300, energy=10)
 
     rules = replace(DEFAULT_RULES, team_size=1)
     s = BattleState(side_a=SideState(units=[mk("炎龙", ["火"])], lives=2),
@@ -191,18 +190,16 @@ def test_engine_dual_type_caps_eff() -> None:
     from environment.actions import Decision, skill_action
     from environment.engine import execute_turn
     from environment.models import BattleState, BattleRng
-    from environment.models import SideState, Skill, Unit
+    from environment.models import SideState, SkillInstance, Unit
     from environment.rules import DEFAULT_RULES
-    from environment.skillbook import SkillCategory, SkillEffect
 
-    fire = Skill(name="测试火袭", kind="物攻", type="火", power=100, energy_cost=2,
-                 effect=SkillEffect(category=SkillCategory.ATTACK))
+    fire = SkillInstance(name="火苗", desc="", type="火", kind="物攻", power=100, energy_cost=2)
 
     def mk(name: str, types: list[str]) -> Unit:
         return Unit(name=name, types=types,
                     stats={"hp": 300, "atk": 100, "sp_atk": 100,
                            "def": 100, "sp_def": 100, "speed": 100},
-                    skills=[fire], max_hp=300, current_hp=300, energy=10)
+                    skills=[fire], current_skills=[fire], max_hp=300, current_hp=300, energy=10)
 
     rules = replace(DEFAULT_RULES, team_size=1)
     s = BattleState(side_a=SideState(units=[mk("炎龙", ["火"])], lives=2),

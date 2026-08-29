@@ -3,6 +3,11 @@
 引擎在固定时机 emit(hook, ctx, sources)，分发器收集来源（特性/技能/印记）中
 匹配该时机的绑定，条件通过后逐个执行效果原语。来源互不感知，只声明绑定。
 
+**v3 骨架 Phase 3**：`emit` 委托 `triggers.collect_reactions`（事件 → 新 Atom）+
+`reducer.reduce_all`（Atom → 状态）——特性效果不再由 Hook 直接改状态，而是走
+「事件 → Trigger 返回 Atom → Reducer 执行」管道。对外行为与旧直写路径逐位等价
+（`tests/test_v3_sentinel.py` 把关）。
+
 S1 只实现机制与三个钩子（SKILL_RESOLVE / STAT_CALC / EXIT），枚举预留全集——
 后续特性/印记按需接入，不改分发器形状。
 """
@@ -12,7 +17,7 @@ from __future__ import annotations
 from enum import Enum
 
 from .effects import Effect
-from .primitives import apply_energy_cost_mod, apply_energy_gain, apply_stat_mod, heal_pct
+from .models import StatModifier
 
 
 class Hook(str, Enum):
@@ -57,36 +62,29 @@ def _cond_matches(cond: str, ctx) -> bool:
     return bool(fn(ctx)) if callable(fn) else False
 
 
-def _apply_effect(state, ctx, effect: Effect, source: str) -> None:
-    """把一条 Effect 分发到对应原语。target="self" 用 ctx.unit（特性绑定单位）。"""
-    if effect.target != "self":
-        raise ValueError(f"S1 只支持 target='self'，实际 {effect.target!r}（效果 {effect.op}）")
+def emit(state, hook: str, ctx, trait_defs) -> None:
+    """在给定时机执行来源（特性）的全部命中绑定（**v3 Phase 3：委托触发器管道**）。
+
+    - 构造 `SkillResolved` 事件（skill 名 / dealt_counter 从 ctx 取）；
+    - `triggers.collect_reactions` 按绑定条件返回新 Atom（TraitGain / 资源即时）；
+    - `reducer.reduce_all` 执行（写 trait.gains，trait=True，免疫常规驱散）。
+
+    对外行为与旧「直接改 trait.gains」逐位等价（哨兵把关）。`state` 可为 None（测试直调）。
+    """
+    if hook != Hook.SKILL_RESOLVE.value:
+        return
+    from .domain import SkillResolved
+    from .reducer import Frame, reduce_all
+    from .triggers import collect_reactions
+
     unit = getattr(ctx, "unit", None)
     if unit is None:
-        raise ValueError(f"ctx 缺少 unit（效果 {effect.op}）")
-    if effect.op == "stat_mod":
-        apply_stat_mod(unit, stat=effect.stat, mode=effect.mode, layers=effect.layers,
-                       permanent=effect.permanent, trait=effect.trait, source=source)
-    elif effect.op == "energy_gain":
-        apply_energy_gain(unit, effect.value, energy_max=getattr(ctx, "energy_max", 10))
-    elif effect.op == "energy_cost_mod":
-        apply_energy_cost_mod(unit, layers=effect.layers, permanent=effect.permanent,
-                              trait=effect.trait, source=source)
-    elif effect.op == "heal_pct":
-        heal_pct(state, unit, int(effect.value), source=source)
-    else:
-        raise ValueError(f"未知效果原语：{effect.op}")
+        return
+    event = SkillResolved(unit_id=getattr(unit, "id", ""),
+                          skill=getattr(getattr(ctx, "skill", None), "name", ""),
+                          dealt_counter=bool(getattr(ctx, "dealt_counter", False)),
+                          skill_type=getattr(getattr(ctx, "skill", None), "type", ""))
+    atoms = collect_reactions(state, event, unit, trait_defs,
+                              energy_max=getattr(ctx, "energy_max", 10))
+    reduce_all(state, atoms, Frame())
 
-
-def emit(state, hook: str, ctx, trait_defs) -> None:
-    """在给定时机执行来源（特性）的全部命中绑定。
-
-    S1 提供机制；S2 由引擎在关键点调用（resolve_skill 结算后 / 离场 / 属性计算）。
-    trait_defs：本轮需要执行的特征静态定义列表（含 cond 匹配失败返回）。
-    """
-    for tdef in trait_defs:
-        for binding in tdef.bindings:
-            if binding.hook != hook or not _cond_matches(binding.cond, ctx):
-                continue
-            for effect in binding.effects:
-                _apply_effect(state, ctx, effect, source=tdef.name)

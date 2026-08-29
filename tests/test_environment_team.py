@@ -181,13 +181,15 @@ def test_build_roster_shape() -> None:
     roster = build_roster(_valid_picks())
     assert len(roster) == 3
     entry = roster[0]
-    assert set(entry) == {"name", "types", "stats", "skills", "nature", "bloodline", "iv", "trait"}
+    assert set(entry) == {"name", "types", "base_stats", "stats", "skills",
+                          "nature", "bloodline", "iv", "trait"}
     assert entry["name"] == "迪莫"
     assert entry["types"] == ["光"]
     assert entry["skills"] == ["闪光", "力量增效"]
-    # 中性口径（iv 全 0 / 坦率）下的真实公式值（FULL 迪莫 == E0 迪莫）
-    assert entry["stats"] == {"hp": 374, "atk": 188, "sp_atk": 188,
-                              "def": 215, "sp_def": 215, "speed": 201}
+    assert entry["base_stats"] == {"hp": 120, "atk": 80, "sp_atk": 80, "def": 105, "sp_def": 105, "speed": 92}
+    # 中性口径（iv 全 0 / 坦率）下的真实公式值（⚠️ 实现 _STAT_GROWTH_BASE=10，待负责人拍板）
+    assert entry["stats"] == {"hp": 374, "atk": 148, "sp_atk": 148,
+                              "def": 175, "sp_def": 175, "speed": 161}
     assert entry["nature"] == "坦率"
     assert entry["bloodline"] == ""
     assert entry["iv"] == {}
@@ -195,13 +197,13 @@ def test_build_roster_shape() -> None:
 
 
 def test_build_roster_applies_iv_and_nature() -> None:
-    """个体值与性格独立作用于公式（先取整 raw 再乘性格，负责人 2026-08-25 口径）：
-    atk = int(int(1.1×(80+30)+50)×1.2)+50 = int(171×1.2)+50 = 255。"""
+    """个体值与性格独立作用于公式（先取整 raw 再乘性格；⚠️ 实现 _STAT_GROWTH_BASE=10）：
+    atk = int(int(1.1×(80+30)+10)×1.2)+50 = int(131×1.2)+50 = 207。"""
     picks = _valid_picks()
     picks[0] = _pick("迪莫", iv={"atk": 10}, nature="加攻击减速度")
     entry = build_roster(picks)[0]
-    assert entry["stats"]["atk"] == 255
-    assert entry["stats"]["speed"] == 185  # int(int(1.1×92+50)×0.9)+50 = int(151×0.9)+50 = 185
+    assert entry["stats"]["atk"] == 207
+    assert entry["stats"]["speed"] == 149  # int(int(1.1×92+10)×0.9)+50 = int(111.2×0.9)+50 = 149
 
 
 def test_build_roster_bloodline_does_not_change_types() -> None:

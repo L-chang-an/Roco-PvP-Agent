@@ -176,10 +176,11 @@ def build_roster(picks: list[TeamPick], source: DataSource = DEFAULT_SOURCE,
     `rules`：管理员（E3 battle_config）可传自定义 team_size/lives，build_roster 按它校验
     （默认 DEFAULT_RULES）。
 
-    roster spec 的形状：
+    roster spec 的形状（数据协议 v2 §1.5，build_unit 吃它）：
         {"name": "迪莫",
          "types": ["光"],
-         "stats": {...},      # 已经是 calc_combat_stats 的输出
+         "base_stats": {...},   # 种族值（六维原始值）
+         "stats": {...},        # 已经是 calc_combat_stats 的输出
          "skills": ["闪光", "魔法增效"],
          "nature": "坦率", "bloodline": "", "iv": {},
          "trait": "最好的伙伴"}   # 特性名（build_unit 据此绑定 TraitState）
@@ -198,6 +199,7 @@ def build_roster(picks: list[TeamPick], source: DataSource = DEFAULT_SOURCE,
                 # 系别**恒为精灵自身系别**（影响克制/STAB）——血脉系别不改写 types，
                 # 它只决定可携带的血脉技能是哪个系（规则 2 校验，见 validate_team）。
                 "types": list(sp.types),
+                "base_stats": dict(sp.stats),      # 种族值（数据协议 v2：Unit.base_stats）
                 "stats": calc_combat_stats(sp.stats, pick.iv, pick.nature),
                 "skills": list(pick.skills),
                 "nature": pick.nature,

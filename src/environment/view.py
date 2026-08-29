@@ -8,9 +8,13 @@ viewer 的**己方全见**；敌方只可见白名单（负责人 2026-08-25，�
 - 敌方每只精灵的**特性描述**（name + desc，图鉴公开数据）；
 - **已揭示技能**（起始全未知；某精灵释放某技能后才揭示该技能详情，含 desc）；
 - **增减益层数**（E4 修正：双方阵营都有状态栏——常规增减益层数 / 特性层数 / 能耗减益，
-  `stat_mods` / `energy_cost_mods` 对敌方也输出；印记将来加）。
+  `stat_mods` + `trait.gains` 对敌方也输出；印记将来加）。
 
 其余（六维、性格、血脉、IV、绝对血量、道具次数、未揭示技能）一律不进敌方视图。
+
+**2026-08-29 数据协议 v2**：Unit 输出对齐新模型——含 `id`（unit_id）/ `base_stats`（种族值）/
+`skills`+`current_skills`（技能详情五要素 + cooldown）/ `trait{name,desc,kwargs,gains}`（特性增益转移到
+gains）；`energy_cost_mods` 字段取消（能耗减益已并入 stat_mods 的 stat="energy_cost"）。
 
 `mode="partial"` 是玩家唯一能看到的口径；`mode="global"` = `state.to_dict()`（引擎回放/CLI
 全量输出用）。本模块是**纯函数**：不写状态、不揭示、不发事件——揭示发生在 engine.resolve_skill。
@@ -27,35 +31,43 @@ def _hp_pct(unit) -> int:
     return unit.current_hp * 100 // unit.max_hp
 
 
-def _skill_dict(skill) -> dict:
-    """Skill → 前端完整技能卡片（详情含 desc——「技能详情描述」是揭示的内容）。"""
+def _skill_dict(s) -> dict:
+    """SkillInstance / Skill → 前端完整技能卡片（详情含 desc——「技能详情描述」是揭示的内容）。"""
     return {
-        "name": skill.name,
-        "type": skill.type,
-        "kind": skill.kind,
-        "power": skill.power,
-        "energy_cost": skill.energy_cost,
-        "desc": skill.desc,
-        "priority": skill.priority,
+        "name": s.name,
+        "type": s.type,
+        "kind": s.kind,
+        "power": s.power,
+        "energy_cost": s.energy_cost,
+        "desc": s.desc,
+        "cooldown": getattr(s, "cooldown", 0),
     }
 
 
 def _mod_dict(m) -> dict:
     return {"stat": m.stat, "mode": m.mode, "layers": m.layers,
-            "permanent": m.permanent, "source": m.source, "trait": m.trait}
+            "permanent": m.permanent, "source": m.source,
+            "desc": m.desc, "kwargs": dict(m.kwargs), "trait": m.trait}
 
 
-def _ecm_dict(m) -> dict:
-    return {"layers": m.layers, "permanent": m.permanent, "trait": m.trait, "source": m.source}
+def _trait_full(t) -> dict | None:
+    """己方特性：真实实例（name + desc + kwargs + 运行时增益 gains）。"""
+    if t is None:
+        return None
+    return {"name": t.name, "desc": t.desc, "kwargs": dict(t.kwargs),
+            "gains": [_mod_dict(m) for m in t.gains]}
 
 
 def _unit_full(u) -> dict:
-    """己方单位：全量（六维/技能详情/增益层/性格/血脉/IV/绝对血量）。"""
+    """己方单位：全量（六维/技能详情/增益层/性格/血脉/IV/绝对血量/种族值/冷却）。"""
     return {
+        "id": u.id,
         "name": u.name,
         "types": list(u.types),
+        "base_stats": dict(u.base_stats),
         "stats": dict(u.stats),
         "skills": [_skill_dict(s) for s in u.skills],
+        "current_skills": [_skill_dict(s) for s in u.current_skills],
         "nature": u.nature,
         "bloodline": u.bloodline,
         "iv": dict(u.iv),
@@ -64,8 +76,7 @@ def _unit_full(u) -> dict:
         "energy": u.energy,
         "fainted": u.fainted,
         "stat_mods": [_mod_dict(m) for m in u.stat_mods],
-        "energy_cost_mods": [_ecm_dict(m) for m in u.energy_cost_mods],
-        "trait": {"name": u.trait.name, "used_once": u.trait.used_once} if u.trait else None,
+        "trait": _trait_full(u.trait),
     }
 
 
@@ -86,10 +97,11 @@ def _unit_masked(u, revealed: set[tuple[int, str]], index: int) -> dict:
     """敌方单位：白名单字段。技能 = 已揭示的（详情）；未揭示的不出现（UI 显示 ？？？）。
 
     E4 修正（负责人 2026-08-25）：**增减益可见**——双方阵营都显示状态栏（常规增减益层数 /
-    特性层数 / 能耗减益；印记将来加），故 stat_mods / energy_cost_mods 对敌方也输出。
+    特性层数 / 能耗减益；印记将来加），故 stat_mods 对敌方也输出。
     其余（六维 / 性格 / 血脉 / IV / 绝对血量 / 道具次数）仍隐藏。
     """
     return {
+        "id": u.id,
         "name": u.name,
         "types": list(u.types),
         "hp_pct": _hp_pct(u),
@@ -98,7 +110,6 @@ def _unit_masked(u, revealed: set[tuple[int, str]], index: int) -> dict:
         "trait": _trait_info(u),
         "skills": [_skill_dict(s) for s in u.skills if (index, s.name) in revealed],
         "stat_mods": [_mod_dict(m) for m in u.stat_mods],
-        "energy_cost_mods": [_ecm_dict(m) for m in u.energy_cost_mods],
     }
 
 

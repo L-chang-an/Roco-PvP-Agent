@@ -91,11 +91,10 @@ def test_start_ok_and_snapshot_masked(client):
     assert b["ok"] and b["phase"] == "decision" and b["opponent"] == "fake_llm"
     assert b["seed"] == 42 and b["battle_id"].startswith("battle_")
     obs = b["observation"]
-    # 己方全量 / 敌方白名单（E4 修正：增减益可见 → 含 stat_mods / energy_cost_mods）
+    # 己方全量 / 敌方白名单（E4 修正：增减益可见 → 含 stat_mods）
     assert set(obs["me"]["units"][0]) >= {"stats", "max_hp", "current_hp", "skills", "nature"}
-    assert set(obs["opponent"]["units"][0]) == {"name", "types", "hp_pct", "energy",
-                                                "fainted", "trait", "skills", "stat_mods",
-                                                "energy_cost_mods"}
+    assert set(obs["opponent"]["units"][0]) == {"id", "name", "types", "hp_pct", "energy",
+                                                "fainted", "trait", "skills", "stat_mods"}
     assert obs["opponent"]["units"][0]["skills"] == []          # 敌方技能起始未知
     assert b["legal"] and b["legal_items"] == ["草魔法"]
 
@@ -145,9 +144,9 @@ def test_act_advances_turn(client):
     bid = b["battle_id"]
     r = client.post(f"/api/battle/{bid}/act", json={"action": b["legal"][0], "item": ""}).json()
     assert r["ok"] and r["turn"] > 1 and isinstance(r["events"], list)
-    assert set(r["observation"]["opponent"]["units"][0]) == {"name", "types", "hp_pct",
+    assert set(r["observation"]["opponent"]["units"][0]) == {"id", "name", "types", "hp_pct",
                                                              "energy", "fainted", "trait", "skills",
-                                                             "stat_mods", "energy_cost_mods"}
+                                                             "stat_mods"}
 
 
 def test_act_invalid_rejected_no_advance(client):

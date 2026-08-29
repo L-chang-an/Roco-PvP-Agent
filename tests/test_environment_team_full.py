@@ -130,12 +130,13 @@ def test_build_roster_full_shape() -> None:
     roster = build_roster(_valid_trio(), source=F)
     assert len(roster) == 3
     entry = roster[0]
-    assert set(entry) == {"name", "types", "stats", "skills", "nature", "bloodline", "iv", "trait"}
+    assert set(entry) == {"name", "types", "base_stats", "stats", "skills",
+                          "nature", "bloodline", "iv", "trait"}
     assert entry["name"] == "迪莫"
     assert entry["types"] == ["光"]          # 真实系别
-    # 迪莫中性六维 = 真实种族值公式：1.7×120+70+100=374；1.1×80+50+50=188 …
-    assert entry["stats"] == {"hp": 374, "atk": 188, "sp_atk": 188,
-                              "def": 215, "sp_def": 215, "speed": 201}
+    # 迪莫中性六维（⚠️ 实现 _STAT_GROWTH_BASE=10）：1.7×120+70+100=374；1.1×80+10+50=148 …
+    assert entry["stats"] == {"hp": 374, "atk": 148, "sp_atk": 148,
+                              "def": 175, "sp_def": 175, "speed": 161}
     assert entry["skills"] == ["闪光"] and entry["bloodline"] == ""
     assert entry["trait"] == "最好的伙伴"     # 特性名进入 roster（build_unit 据此绑定）
 

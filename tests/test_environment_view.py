@@ -30,13 +30,14 @@ def test_own_full_foe_masked() -> None:
     me = view["me"]
     foe = view["opponent"]
     # 己方全量
-    assert set(me["units"][0]) >= {"name", "types", "stats", "skills", "nature", "bloodline",
+    assert set(me["units"][0]) >= {"id", "name", "types", "base_stats", "stats", "skills",
+                                   "current_skills", "nature", "bloodline",
                                    "iv", "max_hp", "current_hp", "energy", "fainted",
-                                   "stat_mods", "energy_cost_mods", "trait"}
+                                   "stat_mods", "trait"}
     assert "item_uses" in me                     # 己方道具可见
-    # 敌方只留白名单（E4 修正：增减益可见 → 含 stat_mods / energy_cost_mods）
-    assert set(foe["units"][0]) == {"name", "types", "hp_pct", "energy", "fainted",
-                                    "trait", "skills", "stat_mods", "energy_cost_mods"}
+    # 敌方只留白名单（E4 修正：增减益可见 → 含 stat_mods）
+    assert set(foe["units"][0]) == {"id", "name", "types", "hp_pct", "energy", "fainted",
+                                    "trait", "skills", "stat_mods"}
     assert "item_uses" not in foe                # 敌方道具次数隐藏
     assert foe["lives"] is not None              # 敌方命数可见
     assert foe["active"] is not None             # 敌方在场下标可见

@@ -19,17 +19,14 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from .actions import Decision
-from .damage import apply_heal, apply_hp_loss, compute_damage
+from .compiler import compile_skill
+from .damage import apply_heal
 from .events import ev
 from .hooks import Hook, emit
-from .models import ActionType, BattleState, SIDES, Skill, StatModifier, Unit, aggregate_stats
-from .primitives import (
-    apply_energy_cost_mod, apply_energy_gain, combo_bonus, heal_pct, lifesteal_bonus,
-    skill_energy_cost,
-)
-from .skillbook import SkillCategory, SkillStatEffect
+from .models import ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats
+from .reducer import Frame, reduce_all
+from .skillbook import P1_EFFECTS, P2_EFFECTS, SkillCategory
 from .traits import trait_defs_for
-from .types import stab_multiplier, type_effectiveness
 
 
 @dataclass(frozen=True)
@@ -91,6 +88,22 @@ class QueuedEntry:
     speed: int           # 入队时 aggregate_stats(actor)["speed"]
 
 
+def _combat_skill(unit: Unit, idx: int) -> Skill | None:
+    """从 `unit.current_skills[idx]`（当前回合技能详情，SkillInstance）构建引擎 Skill。
+
+    数据协议 v2：Unit.skills / current_skills 只存五要素（无 effect）；引擎需要效果时
+    按技能名查 P1∪P2 效果表重建——五要素取**当前回合视图**（愿力替换 / 冷却后的能耗、
+    威力、类别以 current_skills 为准）。
+    """
+    inst = unit.current_skills[idx]
+    effect = P1_EFFECTS.get(inst.name) or P2_EFFECTS.get(inst.name)
+    if effect is None:
+        return None
+    return Skill(name=inst.name, kind=inst.kind, type=inst.type, power=inst.power,
+                 energy_cost=inst.energy_cost, effect=effect,
+                 priority=effect.priority, desc=inst.desc)
+
+
 def _declared_skill(state, side: str, dec: Decision):
     """读出该方声明的技能（非 skill 动作 / 槽位非法 → None）。防御性：直接调用
     execute_turn 时不会因非法槽位崩溃。"""
@@ -100,9 +113,9 @@ def _declared_skill(state, side: str, dec: Decision):
     if isinstance(idx, bool) or not isinstance(idx, int):
         return None
     unit = state.active(side)
-    if idx < 0 or idx >= len(unit.skills):
+    if idx < 0 or idx >= len(unit.current_skills):
         return None
-    return unit.skills[idx]
+    return _combat_skill(unit, idx)
 
 
 def build_turn_context(state, dec_a: Decision, dec_b: Decision) -> tuple[TurnContext, list[dict]]:
@@ -231,197 +244,38 @@ def resolve_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
     ]
 
 
-def _add_stat_layers(unit: Unit, stat: str, mode: str, layers: int,
-                     source: str, permanent: bool = False) -> int:
-    """层数合并进同 (stat, mode, permanent) 记录；返回合并后的总层数。"""
-    for m in unit.stat_mods:
-        if m.stat == stat and m.mode == mode and m.permanent == permanent:
-            m.layers += layers
-            return m.layers
-    unit.stat_mods.append(StatModifier(stat=stat, mode=mode, layers=layers,
-                                       permanent=permanent, source=source))
-    return layers
-
-
-def _apply_target_effect(tgt: Unit, se: SkillStatEffect, source: str) -> int:
-    """把一条 SkillStatEffect 作用到单位上：能耗 → energy_cost_mods；属性/连击/吸血 → stat_mods。
-
-    能耗减益（冰捆缚「全技能能耗+1」）：EnergyCostMod 层为 `-se.layers`（能耗读函数减层）。
-    返回该记录合并后的总层数。
-    """
-    if se.stat == "energy_cost":
-        return apply_energy_cost_mod(tgt, layers=-se.layers, permanent=False, trait=False, source=source)
-    return _add_stat_layers(tgt, se.stat, se.mode, se.layers, source)
-
-
-def effective_hits(state, unit: Unit, skill: Skill, side: str) -> int:
-    """技能的实际连击数：基础 hits + 连击数buff（flat/pct），夹到 ≥1。
-
-    - 虫鸣类（combo_per_team_skill）：基础 = 1 + 队内携带该技能的单位数。
-    - **只有「带有连击描述」的技能（combo_eligible）受连击数buff加成**（负责人规则：
-      常规连击数buff 1 层 = +1 连击；pct 1 层 = +10%）。
-    """
-    effect = skill.effect
-    base = effect.hits
-    if effect.combo_per_team_skill:
-        base += sum(1 for u in state.side(side).units
-                    if any(s.name == effect.combo_per_team_skill for s in u.skills))
-    if not effect.combo_eligible:
-        return max(1, base)
-    flat, pct = combo_bonus(unit)
-    return max(1, int((base + flat) * (1 + 0.10 * pct)))
-
-
 def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
-    """支付能量 → 按 effect.category 分三支：
-      攻击：按连击数逐发 compute_damage → apply_hp_loss → damage 事件（带 hit/hits），
-            每发后若目标阵亡即停；全部命中后结算一次性效果（回能量 / 回血 / 吸血 /
-            场下回能量 / 敌连击减益）。
-      防御：什么也不做 —— 减伤已在 build_turn_context 武装完毕。
-      状态：每连击应用 stat_effects（花炮/冰捆缚），再一次性应用 buff_effects（连击/
-            吸血 buff）与资源效果（回能量 / 回血 / 偷能量 / 场下回能量）。
-      三支之后：SKILL_RESOLVE 特性分发（一次技能恰好一次）。
+    """支付能量 → 按 effect.category 分三支（**v3 骨架：走 compiler + reducer**）。
+
+    攻击/防御/状态三支的全部效果逻辑从旧的内联 if/else 迁移到
+    `compiler.compile_skill`（技能 → Atom 列表）+ `reducer.reduce_all`（Atom → 事件）。
+    三支之后：SKILL_RESOLVE 特性分发（一次技能恰好一次）——特性触发仍走 emit（保留）。
+
+    骨架原则：**行为逐位等价**——事件流与 state_hash 与旧引擎完全一致
+    （`tests/test_v3_sentinel.py` 哨兵把关）。
     """
     side = entry.side
     idx = ctx.decision(side).action.get("value")
     unit = entry.actor
-    if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(unit.skills):
+    if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(unit.current_skills):
         return [ev("skipped", side, kind="main", unit=unit.name, reason="技能槽位非法")]
-    skill = unit.skills[idx]
-    effect = skill.effect
-    # 能量支付走能耗减益（水蓝蓝·浸润）——actions 门控与这里读同一个函数，付得起才算合法
-    unit.energy -= skill_energy_cost(unit, skill.energy_cost)
-    # E4 迷雾：技能**确实释放** → 该方该下标精灵的该技能名揭示（对手视角从此可见详情）。
-    # 同回合每方最多执行一次主动作（阵亡即回合结束），state.side(side).active 即释放者下标。
-    state.side(side).revealed.add((state.side(side).active, skill.name))
-
-    foe = "b" if side == "a" else "a"
-    events: list[dict] = []
-    dealt_counter = False
-    if effect.category == SkillCategory.ATTACK:
-        mult = effect.counter_damage_mult if ctx.counters(side) else 1.0
-        reduced = ctx.reduction(foe)
-        target = state.active(foe)
-        # E2：克制倍率 + STAB——纯函数显式入参，不读 ctx/state.types 之外的东西
-        eff = type_effectiveness(skill.type, target.types)
-        stab = stab_multiplier(skill.type, unit.types)
-        hits = effective_hits(state, unit, skill, side)
-        dealt_counter = eff > 1.0   # 克制判定：系数大于 1 才算（迪莫·最好的伙伴）
-        counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
-        total_dmg = 0
-        for i in range(1, hits + 1):
-            if target.fainted:
-                break   # 连击途中目标阵亡 → 剩余连击不再结算
-            dmg = compute_damage(state, unit, target, skill, counter_mult=mult, reduction=reduced,
-                                 effectiveness=eff, stab=stab)
-            loss = apply_hp_loss(state, target, dmg, source=skill.name)
-            total_dmg += loss.applied
-            events.append(ev(
-                "damage", side, attacker=unit.name, skill=skill.name, target=target.name,
-                damage=loss.applied, target_hp_left=target.current_hp,
-                counter=counter_cat, mult=mult, reduced=reduced, eff=eff, stab=stab,
-                hit=i, hits=hits,
-            ))
-        # ── 一次性效果 ──
-        if effect.self_energy_gain:
-            gained = apply_energy_gain(unit, effect.self_energy_gain,
-                                       energy_max=state.rules.energy_max)
-            events.append(ev("energy_gain", side, unit=unit.name, gained=gained, energy=unit.energy,
-                             source=skill.name, target="self"))
-        if effect.heal_pct_self:
-            hr = heal_pct(state, unit, effect.heal_pct_self, source=skill.name)
-            events.append(ev("heal", side, unit=unit.name, applied=hr.applied, overflow=hr.overflow,
-                             hp=unit.current_hp, source=skill.name))
-        lifesteal = effect.lifesteal_pct + 100 * lifesteal_bonus(unit)
-        if lifesteal > 0 and total_dmg > 0:
-            hr = apply_heal(state, unit, int(total_dmg * lifesteal / 100), source=skill.name)
-            events.append(ev("heal", side, unit=unit.name, applied=hr.applied, overflow=hr.overflow,
-                             hp=unit.current_hp, source=skill.name))
-        if effect.bench_energy_gain:
-            for bench in state.side(side).units:
-                if bench is unit or bench.fainted:
-                    continue
-                gained = apply_energy_gain(bench, effect.bench_energy_gain,
-                                           energy_max=state.rules.energy_max)
-                events.append(ev("energy_gain", side, unit=bench.name, gained=gained,
-                                 energy=bench.energy, source=skill.name, target="bench"))
-        for se in effect.buff_effects:
-            tgt = unit if se.target == "self" else state.active(foe)
-            total = _apply_target_effect(tgt, se, skill.name)
-            events.append(ev("stat_change", side, unit=tgt.name, skill=skill.name, stat=se.stat,
-                             mode=se.mode, layers=se.layers, total_layers=total,
-                             counter=counter_cat, target=se.target))
-    elif effect.category == SkillCategory.DEFENSE:
-        pass
-    elif effect.category == SkillCategory.STATUS:
-        counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
-        if effect.stat_effects:
-            # P1/P2 状态系：每连击应用（花炮 / 冰捆缚 / 缓一缓…）
-            hits = effective_hits(state, unit, skill, side)
-            for _ in range(hits):
-                for se in effect.stat_effects:
-                    tgt = unit if se.target == "self" else state.active(foe)
-                    total = _apply_target_effect(tgt, se, skill.name)
-                    events.append(ev("stat_change", side, unit=tgt.name, skill=skill.name,
-                                     stat=se.stat, mode=se.mode, layers=se.layers,
-                                     total_layers=total, counter=counter_cat, target=se.target))
-        elif effect.stat or effect.layers:
-            # E0 教学：单条自身状态
-            layers = effect.layers + (effect.counter_extra_layers if ctx.counters(side) else 0)
-            total = _add_stat_layers(unit, effect.stat, effect.mode, layers, skill.name)
-            events.append(ev("stat_change", side, unit=unit.name, skill=skill.name,
-                             stat=effect.stat, mode=effect.mode, layers=layers,
-                             total_layers=total, counter=counter_cat))
-        # ── 一次性 buff_effects（连击/吸血）──
-        for se in effect.buff_effects:
-            tgt = unit if se.target == "self" else state.active(foe)
-            total = _apply_target_effect(tgt, se, skill.name)
-            events.append(ev("stat_change", side, unit=tgt.name, skill=skill.name, stat=se.stat,
-                             mode=se.mode, layers=se.layers, total_layers=total,
-                             counter=counter_cat, target=se.target))
-        # ── 一次性资源效果 ──
-        if effect.energy_gain:
-            gained = apply_energy_gain(unit, effect.energy_gain, energy_max=state.rules.energy_max)
-            events.append(ev("energy_gain", side, unit=unit.name, gained=gained, energy=unit.energy,
-                             source=skill.name, target="self"))
-        if effect.heal_pct_self:
-            hr = heal_pct(state, unit, effect.heal_pct_self, source=skill.name)
-            events.append(ev("heal", side, unit=unit.name, applied=hr.applied, overflow=hr.overflow,
-                             hp=unit.current_hp, source=skill.name))
-        if effect.steal_energy:
-            foe_unit = state.active(foe)
-            gained = min(effect.steal_energy, foe_unit.energy)
-            foe_unit.energy -= gained
-            unit.energy = min(state.rules.energy_max, unit.energy + gained)
-            events.append(ev("steal", side, unit=unit.name, gained=gained, energy=unit.energy,
-                             foe=foe_unit.name, foe_energy=foe_unit.energy, source=skill.name))
-        if effect.energy_foe_cost_ratio > 0:
-            # 雾气环绕：回复 = 敌方当前在场精灵全部技能能耗 × 比例（一半）
-            foe_unit = state.active(foe)
-            foe_cost = sum(s.energy_cost for s in foe_unit.skills)
-            gained = apply_energy_gain(unit, int(foe_cost * effect.energy_foe_cost_ratio),
-                                       energy_max=state.rules.energy_max)
-            events.append(ev("energy_gain", side, unit=unit.name, gained=gained, energy=unit.energy,
-                             source=skill.name, target="self", from_foe_cost=foe_cost))
-        if effect.bench_energy_gain:
-            for bench in state.side(side).units:
-                if bench is unit or bench.fainted:
-                    continue
-                gained = apply_energy_gain(bench, effect.bench_energy_gain,
-                                           energy_max=state.rules.energy_max)
-                events.append(ev("energy_gain", side, unit=bench.name, gained=gained,
-                                 energy=bench.energy, source=skill.name, target="bench"))
-    # 特性：技能结算后统一分发（SKILL_RESOLVE）。特性只作用于本回合主动作使用者自身——
-    # ctx.unit 指向 entry.actor，条件（用了哪系 / 是否克制）由 emit 的谓词解析。
+    skill = _combat_skill(unit, idx)
+    if skill is None:
+        return [ev("skipped", side, kind="main", unit=unit.name, reason="技能效果未实装")]
+    # 技能 → Atom 列表 → 逐条执行（扣能量/揭示/伤害段/资源效果都在 reducer 里）
+    frame = Frame()
+    events = reduce_all(state, compile_skill(state, ctx, unit, skill, side), frame)
+    # 特性：技能结算后统一分发（SKILL_RESOLVE）。ctx.unit 指向 entry.actor，
+    # 条件（用了哪系 / 是否克制）由 emit 的谓词解析；dealt_counter 由 reducer 累计。
     emit(state, Hook.SKILL_RESOLVE,
-         SimpleNamespace(unit=unit, skill=skill, dealt_counter=dealt_counter,
+         SimpleNamespace(unit=unit, skill=skill, dealt_counter=frame.dealt_counter,
                          energy_max=state.rules.energy_max),
          trait_defs_for(unit))
     return events
 
 
 def resolve_switch(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
-    """改 active 下标 → **清除离场单位的全部非永久增益层**（属性 + 能耗减益）→ switch 事件带 cleared_layers。"""
+    """改 active 下标 → **清除离场单位的全部非永久增益层**（stat_mods + trait.gains）→ switch 事件带 cleared_layers。"""
     side = entry.side
     idx = ctx.decision(side).action.get("value")
     side_state = state.side(side)
@@ -429,9 +283,10 @@ def resolve_switch(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
         return [ev("skipped", side, kind="main", unit=entry.actor.name, reason="换人槽位非法")]
     old = side_state.active_unit
     cleared = sum(m.layers for m in old.stat_mods if not m.permanent)
-    cleared += sum(m.layers for m in old.energy_cost_mods if not m.permanent)
     old.stat_mods = [m for m in old.stat_mods if m.permanent]
-    old.energy_cost_mods = [m for m in old.energy_cost_mods if m.permanent]
+    if old.trait:
+        cleared += sum(m.layers for m in old.trait.gains if not m.permanent)
+        old.trait.gains = [m for m in old.trait.gains if m.permanent]
     side_state.active = idx
     new = side_state.active_unit
     return [ev("switch", side, out=old.name, **{"in": new.name}, cleared_layers=cleared)]
