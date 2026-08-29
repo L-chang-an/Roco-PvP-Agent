@@ -75,7 +75,7 @@ def _trait_info(u) -> dict:
     Unit.trait 是**已装备**特性（未实现 → 白板 default），而「特性描述」是图鉴数据；
     敌人名字可见 → 特性可查，故直接给图鉴的真实特性名 + 描述。
     """
-    for source in (DataSource.FULL, DataSource.VALID, DataSource.E0):
+    for source in (DataSource.FULL, DataSource.VALID):
         sp = load_spirits(source).get(u.name)
         if sp is not None and sp.trait_name:
             return {"name": sp.trait_name, "desc": sp.trait_desc}

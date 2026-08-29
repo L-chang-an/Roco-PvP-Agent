@@ -134,7 +134,9 @@
   function renderTeamSize() {
     const sel = $('#team-size-select');
     sel.innerHTML = '';
-    for (let n = S.config.team_size.min; n <= S.config.team_size.max; n++) {
+    const allowed = Array.isArray(S.config.team_size.allowed)
+      ? S.config.team_size.allowed : [S.config.team_size.default];
+    for (const n of allowed) {
       const opt = document.createElement('option');
       opt.value = n;
       opt.textContent = `${n}v${n}`;
@@ -489,20 +491,32 @@
     applyLoaded(r.j);
   }
 
-  /* 加载后的统一落地：按 team_size 恢复槽位 + 自动校验（历史队伍可能已失效）。 */
+  /* 加载后的统一落地：按 team_size 恢复槽位 + 自动校验（历史队伍可能已失效）。
+     历史 4v4/5v5 队伍（不再支持）→ 就近吸附到 3 或 6 + 提示。 */
   function applyLoaded(data) {
     const team = Array.isArray(data.team) ? data.team : [];
-    const size = Math.max(S.config.team_size.min,
-      Math.min(S.config.team_size.max,
-        Number(data.team_size) || team.length || S.config.team_size.min));
+    const allowed = Array.isArray(S.config.team_size.allowed)
+      ? S.config.team_size.allowed : [S.config.team_size.default];
+    let size = Number(data.team_size) || team.length || S.config.team_size.default;
+    let snapped = false;
+    if (!allowed.includes(size)) {
+      // 就近吸附：4→3、5→6；其余默认 3
+      const nearest = allowed.reduce((best, n) =>
+        Math.abs(n - size) < Math.abs(best - size) ? n : best, allowed[0]);
+      snapped = true;
+      size = nearest;
+    }
     S.selSlot = 0;
     const slots = [];
     for (let i = 0; i < size; i++) {
       const p = team[i];
       if (!p || typeof p !== 'object' || !S.spiritsByName[p.spirit]) { slots.push(null); continue; }
+      // 技能归一化：v1 存字符串数组，v2 存 {name,type,desc} 富化对象 → 都转回名字数组
+      const skillNames = (Array.isArray(p.skills) ? p.skills : []).map(
+        (x) => (typeof x === 'string' ? x : (x && x.name) || '')).filter(Boolean);
       slots.push({
         spirit: S.spiritsByName[p.spirit],
-        skills: Array.isArray(p.skills) ? p.skills.slice() : [],
+        skills: skillNames,
         bloodline: typeof p.bloodline === 'string' ? p.bloodline : '',
         nature: typeof p.nature === 'string' ? p.nature : '坦率',
         iv: sanitizeIv(p.iv),
@@ -513,7 +527,7 @@
     renderAll();
     refreshPool();
     validate();   // 加载即校验：未实装/家族冲突等会立即提示
-    flash(`已加载队伍（${size} 只）。`, 'ok');
+    flash(snapped ? `历史队伍规模已吸附到 ${size}v${size}（原 ${data.team_size} 不再支持）。` : `已加载队伍（${size} 只）。`, snapped ? 'warn' : 'ok');
   }
 
   async function deleteSelected() {

@@ -40,9 +40,9 @@ def test_learnable_bloodline_filtered_by_type() -> None:
 
 
 def test_e0_learnable_unchanged() -> None:
-    """E0 路径逐字节不变：选合法血脉才拓宽。"""
-    assert "撞击2" in learnable_skills("迪莫", "火")
-    assert "撞击2" not in learnable_skills("迪莫")
+    """（E0 已删）替代：默认源 FULL 的血脉拓宽语义。"""
+    assert "折线冲击" not in learnable_skills("迪莫")           # 无血脉 → 禁血脉技
+    assert "折线冲击" in learnable_skills("迪莫", "光")          # 光血脉 → 光系血脉技
 
 
 # ── 规则 1：同一家族只能入队一只 ──
@@ -123,12 +123,6 @@ def test_reports_all_rules_at_once() -> None:
     assert "道具「不存在道具」不存在" in joined
     assert "道具列表含重复项" in joined
     assert len(errs) >= 8
-
-
-def test_e0_rules_not_applied() -> None:
-    """E0 默认路径：首领/家族概念不存在，同名重复仍允许（判断 3）。"""
-    picks = [_t("迪莫", ["抓挠1", "加物攻"]), _t("迪莫", ["撞击", "防御"]), _t("小火猴", ["抓挠"])]
-    assert validate_team(picks, []) == []
 
 
 # ── build_roster（FULL）──

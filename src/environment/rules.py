@@ -39,5 +39,5 @@ DEFAULT_RULES = BattleRules()
 # 草魔法：回复当前在场精灵 50% 最大 HP（量 = max_hp // 2，夹取交给 apply_heal）。
 ITEM_HEAL_PCT = 0.5
 
-# 道具 → 每方每局可用次数。E0 只有一种道具。
-E0_ITEMS: dict[str, int] = {"草魔法": 1}
+# 道具 → 每方每局可用次数。
+ITEMS: dict[str, int] = {"草魔法": 1}

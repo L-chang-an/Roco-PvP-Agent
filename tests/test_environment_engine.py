@@ -35,39 +35,39 @@ def _solo(a_spec, b_spec, *, rules=RULES_1V1, seed: int = 7):
 
 # ── 伤害 ────────────────────────────────────────────────────────────────────
 def test_damage_neutral_exact() -> None:
-    """atk=100/def=100 抓挠1(power 80)：80×0.9 = 72。"""
-    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠1"]),
-              spec("守", 200, 100, 100, 100, 100, 100, ["抓挠1"]))
-    assert compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0]) == 72
+    """atk=100/def=100 抓挠(power 35)：35×0.9 = 31.5 → int 31。"""
+    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠"]),
+              spec("守", 200, 100, 100, 100, 100, 100, ["抓挠"]))
+    assert compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0]) == 31
 
 
 def test_damage_magic_uses_sp_atk_sp_def() -> None:
-    """撞击（魔攻）走 sp_atk/sp_def：物理防御再高也没用。"""
-    s = _solo(spec("攻", 200, 1, 100, 100, 100, 100, ["撞击"]),   # atk=1，但 spa=100
-              spec("守", 200, 1, 1, 999, 50, 100, ["撞击"]))     # def=999 高物防，sp_def=50
+    """拍击（魔攻）走 sp_atk/sp_def：物理防御再高也没用。"""
+    s = _solo(spec("攻", 200, 1, 100, 100, 100, 100, ["拍击"]),   # atk=1，但 spa=100
+              spec("守", 200, 1, 1, 999, 50, 100, ["拍击"]))     # def=999 高物防，sp_def=50
     dmg = compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0])
-    assert dmg == 108  # (100/50)×60×0.9
+    assert dmg == 117  # (100/50)×65×0.9 = 117
 
 
 def test_damage_power_zero_is_zero() -> None:
     s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["防御"]),
-              spec("守", 200, 1, 1, 1, 1, 1, ["撞击"]))
+              spec("守", 200, 1, 1, 1, 1, 1, ["拍击"]))
     assert compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0]) == 0
 
 
 def test_damage_single_truncation() -> None:
-    """只在出口 int() 一次：int(80×0.9×1.5×0.3) = int(32.4) = 32。"""
-    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠1"]),
-              spec("守", 200, 100, 100, 100, 100, 100, ["抓挠1"]))
+    """只在出口 int() 一次：int(35×0.9×1.5×0.3) = int(14.175) = 14。"""
+    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠"]),
+              spec("守", 200, 100, 100, 100, 100, 100, ["抓挠"]))
     dmg = compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0],
                          counter_mult=1.5, reduction=0.7)
-    assert dmg == 32
+    assert dmg == 14
     assert s.rng.calls == 0  # 纯函数：零 RNG
 
 
 def test_damage_overkill_clamps_and_faints() -> None:
-    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠1"]),
-              spec("守", 30, 1, 1, 1, 1, 1, ["撞击"]))
+    s = _solo(spec("攻", 200, 100, 100, 100, 100, 100, ["抓挠"]),
+              spec("守", 30, 1, 1, 1, 1, 1, ["拍击"]))
     dmg = compute_damage(s, s.active("a"), s.active("b"), s.active("a").skills[0])
     loss = apply_hp_loss(s, s.active("b"), dmg, source="测试")
     assert loss.applied == 30 and s.active("b").current_hp == 0 and loss.fainted
@@ -85,18 +85,11 @@ def test_source_scan_current_hp_writers() -> None:
     assert files <= {"damage.py", "models.py"}, writers
 
 
-# ── 应对三角 ────────────────────────────────────────────────────────────────
-def test_attack_counters_status_x15() -> None:
-    s = _battle()   # a [抓挠1, 加物攻, 防御]，b [撞击1, 加魔攻, 防御]
-    events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(1)))
-    d = [e for e in events if e["type"] == "damage"][0]
-    assert d["mult"] == 1.5 and d["counter"] == "状态" and d["side"] == "a"
-
-
+# ── 应对/防御（FULL 数据仅「防御」带 counter_vs=攻击，应对三角其余角无载体 → 已删）──
 def test_scratch_base_no_counter_bonus() -> None:
     """抓挠（基础款）没有应对子句：对手出状态也不加伤。"""
-    a = spec("小火猴", 300, 100, 100, 100, 100, 100, ["抓挠", "撞击1"])
-    b = spec("水蓝蓝", 300, 100, 100, 100, 100, 100, ["撞击", "加魔攻"])
+    a = spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠", "力量增效"])
+    b = spec("乙", 300, 100, 100, 100, 100, 100, ["拍击", "魔法增效"])
     s = new_battle([a], [b], seed=7, rules=RULES_1V1)
     events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(1)))
     d = [e for e in events if e["type"] == "damage"][0]
@@ -105,7 +98,7 @@ def test_scratch_base_no_counter_bonus() -> None:
 
 def test_defense_reduces_attack() -> None:
     s = _battle()
-    events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(2)))  # 抓挠1 vs 防御
+    events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(2)))  # 抓挠 vs 防御
     arm = [e for e in events if e["type"] == "reduce_arm" and e["side"] == "b"][0]
     d = [e for e in events if e["type"] == "damage"][0]
     assert arm["armed"] is True and arm["pct"] == 0.7
@@ -116,17 +109,10 @@ def test_defense_vs_status_white_guard_energy_paid() -> None:
     """防御遇状态：armed=False 白防，能量照扣（防御 cost=1）。"""
     s = _battle()
     b_unit = s.active("b")
-    events = execute_turn(s, Decision(skill_action(1)), Decision(skill_action(2)))  # 加物攻 vs 防御
+    events = execute_turn(s, Decision(skill_action(1)), Decision(skill_action(2)))  # 力量增效 vs 防御
     arm = [e for e in events if e["type"] == "reduce_arm" and e["side"] == "b"][0]
     assert arm["armed"] is False
     assert b_unit.energy == 10 - 1  # 防御 cost=1，白防也扣
-
-
-def test_status_counters_defense_extra_layers() -> None:
-    s = _battle()
-    events = execute_turn(s, Decision(skill_action(1)), Decision(skill_action(2)))  # 加物攻 vs 防御
-    sc = [e for e in events if e["type"] == "stat_change"][0]
-    assert sc["layers"] == 11 and sc["counter"] == "防御"   # 9 + 2 应对层
 
 
 def test_same_category_no_counter() -> None:
@@ -145,20 +131,21 @@ def test_counter_not_triggered_on_switch_or_recharge() -> None:
 
 
 # ── 增益层 ──────────────────────────────────────────────────────────────────
-def test_stat_first_9_layers() -> None:
+def test_stat_first_layer() -> None:
+    """力量增效（atk pct +100%，10 层）。"""
     s = _battle()
     events = execute_turn(s, Decision(skill_action(1)), Decision(recharge_action()))
     sc = [e for e in events if e["type"] == "stat_change"][0]
-    assert sc["layers"] == 9 and sc["total_layers"] == 9
+    assert sc["layers"] == 10 and sc["total_layers"] == 10
     assert sc["stat"] == "atk" and sc["mode"] == "pct"
 
 
-def test_stat_second_accumulates_18() -> None:
+def test_stat_second_accumulates_2() -> None:
     s = _battle()
     execute_turn(s, Decision(skill_action(1)), Decision(recharge_action()))
     events = execute_turn(s, Decision(skill_action(1)), Decision(recharge_action()))
     sc = [e for e in events if e["type"] == "stat_change"][0]
-    assert sc["layers"] == 9 and sc["total_layers"] == 18
+    assert sc["layers"] == 10 and sc["total_layers"] == 20
 
 
 def test_stat_layer_cap_clamp() -> None:
@@ -180,7 +167,7 @@ def test_speed_flat_80() -> None:
 def test_aggregate_does_not_write_back() -> None:
     s = _battle()
     unit = s.active("a")
-    unit.stat_mods.append(StatModifier(stat="atk", mode="pct", layers=9, source="加物攻"))
+    unit.stat_mods.append(StatModifier(stat="atk", mode="pct", layers=9, source="力量增效"))
     before = dict(unit.stats)
     aggregate_stats(unit)
     assert unit.stats == before
@@ -189,7 +176,7 @@ def test_aggregate_does_not_write_back() -> None:
 def test_switch_clears_nonpermanent_layers() -> None:
     s = new_battle(*mirror_pair(), seed=7)
     a_unit = s.active("a")
-    a_unit.stat_mods.append(StatModifier(stat="atk", mode="pct", layers=9, source="加物攻"))
+    a_unit.stat_mods.append(StatModifier(stat="atk", mode="pct", layers=9, source="力量增效"))
     a_unit.stat_mods.append(StatModifier(stat="def", mode="pct", layers=5,
                                          permanent=True, source="永久"))
     events = execute_turn(s, Decision(switch_action(1)), Decision(recharge_action()))
@@ -242,7 +229,7 @@ def test_item_with_switch_heals_leaving_unit() -> None:
     events = execute_turn(s, Decision(switch_action(1), item="草魔法"), Decision(recharge_action()))
     heal = [e for e in events if e["type"] == "heal"][0]
     sw = [e for e in events if e["type"] == "switch"][0]
-    assert heal["unit"] == sw["out"] == "迪莫" and sw["in"] == "小火猴"
+    assert heal["unit"] == sw["out"] == "迪莫" and sw["in"] == "喵喵"
 
 
 # ── 队列 ────────────────────────────────────────────────────────────────────
@@ -273,14 +260,14 @@ def test_turn_ends_on_first_faint() -> None:
     这是交互式补位（判断 9）的引擎侧语义：a 一回合 KO b 的在场，b 的主动作
     （actor 已死）被整体丢弃，不再有「继续结算」或 skipped。
     """
-    a = [spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠1", "加物攻", "防御"]),
-         spec("甲2", 300, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b = [spec("乙", 30, 1, 1, 1, 1, 50, ["撞击1", "加魔攻", "防御"]),
-         spec("乙2", 300, 100, 100, 100, 100, 100, ["撞击1"])]
+    a = [spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠", "力量增效", "防御"]),
+         spec("甲2", 300, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("乙", 30, 1, 1, 1, 1, 50, ["拍击", "魔法增效", "防御"]),
+         spec("乙2", 300, 100, 100, 100, 100, 100, ["拍击"])]
     s = new_battle(a, b, seed=7, rules=replace(RULES_1V1, team_size=2))
     events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(0)))
     types = [e["type"] for e in events]
-    # a 快（100>50）先出手一回合 KO 乙；抓挠1 回 1 能量 → energy_gain；b 的主动作被整体丢弃
+    # a 快（100>50）先出手一回合 KO 乙；抓挠 回 1 能量 → energy_gain；b 的主动作被整体丢弃
     assert types == ["damage", "energy_gain", "faint", "life_loss", "replace"]
     assert "skipped" not in types
     assert s.active("b").name == "乙2"   # execute_turn 默认补位第一个存活后备
@@ -297,10 +284,10 @@ def test_coin_only_on_cross_side_tie() -> None:
 # ── 终局 ────────────────────────────────────────────────────────────────────
 def test_faint_life_loss_replace_order() -> None:
     """阵亡 → faint → life_loss(−1) → 首个存活后备补位，三件事在一处。"""
-    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["撞击"])
-    b2 = spec("弱2", 200, 1, 1, 1, 1, 10, ["撞击"])
+    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["拍击"])
+    b2 = spec("弱2", 200, 1, 1, 1, 1, 10, ["拍击"])
     s = new_battle(a, [b1, b2], seed=7, rules=replace(RULES_1V1, team_size=2))
     events = execute_turn(s, Decision(skill_action(0)), Decision(skill_action(0)))
     types = [e["type"] for e in events]
@@ -313,10 +300,10 @@ def test_faint_life_loss_replace_order() -> None:
 def test_settle_then_replace_lives_drop_once() -> None:
     """settle_faints 只发 faint/life_loss 并返回需要补位的方；apply_replacement 补位
     后再 settle 不再掉命（一次阵亡只掉 1 命）。"""
-    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["撞击"])
-    b2 = spec("弱2", 200, 1, 1, 1, 1, 10, ["撞击"])
+    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["拍击"])
+    b2 = spec("弱2", 200, 1, 1, 1, 1, 10, ["拍击"])
     s = new_battle(a, [b1, b2], seed=7, rules=replace(RULES_1V1, team_size=2))
     lives_before = s.side("b").lives
     s.active("b").fainted = True
@@ -332,10 +319,10 @@ def test_settle_then_replace_lives_drop_once() -> None:
 
 def test_lives_zero_ends() -> None:
     """命归零 → 终局（默认配置下的唯一常规败因）。"""
-    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["撞击"])
-    b2 = spec("弱2", 30, 1, 1, 1, 1, 10, ["撞击"])
+    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b1 = spec("弱1", 30, 1, 1, 1, 1, 10, ["拍击"])
+    b2 = spec("弱2", 30, 1, 1, 1, 1, 10, ["拍击"])
     s = new_battle(a, [b1, b2], seed=7, rules=replace(RULES_1V1, team_size=2, lives=2))
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert s.side("b").lives == 1 and not s.done
@@ -345,12 +332,12 @@ def test_lives_zero_ends() -> None:
 
 def test_lives5_no_living_ends() -> None:
     """死锁兜底：lives 还有余但无存活单位也终局（默认 3 只/2 命走不到，需 lives=5）。"""
-    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻3", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b = [spec("弱1", 30, 1, 1, 1, 1, 10, ["撞击"]),
-         spec("弱2", 30, 1, 1, 1, 1, 10, ["撞击"]),
-         spec("弱3", 30, 1, 1, 1, 1, 10, ["撞击"])]
+    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻3", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("弱1", 30, 1, 1, 1, 1, 10, ["拍击"]),
+         spec("弱2", 30, 1, 1, 1, 1, 10, ["拍击"]),
+         spec("弱3", 30, 1, 1, 1, 1, 10, ["拍击"])]
     s = new_battle(a, b, seed=7, rules=replace(RULES_1V1, team_size=3, lives=5))
     for _ in range(2):
         execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))

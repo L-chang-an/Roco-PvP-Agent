@@ -167,9 +167,9 @@ def test_replace_without_pending_rejected(client):
 def test_controller_replacement_flow():
     """补位流程（确定性）：对手 ScriptedPlayer 首回合 KO 人类在场 → 暂停等补位 → 补位完成。"""
     rules = dataclasses.replace(DEFAULT_RULES, team_size=2)
-    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     session = BattleSession.start(a, b, seed=1, rules=rules, battle_id="t")
     ctrl = BattleController("t", session, seed=1, opponent="fake_llm",
                             team_a=[], team_b=[], rules=rules, saved_at="x",
@@ -189,9 +189,9 @@ def test_controller_replace_returns_delta_events():
     出招步与续步 `events_turn` 同回合 → 前端不重复插「第 N 回合」头；事件则按步分割追加。
     """
     rules = dataclasses.replace(DEFAULT_RULES, team_size=2)
-    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     session = BattleSession.start(a, b, seed=1, rules=rules, battle_id="t")
     ctrl = BattleController("t", session, seed=1, opponent="fake_llm",
                             team_a=[], team_b=[], rules=rules, saved_at="x",

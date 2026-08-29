@@ -21,8 +21,8 @@ from enum import Enum
 
 from .dataset import DataSource, load_skills
 from .rng import BattleRng
-from .rules import DEFAULT_RULES, E0_ITEMS, BattleRules
-from .skillbook import E0_EFFECTS, P1_EFFECTS, P2_EFFECTS, SkillEffect, battle_ready
+from .rules import DEFAULT_RULES, ITEMS, BattleRules
+from .skillbook import P1_EFFECTS, P2_EFFECTS, SkillEffect, battle_ready
 
 SIDES: tuple[str, str] = ("a", "b")
 
@@ -37,14 +37,14 @@ class ActionType(str, Enum):
 
 @dataclass(frozen=True)
 class Skill:
-    """静态定义，不可变、可共享。effect 来自 skillbook.E0_EFFECTS。
+    """静态定义，不可变、可共享。effect 来自 skillbook.P1/P2 效果表。
 
     序列化只存技能名，from_dict 按名从技能表重建——技能是静态数据，不需要全量落盘。
     """
 
     name: str
     kind: str            # 物攻 / 魔攻 / 防御 / 状态
-    type: str            # 系别，E0 全为「普通」，E2 才生效
+    type: str            # 系别（克制/STAB 依据，真实 18 系）
     power: int
     energy_cost: int
     effect: SkillEffect
@@ -299,16 +299,15 @@ def _rules_from_dict(d: dict) -> BattleRules:
 
 
 def _skill_from_name(name: str) -> Skill:
-    """按名从可对战白名单（教学 ∪ P1 ∪ P2）重建 Skill（from_dict 用）。
+    """按名从可对战白名单（P1 ∪ P2）重建 Skill（from_dict 用）。
 
-    技能数据查 `load_skills()`（教学）→ 未命中再查 `load_skills(FULL)`（P1/P2 技能在
-    FULL 权威表）；效果查 `E0_EFFECTS ∪ P1_EFFECTS ∪ P2_EFFECTS`；`priority`（先手修正）
-    从效果表读。名字不在白名单 → KeyError（不该发生）。
+    技能数据查 `load_skills()`（默认 FULL 权威表）；效果查 `P1_EFFECTS ∪ P2_EFFECTS`；
+    `priority`（先手修正）从效果表读。名字不在白名单 → KeyError（不该发生）。
     """
-    raw = load_skills().get(name) or load_skills(DataSource.FULL).get(name)
-    effect = E0_EFFECTS.get(name) or P1_EFFECTS.get(name) or P2_EFFECTS.get(name)
+    raw = load_skills().get(name)
+    effect = P1_EFFECTS.get(name) or P2_EFFECTS.get(name)
     if raw is None or effect is None:
-        raise KeyError(f"技能「{name}」不在可对战白名单（教学 ∪ P1 ∪ P2）。")
+        raise KeyError(f"技能「{name}」不在可对战白名单（P1 ∪ P2）。")
     return Skill(
         name=raw.name,
         kind=raw.kind,
@@ -357,7 +356,7 @@ def _side_from_dict(d: dict) -> SideState:
 
 
 def build_unit(spec: dict, rules: BattleRules = DEFAULT_RULES) -> Unit:
-    """唯一构造路径：吃 E0a 的 roster spec，按名从可对战白名单（教学 ∪ P1 ∪ P2）取技能定义，
+    """唯一构造路径：吃 roster spec，按名从可对战白名单（P1 ∪ P2）取技能定义，
     派生 max_hp / current_hp / energy，并把特性名解析成**实际装备**的特性（未实现 → 白板
     `default`）。非法 spec 抛 ValueError。"""
     # 函数内 import：traits → hooks → primitives → damage → models 成环，模块级 import 会炸。
@@ -366,7 +365,7 @@ def build_unit(spec: dict, rules: BattleRules = DEFAULT_RULES) -> Unit:
     skills: list[Skill] = []
     for sname in spec["skills"]:
         if not battle_ready(sname):
-            raise ValueError(f"技能「{sname}」不在可对战白名单（教学 ∪ P1 ∪ P2）中。")
+            raise ValueError(f"技能「{sname}」不在可对战白名单（P1 ∪ P2）中。")
         skills.append(_skill_from_name(sname))
     stats = spec["stats"]
     max_hp = stats["hp"]
@@ -391,20 +390,20 @@ def new_battle(roster_a: list[dict], roster_b: list[dict], *,
                seed: int, items_a: list[str] | None = None,
                items_b: list[str] | None = None, rules: BattleRules = DEFAULT_RULES,
                battle_id: str = "") -> BattleState:
-    """用 E0a 的两份 roster spec 开一局。items 为 None → 每方带满 E0 全部道具各 1 次。"""
+    """用两份 roster spec 开一局。items 为 None → 每方带满全部道具各 1 次。"""
     if len(roster_a) != rules.team_size or len(roster_b) != rules.team_size:
         raise ValueError(
             f"队伍规模必须为 {rules.team_size}，实际 {len(roster_a)} / {len(roster_b)}。"
         )
     units_a = [build_unit(spec, rules) for spec in roster_a]
     units_b = [build_unit(spec, rules) for spec in roster_b]
-    item_names_a = items_a if items_a is not None else list(E0_ITEMS)
-    item_names_b = items_b if items_b is not None else list(E0_ITEMS)
+    item_names_a = items_a if items_a is not None else list(ITEMS)
+    item_names_b = items_b if items_b is not None else list(ITEMS)
     return BattleState(
         side_a=SideState(units=units_a, lives=rules.lives,
-                         item_uses={name: E0_ITEMS[name] for name in item_names_a}),
+                         item_uses={name: ITEMS[name] for name in item_names_a}),
         side_b=SideState(units=units_b, lives=rules.lives,
-                         item_uses={name: E0_ITEMS[name] for name in item_names_b}),
+                         item_uses={name: ITEMS[name] for name in item_names_b}),
         rng=BattleRng(seed),
         rules=rules,
         battle_id=battle_id,

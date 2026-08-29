@@ -118,12 +118,12 @@ def test_subprocess_digest_matches_inprocess() -> None:
     env["PYTHONPATH"] = str(root / "src") + os.pathsep + env.get("PYTHONPATH", "")
     out = subprocess.run(
         [sys.executable, "-m", "environment", "battle", "--seed", "20260823",
-         "--preset", "mirror", "--json"],
+         "--preset", "p1", "--json"],
         capture_output=True, text=True, cwd=root, env=env, timeout=120,
     )
     assert out.returncode == 0, out.stderr
     cli_digest = json.loads(out.stdout)["digest"]
-    pa, pb = _battle_picks("mirror", DataSource.E0)
+    pa, pb = _battle_picks("p1", DataSource.FULL)
     # battle_id 进 state_hash，必须与 CLI 一致（CLI 固定用 f"cli-{seed}"）
     session = BattleSession.start(build_roster(pa), build_roster(pb), seed=20260823,
                                   battle_id="cli-20260823")
@@ -215,12 +215,12 @@ def _ko_setup(seed: int = 7, lives: int = 2):
     from environment.models import new_battle
     from dataclasses import replace
     from rosters import RULES_1V1, spec
-    a = [spec("甲", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("甲2", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("甲3", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b = [spec("乙1", 30, 1, 1, 1, 1, 50, ["撞击"]),
-         spec("乙2", 300, 1, 1, 1, 1, 50, ["撞击"]),
-         spec("乙3", 300, 1, 1, 1, 1, 50, ["撞击"])]
+    a = [spec("甲", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("甲2", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("甲3", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("乙1", 30, 1, 1, 1, 1, 50, ["拍击"]),
+         spec("乙2", 300, 1, 1, 1, 1, 50, ["拍击"]),
+         spec("乙3", 300, 1, 1, 1, 1, 50, ["拍击"])]
     return new_battle(a, b, seed=seed, rules=replace(RULES_1V1, team_size=3, lives=lives))
 
 
@@ -288,12 +288,12 @@ def test_game_over_at_faint_no_replacement() -> None:
 def test_run_match_applies_player_replacement() -> None:
     """run_match 驱动补位：非终局阵亡 → 玩家 choose_replacement → replace 事件。"""
     from environment.players import ScriptedPlayer
-    a = [spec("甲", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("甲2", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("甲3", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b = [spec("乙1", 30, 1, 1, 1, 1, 50, ["撞击"]),
-         spec("乙2", 30, 1, 1, 1, 1, 50, ["撞击"]),
-         spec("乙3", 30, 1, 1, 1, 1, 50, ["撞击"])]
+    a = [spec("甲", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("甲2", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("甲3", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("乙1", 30, 1, 1, 1, 1, 50, ["拍击"]),
+         spec("乙2", 30, 1, 1, 1, 1, 50, ["拍击"]),
+         spec("乙3", 30, 1, 1, 1, 1, 50, ["拍击"])]
     session = BattleSession.start(a, b, seed=3, rules=replace(RULES_1V1, team_size=3, lives=2))
     players = {
         "a": ScriptedPlayer("a", script=[Decision(skill_action(0))] * 6),

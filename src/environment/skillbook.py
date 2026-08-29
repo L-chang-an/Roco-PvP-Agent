@@ -1,13 +1,13 @@
-"""14 个技能的**显式效果表**（`SkillEffect`）+ **P1 效果编译器**（batch-P1.json 125 技能）。
+"""技能效果表（`SkillEffect`）+ **P1/P2 效果编译器**（batch-P1 125 / batch-P2 技能）。
 
 引擎永不读 `desc`。两条效果来源：
-- `E0_EFFECTS`：14 条手写教学效果（`SkillEffect`）。
 - `P1_EFFECTS`：由 `compile_p1_effect` 从 P1 批次技能 desc 的**固定模式**编译生成——
   纯伤害 / 纯防御 / 纯六维状态（P1 全部 125 条都应命中）。
-`battle_ready(name)` = 教学 ∪ P1（可对战白名单）。
+- `P2_EFFECTS`：P2 扩展（连击/先手/吸血/能量/每连击状态…）。
+`battle_ready(name)` = P1 ∪ P2（可对战白名单）。
 
-这是「不做 DSL 编译器」的代价与边界：教学 14 条手写，P1 125 条用固定模式编译，
-553 条时的任意 desc 仍不支持（`compile_p1_effect` 返回 None，battle_ready=False）。
+这是「不做 DSL 编译器」的代价与边界：P1/P2 用固定模式编译，
+553 条时的任意 desc 仍不支持（`compile_effect` 返回 None，battle_ready=False）。
 效果参数**只**从效果表读——引擎里出现正则就是设计事故（参考项目的
 `re.search(r"(\\d+)%")` 写进了 engine.py，减伤比例从 power 反推）。
 
@@ -107,66 +107,6 @@ class SkillEffect:
     counter_extra_layers: int = 0            # 状态系应对成功时的额外层数
     stat_effects: tuple[SkillStatEffect, ...] = ()   # 状态系每连击应用
     buff_effects: tuple[SkillStatEffect, ...] = ()   # 一次性目标效果（连击/吸血/能耗）
-
-
-E0_EFFECTS: dict[str, SkillEffect] = {
-    # ── 攻击（6）：物攻走 atk/def，魔攻走 sp_atk/sp_def ──
-    "抓挠": SkillEffect(category=SkillCategory.ATTACK, self_energy_gain=1),
-    "抓挠1": SkillEffect(
-        category=SkillCategory.ATTACK, self_energy_gain=1,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "抓挠2": SkillEffect(
-        category=SkillCategory.ATTACK, self_energy_gain=1,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击1": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击2": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    # ── 防御（3）：减伤只在应对攻击时武装（E0b 的 build_turn_context 负责武装）──
-    "防御": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.70,
-    ),
-    "防御1": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.80,
-    ),
-    "防御2": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.85,
-    ),
-    # ── 状态（5）：属性增益层，1 层 = 10%(pct) 或 +10(flat) ──
-    "加物攻": SkillEffect(
-        category=SkillCategory.STATUS, stat="atk", mode="pct", layers=9,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-    "加魔攻": SkillEffect(
-        category=SkillCategory.STATUS, stat="sp_atk", mode="pct", layers=9,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-    "加魔防": SkillEffect(
-        category=SkillCategory.STATUS, stat="sp_def", mode="pct", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=1,
-    ),
-    "加物防": SkillEffect(
-        category=SkillCategory.STATUS, stat="def", mode="pct", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=1,
-    ),
-    "加速度": SkillEffect(
-        category=SkillCategory.STATUS, stat="speed", mode="flat", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-}
 
 
 def category_of(skill) -> SkillCategory:
@@ -450,5 +390,5 @@ for _name in sorted(_load_p2_names()):
 
 
 def battle_ready(name: str) -> bool:
-    """可对战白名单：教学效果表 ∪ P1 效果表 ∪ P2 效果表都覆盖的技能名。"""
-    return name in E0_EFFECTS or name in P1_EFFECTS or name in P2_EFFECTS
+    """可对战白名单：P1 效果表 ∪ P2 效果表都覆盖的技能名。"""
+    return name in P1_EFFECTS or name in P2_EFFECTS

@@ -1,13 +1,11 @@
 """CLI 入口：python -m environment。
 
-E0a 三个子命令（全部只读、不写文件、不联网），`--data E0|FULL|VALID` 切数据源：
-  --data-report    数据自检：技能/效果表/精灵/防御.power（E0）或 553/593/家族/首领（FULL）
-                   / 179 技能 + 593 精灵（VALID，E3 可对战池）
-  --team-report    打印阵容与最终六维，末尾校验合法（FULL/VALID 用 --spirit 选精灵）
+数据自检子命令（全部只读、不写文件、不联网），`--data FULL|VALID` 切数据源：
+  --data-report    数据自检：技能/系别/精灵/家族/首领（FULL）或 179 技能 + 593 精灵（VALID）
+  --team-report    打印阵容与最终六维，末尾校验合法（用 --spirit 选精灵）
   --probe-errors   演示一个处处违规的阵容被 validate_team 逐条拒绝
-E0b 的 battle 子命令：随机策略自对战一局（同 seed 逐字节复现）。battle 吃 E0 教学数据
-或 E3 真数据（--data VALID，FULL 精灵 + 白名单技能）；管理员经 battle_config 配
---team-size（3–6）与 --lives（1..team_size−1），为 Web UI 做准备。
+battle 子命令：随机策略自对战一局（同 seed 逐字节复现），吃 FULL/VALID 数据；管理员经
+battle_config 配 --team-size（3 或 6）与 --lives（1..team_size−1），为 Web UI 做准备。
 """
 
 from __future__ import annotations
@@ -26,9 +24,9 @@ from .match import MatchResult, run_match
 from .models import SIDES
 from .players import RandomPlayer
 from .presets import p1_preset
-from .rules import DEFAULT_RULES, E0_ITEMS
+from .rules import DEFAULT_RULES, ITEMS
 from .session import BattleSession
-from .skillbook import E0_EFFECTS, KIND_TO_CATEGORY, P1_EFFECTS, P2_EFFECTS, battle_ready
+from .skillbook import KIND_TO_CATEGORY, P1_EFFECTS, P2_EFFECTS, battle_ready
 from .teambuilder import TeamPick, build_roster, validate_team
 from .traits import DEFAULT_TRAIT_NAME, resolve_trait_name, trait_implemented
 from .view import observe
@@ -47,41 +45,7 @@ def _pool_range(spirits) -> tuple[int, int]:
 
 def _data_report(source: DataSource = DEFAULT_SOURCE, effects: bool = False) -> int:
     """数据自检。任一检查不过 → 返回 1（可进 CI 作门禁）。"""
-    if source in (DataSource.FULL, DataSource.VALID):
-        return _data_report_full(source=source, effects=effects)
-
-    skills = load_skills()
-    spirits = load_spirits()
-
-    cats = {"攻击": 0, "防御": 0, "状态": 0}
-    for s in skills.values():
-        category = KIND_TO_CATEGORY.get(s.kind)
-        key = category.value if category else s.kind
-        cats[key] = cats.get(key, 0) + 1
-
-    keys_ok = set(E0_EFFECTS) == set(skills)
-    stats_normalized = all(
-        isinstance(v, int) for sp in spirits.values() for v in sp.stats.values()
-    )
-    pool_min, pool_max = _pool_range(spirits)
-    def_power = skills["防御"].power if "防御" in skills else None
-    def_ok = def_power == 0
-    ok = keys_ok and stats_normalized and def_ok
-
-    print("E0 数据自检")
-    print(
-        f"技能 {len(skills)} 条（攻击 {cats['攻击']} / 防御 {cats['防御']} / 状态 {cats['状态']}）"
-        f" · 效果表 {len(E0_EFFECTS)} 条 · 键集合一致 {'✅' if keys_ok else '❌'}"
-    )
-    print(
-        f"精灵 {len(spirits)} 只 · 六维{'已归一' if stats_normalized else '未归一'} "
-        f"· 可学池最小 {pool_min} 最大 {pool_max}"
-    )
-    print(f"防御.power = {def_power}（不是 30）{'✅' if def_ok else '❌'}")
-    if not ok:
-        print("数据自检未通过。")
-        return 1
-    return 0
+    return _data_report_full(source=source, effects=effects)
 
 
 def _effects_coverage() -> tuple[int, int, int, int, list[str]]:
@@ -143,7 +107,7 @@ def _data_report_full(source: DataSource = DataSource.FULL, effects: bool = Fals
         ok = True
     if effects:
         ready, total, p1, p2, unsupported = _effects_coverage()
-        print(f"可对战白名单（教学 ∪ P1 ∪ P2）：{ready}/{total}（{ready * 100 // total}%）"
+        print(f"可对战白名单（P1 ∪ P2）：{ready}/{total}（{ready * 100 // total}%）"
               f" · P1 {p1}/125 全实现 · P2 {p2}/54 全实现")
         t_impl, t_total, t_real, t_blank = _traits_coverage()
         print(f"特性目录：{t_impl}/{t_total} 已实现 · 真实特性精灵 {t_real} 只 ·"
@@ -155,24 +119,6 @@ def _data_report_full(source: DataSource = DataSource.FULL, effects: bool = Fals
         print("数据自检未通过。")
         return 1
     return 0
-
-
-def _default_picks_a() -> list[TeamPick]:
-    """E0 队伍 a：演示血脉拓宽可学池（3 技能）+ 个体值 + 性格都真实改六维。"""
-    return [
-        TeamPick("迪莫", ["抓挠2", "加速度", "防御1"], bloodline="火"),
-        TeamPick("小火猴", ["抓挠", "撞击1"], nature="加攻击减速度", iv={"atk": 10}),
-        TeamPick("水蓝蓝", ["撞击", "加魔攻"], nature="加速度减攻击", iv={"speed": 10}),
-    ]
-
-
-def _default_picks_b() -> list[TeamPick]:
-    """E0 队伍 b：部分走默认（坦率 / 无个体值 / 无血脉），验证中性口径。"""
-    return [
-        TeamPick("圣水迪莫", ["撞击1", "加魔攻"]),
-        TeamPick("布布种子", ["抓挠2", "防御1"], nature="加物防减魔防"),
-        TeamPick("猫老大", ["撞击", "加物攻"], nature="加攻击减魔攻"),
-    ]
 
 
 # FULL 默认演示阵容：三只不同家族，迪莫带光血脉 + 光系血脉技，展示规则 2 通过的样子。
@@ -202,26 +148,12 @@ def _print_team(label: str, picks: list[TeamPick], source: DataSource) -> None:
         equipped = resolve_trait_name(entry.get("trait") or "")
         mark = "" if equipped != DEFAULT_TRAIT_NAME else f" → 白板「{DEFAULT_TRAIT_NAME}」（未实现，零效果）"
         print(f"          特性 {raw_trait}{mark}")
-    items = " / ".join(f"{name} ×{count}" for name, count in E0_ITEMS.items())
+    items = " / ".join(f"{name} ×{count}" for name, count in ITEMS.items())
     print(f"  道具  {items}")
 
 
 def _team_report(source: DataSource, spirit_names: list[str]) -> int:
-    if source in (DataSource.FULL, DataSource.VALID):
-        return _team_report_full(source, spirit_names)
-
-    picks_a, picks_b = _default_picks_a(), _default_picks_b()
-    _print_team("a", picks_a, source)
-    print()
-    _print_team("b", picks_b, source)
-    print()
-    errors = validate_team(picks_a, ["草魔法"]) + validate_team(picks_b, ["草魔法"])
-    if errors:
-        for err in errors:
-            print(f"❌ {err}")
-        return 1
-    print("校验：两队合法 ✅")
-    return 0
+    return _team_report_full(source, spirit_names)
 
 
 def _team_report_full(source: DataSource, spirit_names: list[str]) -> int:
@@ -252,21 +184,7 @@ def _team_report_full(source: DataSource, spirit_names: list[str]) -> int:
 
 def _probe_errors(source: DataSource) -> int:
     """构造一个处处违规的阵容，演示 validate_team 一次报出全部错误。"""
-    if source is DataSource.FULL:
-        return _probe_errors_full()
-    bad = [
-        TeamPick("迪莫", []),                                        # 技能数不足（0 个）
-        TeamPick("不存在的精灵", ["抓挠1", "加物攻"]),               # 精灵不存在
-        TeamPick("小火猴", ["撞击2", "加速度"], bloodline="水"),      # 血脉非法 + 两个技能不可学
-        TeamPick("水蓝蓝", ["撞击", "加魔攻"], iv={"luck": 5, "atk": 99}),  # iv 键非法 + 越界
-        TeamPick("猫老大", ["撞击", "加物攻"], iv={"atk": 3, "def": 3, "sp_def": 3, "speed": 3}),  # 4 个维度
-    ]
-    print("非法阵容演示（validate_team 一次报出全部错误，不遇到第一个就停）：")
-    errors = validate_team(bad, ["不存在道具", "草魔法", "草魔法"])
-    for err in errors:
-        print(f"  ❌ {err}")
-    print(f"共 {len(errors)} 条错误。")
-    return 0
+    return _probe_errors_full()
 
 
 def _probe_errors_full() -> int:
@@ -286,29 +204,12 @@ def _probe_errors_full() -> int:
     return 0
 
 
-# ── E0b battle 部分 ─────────────────────────────────────────────────────────
+# ── battle 部分 ───────────────────────────────────────────────────────────────
 def _battle_picks(preset: str, source: DataSource, team_size: int = 3) -> tuple[list[TeamPick], list[TeamPick]]:
-    """mirror：双方同规格同速 → 平手硬币必然有机会触发；asym：六维速度互不相交 → 永不平手。
-    FULL/VALID 下只支持 p1（真数据队，规模随 team_size 自适应，见 presets.py）。"""
-    if source in (DataSource.FULL, DataSource.VALID):
-        if preset == "p1":
-            return p1_preset(team_size)
+    """FULL/VALID 下只支持 p1（真数据队，规模随 team_size 自适应，见 presets.py）。"""
+    if preset != "p1":
         raise ValueError(f"{source.value} 对战只支持 --preset p1，实际 {preset!r}。")
-    if preset == "mirror":
-        team = _default_picks_a()
-        return team, list(team)
-    # asym：a 速度 {221, 210, 166}，b 速度 {201, 201, 182}，完全不相交（叠加加速度也不相交）
-    a = [
-        TeamPick("小火猴", ["抓挠", "撞击1"]),
-        TeamPick("水蓝蓝", ["撞击", "加魔攻"]),
-        TeamPick("布布种子", ["抓挠2", "防御1"]),
-    ]
-    b = [
-        TeamPick("迪莫", ["抓挠1", "加物攻"]),
-        TeamPick("圣水迪莫", ["撞击1", "加魔攻"]),
-        TeamPick("猫老大", ["撞击", "加物攻"]),
-    ]
-    return a, b
+    return p1_preset(team_size)
 
 
 def _summary_from_events(record, side: str) -> str:
@@ -422,7 +323,7 @@ def _play_once(roster_a, roster_b, args, rules):
 
 
 def _print_match(session, result: MatchResult, args, rules, source: DataSource) -> None:
-    title = {"FULL": "FULL 真数据自对战", "VALID": "E3 真数据自对战"}.get(source.value, "E0b 自对战")
+    title = {"FULL": "FULL 真数据自对战", "VALID": "E3 真数据自对战"}.get(source.value, "自对战")
     print(f"{title}  seed={args.seed}  规则={rules.team_size}v{rules.team_size}/"
           f"{rules.lives}命/能量{rules.energy_max}/上限{rules.max_turns}  预设={args.preset}"
           + (f"  视角={args.viewer}" if args.viewer else ""))
@@ -526,24 +427,24 @@ def main() -> int:
     parser.add_argument("--effects", action="store_true",
                         help="--data-report 附加：可对战白名单覆盖率 + 特性目录")
     parser.add_argument("--probe-errors", action="store_true", help="演示非法阵容被逐条拒绝")
-    parser.add_argument("--data", choices=["E0", "FULL", "VALID"], default=DEFAULT_SOURCE.value,
-                        help="数据源：E0 教学 / FULL 真实 / VALID（E3，FULL 精灵+白名单技能，默认 E0）")
+    parser.add_argument("--data", choices=["FULL", "VALID"], default=DEFAULT_SOURCE.value,
+                        help="数据源：FULL 真实 / VALID（E3，FULL 精灵+白名单技能，默认 FULL）")
     parser.add_argument("--spirit", action="append", default=None,
-                        help="FULL/VALID 组队报告要选的精灵名（可重复；缺省用默认演示阵容）")
+                        help="组队报告要选的精灵名（可重复；缺省用默认演示阵容）")
 
     sub = parser.add_subparsers(dest="command", help="子命令")
-    bp = sub.add_parser("battle", help="随机策略自对战一局（同 seed 逐字节复现；--data VALID 用四家族白名单队）")
-    bp.add_argument("--data", choices=["E0", "FULL", "VALID"], default=DEFAULT_SOURCE.value,
-                    help="数据源：E0 教学 / FULL / VALID（默认 E0；可在子命令前后放）")
+    bp = sub.add_parser("battle", help="随机策略自对战一局（同 seed 逐字节复现；--data VALID 用白名单队）")
+    bp.add_argument("--data", choices=["FULL", "VALID"], default=DEFAULT_SOURCE.value,
+                    help="数据源：FULL / VALID（默认 FULL；可在子命令前后放）")
     bp.add_argument("--team-size", type=int, default=3,
-                    help="每方精灵数（管理员接口：3–6，默认 3V3）")
+                    help="每方精灵数（管理员接口：3 或 6，默认 3V3）")
     bp.add_argument("--lives", type=int, default=2,
                     help="每方命数（管理员接口：1..team_size−1，默认 2）")
     bp.add_argument("--seed", type=int, default=20260823, help="引擎 seed（默认 20260823）")
     bp.add_argument("--seed-a", type=int, default=None, help="玩家 a seed（默认 seed+1）")
     bp.add_argument("--seed-b", type=int, default=None, help="玩家 b seed（默认 seed+2）")
-    bp.add_argument("--preset", choices=["mirror", "asym", "p1"], default="mirror",
-                    help="mirror=双方同速必平手；asym=速度互异永不平手；p1=FULL/VALID 四家族真数据队")
+    bp.add_argument("--preset", choices=["p1"], default="p1",
+                    help="p1=真数据队（FULL/VALID，规模随 team_size 自适应）")
     bp.add_argument("--repeat", type=int, default=1, help="同参数跑 N 次并比对 digest")
     bp.add_argument("--turns", type=int, default=None, help="覆盖 rules.max_turns")
     bp.add_argument("--viewer", choices=["a", "b"], default=None,

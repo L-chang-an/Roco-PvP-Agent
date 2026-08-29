@@ -11,7 +11,7 @@ from pathlib import Path
 
 from environment.dataset import DataSource, load_skills
 from environment.skillbook import (
-    E0_EFFECTS, P1_EFFECTS, P2_EFFECTS, P1_SKILLS_FILE, SkillCategory, SkillStatEffect,
+    P1_EFFECTS, P2_EFFECTS, P1_SKILLS_FILE, SkillCategory, SkillStatEffect,
     battle_ready, compile_p1_effect,
 )
 
@@ -116,16 +116,16 @@ def test_status_dual_dual_effect() -> None:
 
 # ── battle_ready 白名单边界 ──
 def test_battle_ready_union() -> None:
-    assert battle_ready("抓挠")      # 教学效果表
+    assert battle_ready("抓挠")      # P2（造成物伤，自己回复1能量）
     assert battle_ready("闪光")      # P1
-    assert battle_ready("防御")      # 教学 ∪ P1 都覆盖
+    assert battle_ready("防御")      # P1（减伤 70%，应对攻击）
     assert battle_ready("火苗")      # P2（造成物伤，自己回复1能量）
     assert battle_ready("三连破")    # P2（2026-08-25 人工裁决后实现）
     assert not battle_ready("借用")  # FULL 里效果未实现
 
 
 def test_battle_ready_has_179() -> None:
-    """可对战白名单 = P1 125 ∪ P2 54（含 抓挠）→ 179。教学 14 名里 抓挠/防御 都在 P1∪P2 内。"""
+    """可对战白名单 = P1 125 ∪ P2 54 → 179。"""
     ready = {n for n in FULL if battle_ready(n)}
     assert len(ready) == len(P1_EFFECTS) + len(P2_EFFECTS) == 179
 

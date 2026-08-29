@@ -62,9 +62,9 @@ def _valid_team() -> list[dict]:
 
 
 def test_config_metadata(client):
-    """队伍规模 3–6 / 技能槽 4 / 个体值上限 10 且最多 3 维 / 31 性格 / 18 系。"""
+    """队伍规模仅 {3,6} / 技能槽 4 / 个体值上限 10 且最多 3 维 / 31 性格 / 18 系。"""
     body = client.get("/api/team/config").json()
-    assert body["team_size"] == {"min": 3, "max": 6, "default": 3}
+    assert body["team_size"] == {"allowed": [3, 6], "default": 3}
     assert body["skill_slots"] == 4
     assert body["iv_max"] == 10
     assert body["iv_dims_max"] == 3
@@ -219,8 +219,37 @@ def test_save_load_roundtrip_absolute(client, tmp_path):
     d = client.get("/api/team/load", params={"path": str(target)}).json()
     assert d["ok"] is True and d["team_size"] == 3
     assert [p["spirit"] for p in d["team"]] == ["迪莫", "喵喵", "火花"]
-    assert d["team"][0]["skills"] == team[0]["skills"]
-    assert d["version"] == 1 and d["saved_at"]
+    # v2 富化：技能带 {name,type,desc}，精灵带 trait{name,desc}
+    assert d["version"] == 2 and d["saved_at"]
+    sk = d["team"][0]["skills"]
+    assert isinstance(sk, list) and sk and set(sk[0]) == {"name", "type", "desc"}
+    assert sk[0]["name"] == team[0]["skills"][0]
+    assert d["team"][0]["trait"] == {"name": "最好的伙伴", "desc": "造成克制伤害后，获得攻防速+20%，并回复2能量。"}
+
+
+def test_save_rejects_enriched_fields_in_request(client):
+    """富化字段（技能 {name,type,desc} / trait）只出现在落盘文件，请求体 extra="forbid" → 422。"""
+    team = _valid_team()
+    team[0]["skills"] = [{"name": "闪光", "type": "光", "desc": "..."}]
+    res = client.post("/api/team/save", json={"team": team, "team_size": 3, "path": "富化.json"})
+    assert res.status_code == 422
+
+
+def test_load_tolerates_v1_string_skills(client, tmp_path):
+    """v1 队伍（技能为字符串数组）仍可加载——历史文件兼容。"""
+    target = tmp_path / "v1队.json"
+    team = _valid_team()
+    payload = {
+        "version": 1,
+        "saved_at": "2026-01-01T00:00:00+00:00",
+        "team_size": 3,
+        "team": [{"spirit": p["spirit"], "skills": p["skills"],
+                  "bloodline": p["bloodline"], "nature": p["nature"], "iv": p["iv"]} for p in team],
+    }
+    import json as _json
+    target.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    d = client.get("/api/team/load", params={"path": str(target)}).json()
+    assert d["version"] == 1 and d["team"][0]["skills"] == team[0]["skills"]
 
 
 def test_save_relative_into_teams_dir(client):

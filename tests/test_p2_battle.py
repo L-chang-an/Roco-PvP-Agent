@@ -90,7 +90,7 @@ def test_markov_step_with_p2_skill() -> None:
                     "skills": ["乱打"], "trait": ""})
     b = build_unit({"name": "乙", "types": ["普通"],
                     "stats": {"hp": 300, "atk": 100, "sp_atk": 100, "def": 100, "sp_def": 100, "speed": 100},
-                    "skills": ["撞击"], "trait": ""})
+                    "skills": ["抓挠"], "trait": ""})
     s = BattleState(side_a=SideState(units=[a], lives=2), side_b=SideState(units=[b], lives=2),
                     rng=BattleRng(7), rules=replace(DEFAULT_RULES, team_size=1))
     h = s.state_hash()

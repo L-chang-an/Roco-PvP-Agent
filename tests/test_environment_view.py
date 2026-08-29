@@ -70,10 +70,10 @@ def test_skills_hidden_until_revealed() -> None:
     s = _session()
     # 起始：敌方技能全未知
     assert s.view("a")["opponent"]["units"][0]["skills"] == []
-    # b 使用技能（撞击1）→ a 视角该技能揭示（含详情描述）
+    # b 使用技能（拍击）→ a 视角该技能揭示（含详情描述）
     execute_turn(s.state, Decision(recharge_action()), Decision(skill_action(0)))
     foe_skills = s.view("a")["opponent"]["units"][0]["skills"]
-    assert [x["name"] for x in foe_skills] == ["撞击1"]
+    assert [x["name"] for x in foe_skills] == ["拍击"]
     assert foe_skills[0]["power"] > 0 and foe_skills[0]["desc"] and "energy_cost" in foe_skills[0]
 
 
@@ -100,7 +100,7 @@ def test_foe_trait_shows_real_desc() -> None:
     """特性描述：图鉴公开数据（真实特性名+描述，不是白板 default）。"""
     from environment.dataset import DataSource, load_spirits
     s = BattleSession.start(*mirror_pair(), seed=1)      # 真实 E0 精灵
-    sp = load_spirits(DataSource.E0)["迪莫"]
+    sp = load_spirits(DataSource.FULL)["迪莫"]
     foe_trait = s.view("a")["opponent"]["units"][0]["trait"]
     assert foe_trait["name"] == sp.trait_name and foe_trait["desc"] == sp.trait_desc
 

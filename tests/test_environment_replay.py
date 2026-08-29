@@ -38,10 +38,10 @@ def _ko_record() -> dict:
     ScriptedPlayer 脚本 [skill_action(0)] 耗尽后回落聚能，纯确定；battle_id 固定 "ko"。
     """
     rules = dataclasses.replace(DEFAULT_RULES, team_size=2)
-    roster_a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]),
-                spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    roster_b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-                spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    roster_a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]),
+                spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    roster_b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+                spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     session = BattleSession.start(roster_a, roster_b, seed=1, rules=rules, battle_id="ko")
     players = {"a": ScriptedPlayer("a", script=[Decision(skill_action(0))]),
                "b": ScriptedPlayer("b", script=[Decision(skill_action(0))])}

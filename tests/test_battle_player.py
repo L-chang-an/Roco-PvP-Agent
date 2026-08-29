@@ -41,9 +41,9 @@ def _session() -> BattleSession:
 def _session2() -> BattleSession:
     """2v2 手写阵容（有存活后备，供补位测试）。"""
     rules = dr(DEFAULT_RULES, team_size=2)
-    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     return BattleSession.start(a, b, seed=1, rules=rules)
 
 
@@ -205,7 +205,7 @@ def test_render_observation_foe_has_no_absolute_hp() -> None:
 
 def test_render_events_filtered_damage_shape() -> None:
     """过滤后的 damage 事件（敌方 target_hp_pct）渲染正常。"""
-    text = render_events([{"type": "damage", "side": "a", "attacker": "迪莫", "skill": "抓挠1",
+    text = render_events([{"type": "damage", "side": "a", "attacker": "迪莫", "skill": "抓挠",
                            "target": "布布", "damage": 55, "target_hp_pct": 82}])
     assert "剩82%" in text
 
@@ -336,7 +336,7 @@ def test_render_all_branches() -> None:
     ]
     me["units"][0]["energy_cost_mods"] = [{"layers": 1, "permanent": False, "trait": False, "source": "x"}]
     me["units"][1]["fainted"] = True
-    foe["units"][0]["skills"] = [{"name": "抓挠1", "type": "普通", "energy_cost": 3, "desc": "造成物理伤害。"}]
+    foe["units"][0]["skills"] = [{"name": "抓挠", "type": "普通", "energy_cost": 3, "desc": "造成物理伤害。"}]
     foe["units"][0]["stat_mods"] = [{"stat": "def", "mode": "pct", "layers": 5}]
     foe["units"][1]["fainted"] = True
 
@@ -344,7 +344,7 @@ def test_render_all_branches() -> None:
     assert "（无）" in text and "草魔法" in text
     assert "物攻+100%" in text and "速度-20" in text and "weird+30%" in text   # pct/flat/负层/未知键
     assert "能耗减益 1 条" in text                                               # ecm 分支
-    assert "已见技能" in text and "抓挠1" in text and "增减益 物防+50%" in text   # 敌方揭示技能/增减益
+    assert "已见技能" in text and "抓挠" in text and "增减益 物防+50%" in text   # 敌方揭示技能/增减益
     assert "（*在场）" in text                                                    # 在场标记（阵亡被跳过）
 
     # _describe_action 兜底分支
@@ -361,7 +361,7 @@ def test_render_all_branches() -> None:
 
     # 全部事件类型
     ev = render_events([
-        {"type": "damage", "side": "a", "attacker": "迪莫", "skill": "抓挠1", "target": "布布",
+        {"type": "damage", "side": "a", "attacker": "迪莫", "skill": "抓挠", "target": "布布",
          "damage": 55, "target_hp_pct": 82},
         {"type": "damage", "side": "a", "attacker": "迪莫", "skill": "抓挠", "target": "布布",
          "damage": 20, "target_hp_left": 50},

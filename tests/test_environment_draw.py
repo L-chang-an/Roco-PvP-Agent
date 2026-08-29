@@ -27,10 +27,10 @@ def _be_message(events) -> str:
 def test_rule1_lives_decides() -> None:
     """命数多者胜：b 首回合阵亡掉 1 命（还有存活后备），a 命数领先 → a 胜。"""
     rules = replace(RULES_1V1, team_size=2, lives=2, max_turns=1)
-    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
-    b = [spec("弱靶", 30, 1, 1, 1, 1, 50, ["撞击"]),
-         spec("弱2", 30, 1, 1, 1, 1, 50, ["撞击"])]
+    a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("弱靶", 30, 1, 1, 1, 1, 50, ["抓挠"]),
+         spec("弱2", 30, 1, 1, 1, 1, 50, ["抓挠"])]
     s = _battle(a, b, rules=rules)
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert s.done and s.winner == "a"
@@ -41,7 +41,7 @@ def test_rule2_hp_percent_sum_decides() -> None:
     """血量百分比和胜：双方命数相同、血量和 a 高（b 被打了 1 下）→ a 胜。"""
     rules = replace(RULES_1V1, max_turns=1)
     a = [spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠"])]
-    b = [spec("乙", 300, 100, 100, 100, 100, 90, ["撞击"])]
+    b = [spec("乙", 300, 100, 100, 100, 100, 90, ["抓挠"])]
     s = _battle(a, b, rules=rules)
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert s.done and s.winner == "a"

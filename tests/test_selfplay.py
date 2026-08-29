@@ -142,9 +142,9 @@ def test_selfplay_players_get_fogged_views() -> None:
 def test_run_match_records_replacements() -> None:
     """run_match 把补位选择写进 TurnRecord.replace_a/b——轨迹重放的必需输入。"""
     rules = dr(DEFAULT_RULES, team_size=2)
-    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]), spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+         spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     session = BattleSession.start(a, b, seed=1, rules=rules, battle_id="ko")
     players = {"a": ScriptedPlayer("a", script=[Decision(skill_action(0))]),
                "b": ScriptedPlayer("b", script=[Decision(skill_action(0))])}

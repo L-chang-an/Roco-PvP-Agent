@@ -1,7 +1,7 @@
 """E3 集成：FULL 全部精灵 + valid_skills 白名单技能 + 管理员对局规则跑完整局。
 
 验证：① 已实现特性（迪莫·最好的伙伴等）绑定真实特性、未实现特性的精灵装白板零效果；
-② 管理员规则 4v4/3命 完整对局（回合/伤害/补位/胜负）；③ 确定性 + 马尔可夫。
+② 管理员规则 6v6/5命 完整对局（回合/伤害/补位/胜负）；③ 确定性 + 马尔可夫。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from environment.engine import execute_turn, step
 from environment.match import run_match
 from environment.models import BattleRng, BattleState, SideState, build_unit
 from environment.players import RandomPlayer
+from environment.presets import valid_spirit_candidates
 from environment.session import BattleSession
 from environment.skillbook import battle_ready
 from environment.teambuilder import TeamPick, build_roster
@@ -28,11 +29,13 @@ def _pick(spirit: str, n: int = 4) -> TeamPick:
     return TeamPick(spirit, [s for s in sp.skills_default if battle_ready(s)][:n])
 
 
-def test_e3_4v4_3lives_full_battle() -> None:
-    """管理员规则 4v4/3命：完整对局，有伤害、有胜负、digest 稳定。"""
-    rules = build_battle_rules(team_size=4, lives=3)
-    picks_a = [_pick("迪莫"), _pick("喵喵"), _pick("火花"), _pick("水蓝蓝")]
-    picks_b = [_pick("迪莫"), _pick("喵呜"), _pick("焰火"), _pick("水灵")]   # 每队 4 个不同家族
+def test_e3_6v6_5lives_full_battle() -> None:
+    """管理员规则 6v6/5命：完整对局，有伤害、有胜负、digest 稳定。"""
+    rules = build_battle_rules(team_size=6, lives=5)
+    cands = valid_spirit_candidates()
+    names_a, names_b = cands[:6], cands[6:12]          # 每队 6 个不同家族
+    picks_a = [_pick(n) for n in names_a]
+    picks_b = [_pick(n) for n in names_b]
     ra, rb = build_roster(picks_a, VALID, rules=rules), build_roster(picks_b, VALID, rules=rules)
     session = BattleSession.start(ra, rb, seed=7, rules=rules, battle_id="e3-7")
     players = {"a": RandomPlayer("a", seed=8), "b": RandomPlayer("b", seed=9)}
@@ -41,7 +44,7 @@ def test_e3_4v4_3lives_full_battle() -> None:
     all_events = [e for t in result.turns for e in t.events]
     assert any(e["type"] == "damage" for e in all_events)
     assert result.winner in ("a", "b", None)
-    assert session.state.side("a").lives <= 3 and session.state.side("b").lives <= 3
+    assert session.state.side("a").lives <= 5 and session.state.side("b").lives <= 5
     # 同参数再来一局 → digest 一致
     session2 = BattleSession.start(ra, rb, seed=7, rules=rules, battle_id="e3-7")
     result2 = run_match(session2, {"a": RandomPlayer("a", seed=8), "b": RandomPlayer("b", seed=9)})
@@ -95,15 +98,16 @@ def test_e3_markov_step() -> None:
 
 
 def test_e3_team_size_limits_on_cli() -> None:
-    """CLI 管理员参数：非法规模被 battle_config 拒绝（返回非 0）。"""
+    """CLI 管理员参数：非法规模（4/5/7）被 battle_config 拒绝（返回非 0）。"""
     import subprocess
     import sys
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    out = subprocess.run(
-        [sys.executable, "-m", "environment", "battle", "--team-size", "7"],
-        capture_output=True, text=True, cwd=root, timeout=60,
-    )
-    assert out.returncode != 0
-    assert "3–6" in out.stderr or "3–6" in out.stdout
+    for bad_size in ("4", "5", "7"):
+        out = subprocess.run(
+            [sys.executable, "-m", "environment", "battle", "--team-size", bad_size],
+            capture_output=True, text=True, cwd=root, timeout=60,
+        )
+        assert out.returncode != 0
+        assert "3 或 6" in (out.stderr + out.stdout)

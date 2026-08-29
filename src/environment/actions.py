@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from .models import ActionType
 from .primitives import skill_energy_cost
-from .rules import E0_ITEMS
+from .rules import ITEMS
 
 _ACTION_TYPES: frozenset[str] = frozenset(a.value for a in ActionType)
 
@@ -130,7 +130,7 @@ def validate_decision(state, side: str, dec: Decision) -> str | None:
     # RECHARGE 恒合法
 
     if dec.item:
-        if dec.item not in E0_ITEMS:
+        if dec.item not in ITEMS:
             return f"道具「{dec.item}」不存在。"
         if side_state.item_uses.get(dec.item, 0) <= 0:
             return f"道具「{dec.item}」次数已尽。"
