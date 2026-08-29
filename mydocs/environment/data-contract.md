@@ -270,5 +270,7 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | **伤害公式规范（2026-08-30 拍板）**：唯一公式 `damage.formula`——顺序求值出口 int() 一次；flat 层留属性、pct 层进比值项；attack_power 激活（flat→威力绝对值、pct→威力百分比）；应对倍率先乘后加；天气项落位（恒 1.0） | damage.py / modifiers.py / reducer.py |
 | **预估体系（2026-08-30）**：预估威力/预估伤害纯函数；view me 侧 `predictions` 提示；预估是**派生量不进状态**（不入 to_dict/from_dict，state_hash 不变） | prediction.py / view.py |
 | **反应管道 + 回合边界事件（2026-08-30）**：`pipeline.run` fixpoint 循环（Frame.domain_events 回传）；TurnStarted（携预估）/ TurnEnded | pipeline.py / domain.py / engine.py |
+| **印记与天气效果层（2026-08-30）**：MarkState/WeatherState 字段**零变更**（全复用 v2 落地字段）；marks.py/weather.py 效果目录 + 读钩子接线；印记槽规则（同种叠加/异种顶替/独立空间） | marks.py / weather.py / primitives.py |
+| **印记/天气技能入口（2026-08-30）**：MW_EFFECTS 白名单 24 条（P1∪P2∪MW = 203）；valid_skills.json 重新生成（`scripts/build_valid_skills.py`，check 口径改动态） | skillbook.py / scripts/ |
 
 **待负责人确认**：① 六维公式口径（`_STAT_GROWTH_BASE` 10 vs 50）；② roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。

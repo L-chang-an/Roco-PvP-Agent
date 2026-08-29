@@ -387,3 +387,23 @@ def test_star_meteor_fires_once_per_attack() -> None:
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     star_hits = [e for e in events if e["type"] == "damage" and e["skill"] == "星陨印记"]
     assert len(star_hits) == 1 and s.side_b.negative_marks == []
+
+
+# ── 迷雾视图：印记/天气双方可见 ──
+def test_view_exposes_marks_and_weather() -> None:
+    from environment.view import observe
+    from environment.weather import set_weather
+
+    s = _state()
+    apply_mark(s.side_a, "攻击印记", 2, source="主场优势")
+    apply_mark(s.side_b, "减速印记", 1, source="速冻")
+    set_weather(s, "雨天", 7, "落雨")
+    obs = observe(s, "a", "partial")
+    assert obs["me"]["positive_marks"] == [{"name": "攻击印记", "layers": 2,
+                                            "source": "主场优势"}]
+    assert obs["opponent"]["negative_marks"] == [{"name": "减速印记", "layers": 1,
+                                                  "source": "速冻"}]
+    assert obs["weather"] == {"kind": "雨天", "turns_left": 7, "source": "落雨"}
+    # 敌方视角同样可见（印记栏是战斗状态栏的一部分）
+    obs_b = observe(s, "b", "partial")
+    assert obs_b["opponent"]["positive_marks"][0]["name"] == "攻击印记"

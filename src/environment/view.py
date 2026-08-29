@@ -18,6 +18,9 @@ gains）；`energy_cost_mods` 字段取消（能耗减益已并入 stat_mods 的
 
 **2026-08-30 公式规范**：me 侧新增 `predictions`（在场精灵逐技能预估威力/预估伤害，确定性派生量）。
 
+**2026-08-30 印记/天气批**：双方侧输出三印记槽（positive/negative/exclusive_marks），
+顶层输出 `weather`——印记栏是战斗状态栏的一部分，双方可见。
+
 `mode="partial"` 是玩家唯一能看到的口径；`mode="global"` = `state.to_dict()`（引擎回放/CLI
 全量输出用）。本模块是**纯函数**：不写状态、不揭示、不发事件——揭示发生在 engine.resolve_skill。
 """
@@ -116,19 +119,33 @@ def _unit_masked(u, revealed: set[tuple[int, str]], index: int) -> dict:
 
 
 def _side_view(side_state, *, masked: bool) -> dict:
-    """一方视图：masked=False → 全量（己方）；masked=True → 白名单（敌方）。"""
+    """一方视图：masked=False → 全量（己方）；masked=True → 白名单（敌方）。
+
+    印记（印记/天气批 2026-08-30）：双方可见——印记栏是战斗状态栏的一部分
+    （E4 观战白名单预留「印记将来加」，本批落地）。
+    """
+    marks = {
+        "positive_marks": [{"name": m.name, "layers": m.layers, "source": m.source}
+                           for m in side_state.positive_marks],
+        "negative_marks": [{"name": m.name, "layers": m.layers, "source": m.source}
+                           for m in side_state.negative_marks],
+        "exclusive_marks": [{"name": m.name, "layers": m.layers, "source": m.source}
+                            for m in side_state.exclusive_marks],
+    }
     units = [u for u in side_state.units]
     if masked:
         revealed = side_state.revealed
         return {
             "lives": side_state.lives,
             "active": side_state.active,
+            **marks,
             "units": [_unit_masked(u, revealed, i) for i, u in enumerate(units)],
         }
     return {
         "lives": side_state.lives,
         "active": side_state.active,
         "item_uses": dict(side_state.item_uses),
+        **marks,
         "units": [_unit_full(u) for u in units],
     }
 
@@ -170,4 +187,7 @@ def observe(state: BattleState, viewer: str, mode: str = "partial") -> dict:
         },
         "me": me_view,
         "opponent": _side_view(state.side(foe), masked=True),
+        # 天气（印记/天气批 2026-08-30）：全局、双方共享 → 直接给全量
+        "weather": ({"kind": state.weather.kind, "turns_left": state.weather.turns_left,
+                     "source": state.weather.source} if state.weather else None),
     }

@@ -113,12 +113,12 @@ pipeline 把新 Atom 交回 reducer 执行 → 新事件继续反应，直至静
 
 | 系统 | 接入位置 | 通道状态 |
 |---|---|---|
-| 印记（mark） | `triggers.collect_reactions` 增加对 Marks 的绑定收集；`SideState.marks` 已在数据协议 v2 落地 | ✅ 事件回传通道已通（问题①） |
-| 天气（weather） | `damage.formula` 的 weather 项（恒 1.0）挂 ATTACK_POWER 读钩子；`BattleState.weather` 已落地 | ✅ 公式落位已定 |
-| 纯负面 buff（DOT） | TurnEnded 事件 → Trigger → LoseHp Atom；reducer 已有 HealPct 同类原语可扩展 | ✅ TURN_END 执行点已铺（问题③） |
-| 防御冷却 | TURN_END 递减 `current_skills[].cooldown` | ✅ 同上 |
+| 印记（mark） | `marks.py` 目录 + `collect_reactions` 多源收集（特性→印记→天气）；三槽规则见 primitives.apply_mark | ✅ 已接线（2026-08-30，14 印记全结算） |
+| 天气（weather） | `weather.py` 目录 + `damage.formula` weather 项（雨天 ×1.75）+ `skill_energy_cost`（沙暴减半）+ TURN_END（暴风雪/雷鸣） | ✅ 已接线（2026-08-30，4 天气全结算） |
+| 纯负面 buff（DOT） | TurnEnded 事件 → Trigger → LoseHp Atom（冻结/引电层已可施加，**结算**待本批） | ⬜ 层施加已通、结算下批 |
+| 防御冷却 | TURN_END 递减 `current_skills[].cooldown` | ⬜ 未实施 |
 | 回合开始预估特性 | TurnStarted 事件携带双侧 `predictions`（预估威力/预估伤害） | ✅ 已发事件，等绑定 |
-| 阵亡补位语义 | session 层（回合边界被动补位，见 battle_docs §9） | ⬜ 设计稿，未实施 |
+| 阵亡补位语义 | session 层（回合边界被动补位，见 battle_docs §9） | ⬜ 设计稿，未实施（TURN_END 阵亡由 resolve_turn 开场兜底复用现有补位流） |
 
 **加一种新效果 = 加一个 Atom 类型 + 一个 reducer + 一条 Trigger 绑定，引擎零改动**（v3 扩展铁律）。
 
@@ -133,3 +133,5 @@ pipeline 把新 Atom 交回 reducer 执行 → 新事件继续反应，直至静
 | **反应管道**：`pipeline.run` fixpoint 循环（Frame.domain_events 回传 + 保护闸 budget/max_events 确定性 warn+停止）；engine.resolve_skill 换芯；hooks.emit 变 shim；collect_reactions 放宽 unit=None | pipeline.py / reducer.py / engine.py / hooks.py / triggers.py |
 | **回合边界执行点**：TurnStarted（携双侧预估，resolve_turn 入口）+ TurnEnded（end_of_turn）；end_turn 合并回合末事件 | domain.py / engine.py |
 | 哨兵零重钉：既有 600 测试 + 4 哨兵原样通过（新旧公式差异场景零覆盖），新规则由 `tests/test_environment_formula.py` 钉死 | tests/ |
+| **印记与天气效果层（2026-08-30）**：marks.py/weather.py 目录、5 个新原子、多源收集器、三处读钩子（公式/能耗/速度）、ENTER/EXIT 发射点、天气递减过期、开场阵亡兜底；14 印记 + 4 天气全结算（星陨 N²+24(N−1) 拍板、暗涌逐层随机、风起执行顺序先手） | marks.py / weather.py / reducer.py / triggers.py / damage.py / primitives.py / engine.py / atom.py / domain.py |
+| **印记/天气技能入口（2026-08-30）**：4 个编译模式 + MW_EFFECTS 白名单 24 条（battle_ready 扩为 P1∪P2∪MW → 203）；valid_skills.json 重新生成；吟游之弦 exclusive 路由 | skillbook.py / compiler.py / models.py / scripts/build_valid_skills.py |
