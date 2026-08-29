@@ -1,9 +1,11 @@
 # v3 骨架审计文档（根动作 → 效果 → 事件 → 触发器 四层管道）
 
-> 状态：**已施工并通过行为等价验证**（2026-08-29）
-> 代码：`src/environment/{atom,domain,modifiers,compiler,reducer,triggers}.py` + `engine.py`/`hooks.py` 改造
+> 状态：**已施工并通过行为等价验证**（2026-08-29；2026-08-30 Phase 3.1 增量：DomainEvent
+> 回传通道 / 回合边界执行点 / 伤害公式规范，621 passed + 确定性 3× 一致）
+> 代码：`src/environment/{atom,domain,modifiers,compiler,reducer,triggers,pipeline,prediction}.py`
+> + `engine.py`/`hooks.py`/`damage.py` 改造
 > 依据：`mydocs/battle_docs.md` §7 引擎主循环 / §12 迁移路径第 1–4 步
-> 护栏：`tests/test_v3_sentinel.py`（行为等价哨兵）+ 全量 **600 passed** + 覆盖率 94% + 确定性 digest 一致
+> 护栏：`tests/test_v3_sentinel.py`（行为等价哨兵）+ 全量 **621 passed** + 覆盖率 94% + 确定性 digest 一致
 
 ---
 
@@ -24,19 +26,21 @@ SkillEffect（旧大字段袋）
 Atom 列表（类型化 Effect：SpendEnergy / RevealSkill / DealDamage / HealPct /
             AddModifier / GainEnergy / BenchEnergy / Lifesteal / StealEnergy /
             FoeCostGain / TraitGain）
-   │  reducer.reduce_all(state, atoms, frame)
+   │  pipeline.run(state, atoms, frame, after=SkillResolved, collector)
    ▼
 状态修改（唯一写入口，走 damage/primitives 漏斗）+ 展示事件（ev()，形状不变）
-   │  同时产出 DomainEvent（DamageApplied / EnergyChanged / SkillResolved…）
+   │  Reducer 把 DomainEvent（DamageApplied / EnergyChanged / StatModChanged…）
+   │  挂进 frame.domain_events —— pipeline 回传给 Trigger（Phase 3.1 通道）
    ▼
 triggers.collect_reactions(state, event, unit, trait_defs) → 新 Atom 列表
    │  （当前接 SKILL_RESOLVE：特性效果 → TraitGain Atom）
    ▼
-reducer 再次执行（写 trait.gains）
+pipeline 把新 Atom 交回 reducer 执行 → 新事件继续反应，直至静默（fixpoint）
 ```
 
-**依赖方向**：`engine → compiler → atom`；`engine → reducer → atom/domain/modifiers`；
-`hooks → triggers → atom/domain`。`reducer`/`compiler` 不 import engine（无循环依赖）。
+**依赖方向**：`engine → pipeline → reducer/triggers`；`engine → compiler → atom`；
+`engine/prediction → damage → models`。`reducer`/`compiler`/`pipeline` 不 import engine
+（无循环依赖）。
 
 ---
 
@@ -45,13 +49,16 @@ reducer 再次执行（写 trait.gains）
 | 文件 | 职责 | 关键点 |
 |---|---|---|
 | `atom.py` | 类型化 Effect（Atom）声明层 | 每个 Atom 是 frozen dataclass、纯数据；**持 Unit 对象引用**（回合内局部，不序列化，规避 unit_id 依赖） |
-| `domain.py` | DomainEvent 内部事实 | Trigger 的输入；与展示事件（EVENT_TYPES dict）严格分开 |
-| `modifiers.py` | ModifierPipeline 纯函数修正层 | `DamageQuery` + `compute`；克制/STAB/应对乘子/减伤折叠进 multiplier，纯函数不改状态 |
+| `domain.py` | DomainEvent 内部事实 | Trigger 的输入；与展示事件（EVENT_TYPES dict）严格分开；2026-08-30 增 TurnStarted（携预估） |
+| `modifiers.py` | DamageQuery + 管线终点 | `compute` 一行委托 `damage.formula`（唯一伤害公式在 damage.py，2026-08-30 规范） |
 | `compiler.py` | 技能编译器 | SkillEffect → 有序 Atom 列表；顺序与旧 resolve_skill 逐位一致（扣能→揭示→伤害段→资源效果） |
-| `reducer.py` | Reducer 表 | 每个 Atom 一个 reducer，唯一改状态；产出 DomainEvent + 展示事件（形状不变） |
-| `triggers.py` | Trigger 收集器 | `collect_reactions`：事件 → 新 Atom；当前接 SKILL_RESOLVE 特性 |
-| `engine.py` | resolve_skill 换芯 | 校验 → `_combat_skill` → `compile_skill` → `reduce_all` → `emit`（特性） |
-| `hooks.py` | emit 委托 | 构造 SkillResolved 事件 → `collect_reactions` → `reduce_all`（Phase 3） |
+| `reducer.py` | Reducer 表 | 每个 Atom 一个 reducer，唯一改状态；领域事件挂 `frame.domain_events`（Phase 3.1，不再构造即弃） |
+| `triggers.py` | Trigger 收集器 | `collect_reactions`：事件 → 新 Atom；当前接 SKILL_RESOLVE 特性；`unit=None` 放宽（TURN_END 等无施法者事件） |
+| `pipeline.py` | **反应执行器（Phase 3.1）** | 全库唯一 fixpoint 循环 `run()`：原子执行 → 领域事件回传 → 收集反应 → 再执行至静默；`after` 回调（SkillResolved 读 dealt_counter）排原子领域事件之后；保护闸 budget/max_events 超限确定性 warn+停止 |
+| `prediction.py` | **确定性预估（2026-08-30）** | predict_power/predict_damage/predictions_for 纯函数（无应对倍率、无 RNG、不入状态）；view 提示 + TURN_START 事件携带 |
+| `damage.py` | **唯一伤害公式（2026-08-30）** | `formula()` 顺序求值出口 int() 一次；`build_damage_terms`（flat 留属性、pct 进比值、attack_power 激活）；`compute_damage` 兼容入口 |
+| `engine.py` | resolve_skill 换芯 | 校验 → `_combat_skill` → `compile_skill` → `pipeline.run`；resolve_turn 入口发 TurnStarted、end_of_turn 发 TurnEnded |
+| `hooks.py` | emit 兼容 shim | 委托 `pipeline.run`（测试直调场景保留）；对外行为与旧直写逐位一致 |
 
 ---
 
@@ -87,23 +94,42 @@ reducer 再次执行（写 trait.gains）
 
 ## 5. 审计清单（负责人逐项核）
 
-- [ ] `resolve_skill` 已无 20 字段 if 分支（只剩校验 + compile + reduce + emit）。
-- [ ] 展示事件形状与旧引擎逐位一致（哨兵 4 项验证）。
-- [ ] `hooks.emit` 已委托 collect_reactions + reduce_all（特性也走事件→Atom→Reducer）。
-- [ ] 四层管道文件各自职责单一、可单测（后续按需补单测）。
-- [ ] 新文件零依赖 cycle（reducer/compiler 不 import engine）。
-- [ ] 596 既有测试 + 4 哨兵全绿、覆盖率 94%。
+- [x] `resolve_skill` 已无 20 字段 if 分支（只剩校验 + compile + pipeline.run）。
+- [x] 展示事件形状与旧引擎逐位一致（哨兵 4 项验证）。
+- [x] `hooks.emit` 已委托 pipeline.run（特性走事件→Atom→Reducer，shim 保留）。
+- [x] **DomainEvent 回传通道已通**（Phase 3.1）：Reducer 领域事件挂 `frame.domain_events`，
+      由 `pipeline.run` 回传给 Trigger——印记/天气/DOT 接入的地基（原审计问题①）。
+- [x] **回合边界执行点已铺**（Phase 3.1）：`resolve_turn` 入口发 TurnStarted（携预估）、
+      `end_of_turn` 发 TurnEnded——原审计问题③。
+- [x] **唯一伤害公式已落地**（2026-08-30 规范）：`damage.formula` 单一事实源、
+      `modifiers.compute`/`compute_damage` 均委托——原审计问题②。
+- [x] 四层管道文件各自职责单一、可单测（pipeline/prediction/formula 有专测）。
+- [x] 新文件零依赖 cycle（reducer/compiler/pipeline 不 import engine）。
+- [x] 621 既有+新增测试 + 4 哨兵全绿、确定性 3× 一致。
 
 ---
 
 ## 6. 后续接入点（骨架已就位，等下一步填充）
 
-| 系统 | 接入位置 |
-|---|---|
-| 印记（mark） | `triggers.collect_reactions` 增加对 Marks 的绑定收集；`SideState.marks` 已在数据协议 v2 落地 |
-| 天气（weather） | `modifiers.py` 管线两端挂 ATTACK_POWER / SKILL_COST 读钩子；`BattleState.weather` 已落地 |
-| 纯负面 buff（DOT） | TURN_END 事件 → Trigger → LoseHp Atom；reducer 已有 HealPct 同类原语可扩展 |
-| 防御冷却 | TURN_END 递减 `current_skills[].cooldown` |
-| 阵亡补位语义 | session 层（回合边界被动补位，见 battle_docs §9） |
+| 系统 | 接入位置 | 通道状态 |
+|---|---|---|
+| 印记（mark） | `triggers.collect_reactions` 增加对 Marks 的绑定收集；`SideState.marks` 已在数据协议 v2 落地 | ✅ 事件回传通道已通（问题①） |
+| 天气（weather） | `damage.formula` 的 weather 项（恒 1.0）挂 ATTACK_POWER 读钩子；`BattleState.weather` 已落地 | ✅ 公式落位已定 |
+| 纯负面 buff（DOT） | TurnEnded 事件 → Trigger → LoseHp Atom；reducer 已有 HealPct 同类原语可扩展 | ✅ TURN_END 执行点已铺（问题③） |
+| 防御冷却 | TURN_END 递减 `current_skills[].cooldown` | ✅ 同上 |
+| 回合开始预估特性 | TurnStarted 事件携带双侧 `predictions`（预估威力/预估伤害） | ✅ 已发事件，等绑定 |
+| 阵亡补位语义 | session 层（回合边界被动补位，见 battle_docs §9） | ⬜ 设计稿，未实施 |
 
 **加一种新效果 = 加一个 Atom 类型 + 一个 reducer + 一条 Trigger 绑定，引擎零改动**（v3 扩展铁律）。
+
+---
+
+## 7. 施工变更记录（2026-08-30 Phase 3.1）
+
+| 变更 | 落点 |
+|---|---|
+| **伤害公式规范**（负责人拍板）：`damage.formula` 唯一公式——顺序求值出口 int() 一次；flat 层留属性、pct 层进比值项（四分量夹 cap）；attack_power 激活（flat→威力绝对值 +10×层、pct→威力百分比 +10%×层）；应对倍率先乘基础威力再加绝对值；天气项落位（恒 1.0）；逐段结算（连击数不进公式） | damage.py / modifiers.py / reducer.py |
+| **预估体系**：predict_power（无应对倍率）/ predict_damage（×0.9×确定连击数，无 min_damage）/ predictions_for；view me 侧 `predictions` 提示；预估不入状态（派生量） | prediction.py / view.py |
+| **反应管道**：`pipeline.run` fixpoint 循环（Frame.domain_events 回传 + 保护闸 budget/max_events 确定性 warn+停止）；engine.resolve_skill 换芯；hooks.emit 变 shim；collect_reactions 放宽 unit=None | pipeline.py / reducer.py / engine.py / hooks.py / triggers.py |
+| **回合边界执行点**：TurnStarted（携双侧预估，resolve_turn 入口）+ TurnEnded（end_of_turn）；end_turn 合并回合末事件 | domain.py / engine.py |
+| 哨兵零重钉：既有 600 测试 + 4 哨兵原样通过（新旧公式差异场景零覆盖），新规则由 `tests/test_environment_formula.py` 钉死 | tests/ |

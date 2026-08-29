@@ -204,6 +204,8 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
    - `statuses` dict → 并入 `stat_mods`（`mode="dot"`）；
    - `base_stats` 缺失 → fallback 到 `stats`；`trait` 缺失 → None。
 3. 静态定义查表（技能效果 / 特性 / 印记 / 天气），状态只存引用 + 运行时实例 → 升级效果不迁移历史状态。
+4. **预估是派生量**（2026-08-30）：预估威力/预估伤害按需计算、不入状态（TURN_START 事件携带），
+   `to_dict/from_dict` 不涉及。
 
 ---
 
@@ -265,5 +267,8 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | 引擎从 `current_skills` 构建 combat Skill（effect 按名查 P1∪P2） | engine.py `_combat_skill` |
 | 旧快照容错（energy_cost_mods / statuses / v1 字符串 skills） | models.py `_unit_from_dict` |
 | 公式口径统一：`_STAT_GROWTH_BASE=10`（docstring 由 50 改为 10） | statline.py（⚠️ 待负责人最终确认） |
+| **伤害公式规范（2026-08-30 拍板）**：唯一公式 `damage.formula`——顺序求值出口 int() 一次；flat 层留属性、pct 层进比值项；attack_power 激活（flat→威力绝对值、pct→威力百分比）；应对倍率先乘后加；天气项落位（恒 1.0） | damage.py / modifiers.py / reducer.py |
+| **预估体系（2026-08-30）**：预估威力/预估伤害纯函数；view me 侧 `predictions` 提示；预估是**派生量不进状态**（不入 to_dict/from_dict，state_hash 不变） | prediction.py / view.py |
+| **反应管道 + 回合边界事件（2026-08-30）**：`pipeline.run` fixpoint 循环（Frame.domain_events 回传）；TurnStarted（携预估）/ TurnEnded | pipeline.py / domain.py / engine.py |
 
 **待负责人确认**：① 六维公式口径（`_STAT_GROWTH_BASE` 10 vs 50）；② roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
