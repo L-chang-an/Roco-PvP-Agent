@@ -33,7 +33,7 @@ from typing import Any
 from .dataset import DataSource, load_skills
 from .rng import BattleRng
 from .rules import DEFAULT_RULES, ITEMS, BattleRules
-from .skillbook import P1_EFFECTS, P2_EFFECTS, battle_ready
+from .skillbook import MW_EFFECTS, P1_EFFECTS, P2_EFFECTS, battle_ready
 
 SIDES: tuple[str, str] = ("a", "b")
 
@@ -482,10 +482,10 @@ def skill_from_instance(inst: SkillInstance) -> Skill | None:
     """从 `SkillInstance`（当前回合技能详情）构建引擎 Skill。
 
     数据协议 v2：五要素取实例（愿力替换 / 冷却后的能耗、威力、类别以 current_skills
-    为准），效果按名查 P1∪P2 表；不在白名单 → None。engine._combat_skill 与
+    为准），效果按名查 P1∪P2∪MW 表；不在白名单 → None。engine._combat_skill 与
     prediction（预估）共用此构造，消灭复制。
     """
-    effect = P1_EFFECTS.get(inst.name) or P2_EFFECTS.get(inst.name)
+    effect = P1_EFFECTS.get(inst.name) or P2_EFFECTS.get(inst.name) or MW_EFFECTS.get(inst.name)
     if effect is None:
         return None
     return Skill(name=inst.name, kind=inst.kind, type=inst.type, power=inst.power,
@@ -494,13 +494,13 @@ def skill_from_instance(inst: SkillInstance) -> Skill | None:
 
 
 def _skill_from_name(name: str) -> Skill:
-    """按名从可对战白名单（P1 ∪ P2）重建 Skill（from_dict 用）。
+    """按名从可对战白名单（P1 ∪ P2 ∪ MW）重建 Skill（from_dict 用）。
 
-    技能数据查 `load_skills()`（默认 FULL 权威表）；效果查 `P1_EFFECTS ∪ P2_EFFECTS`；
-    `priority`（先手修正）从效果表读。名字不在白名单 → KeyError（不该发生）。
+    技能数据查 `load_skills()`（默认 FULL 权威表）；效果查 `P1_EFFECTS ∪ P2_EFFECTS
+    ∪ MW_EFFECTS`；`priority`（先手修正）从效果表读。名字不在白名单 → KeyError（不该发生）。
     """
     raw = load_skills().get(name)
-    effect = P1_EFFECTS.get(name) or P2_EFFECTS.get(name)
+    effect = P1_EFFECTS.get(name) or P2_EFFECTS.get(name) or MW_EFFECTS.get(name)
     if raw is None or effect is None:
         raise KeyError(f"技能「{name}」不在可对战白名单（P1 ∪ P2）。")
     return Skill(

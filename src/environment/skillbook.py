@@ -65,6 +65,18 @@ class SkillStatEffect:
 
 
 @dataclass(frozen=True)
+class SkillMarkEffect:
+    """状态/防御系一条印记效果（印记/天气批 2026-08-30）：目标 + 印记名 + 层数。
+
+    印记名在编译时查 `marks.MARK_CATALOG`（未知名 → 不编译）。
+    """
+
+    target: str        # "self" | "foe"
+    name: str          # 印记名（MARK_CATALOG 键）
+    layers: int
+
+
+@dataclass(frozen=True)
 class SkillEffect:
     """一个技能的全部结构化效果。引擎永不读 `desc`——desc 只用于展示与将来的提示词。
 
@@ -107,6 +119,11 @@ class SkillEffect:
     counter_extra_layers: int = 0            # 状态系应对成功时的额外层数
     stat_effects: tuple[SkillStatEffect, ...] = ()   # 状态系每连击应用
     buff_effects: tuple[SkillStatEffect, ...] = ()   # 一次性目标效果（连击/吸血/能耗）
+    # 印记/天气批（2026-08-30）
+    mark_effects: tuple[SkillMarkEffect, ...] = ()          # 状态系每连击应用（普通施加以 hits=1）
+    counter_mark_effects: tuple[SkillMarkEffect, ...] = ()  # 防御系应对命中时施加
+    set_weather: str = ""       # 天气名（雨天/沙暴/暴风雪/雷鸣；"" = 无）
+    weather_turns: int = 0      # 天气持续回合
 
 
 def category_of(skill) -> SkillCategory:
@@ -184,7 +201,7 @@ def compile_p1_effect(skill: RawSkill) -> SkillEffect | None:
       - 纯六维状态：「自己获得 / 敌方获得 …」（多目标/多维度经 stat_effects）
     desc 推得的类别与 kind 矛盾（数据异常）→ None，不编译。
     """
-    desc = skill.desc.strip().rstrip("。")
+    desc = skill.desc.strip().rstrip("。").strip()
     if desc in ("对敌方精灵造成物理伤害", "对敌方精灵造成魔法伤害"):
         effect = SkillEffect(category=SkillCategory.ATTACK)
     elif re.fullmatch(r"减伤\d+%，应对攻击", desc) is not None:
@@ -228,6 +245,14 @@ def _status(skill: RawSkill, **kw) -> SkillEffect | None:
 
 def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
     """处理所有含「连击」描述的技能：连击伤害 / 连击buff / 每连击状态 / 虫鸣；歧义 → None。"""
+    # 连击 + 印记（印记/天气批 2026-08-30）：N连击，每次连击使?敌方获得M层X印记（星链）
+    m = re.fullmatch(r"(\d+)连击，每次连击使?敌方获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(3)
+        if mark not in _mark_names():
+            return None
+        return _status(skill, hits=int(m.group(1)), combo_eligible=True,
+                       mark_effects=(SkillMarkEffect("foe", mark, int(m.group(2))),))
     # 虫鸣：队伍中每携带 1 个 X，本次技能连击数 +1
     m = re.fullmatch(rf"造成{_DMG}，队伍中的精灵每携带1个(.+?)，本次技能连击数\+1", desc)
     if m is not None:
@@ -285,7 +310,7 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     含「连击」的 desc 走 P2 连击路径（含歧义拦截）；其余先试 P2 非连击模式（先手 /
     吸血 / 能量 / 场下 / 每连击…），再兜底 P1 模式（纯伤害 / 纯防御 / 纯六维状态）。
     """
-    desc = skill.desc.strip().rstrip("。")
+    desc = skill.desc.strip().rstrip("。").strip()
     if "连击" in desc:
         return _compile_combo_effect(skill, desc)
 
@@ -349,8 +374,41 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     if m is not None:
         return _status(skill, energy_foe_cost_ratio=0.5)
 
+    # ── 印记/天气模式（2026-08-30：施加类；驱散/偷取/转化/条件类不匹配 → 下批）──
+    # 获得 N 层 X 印记（主场优势/棘刺/光合作用/打湿/蓄势待发/速冻/龙威/增程电池/…）
+    m = re.fullmatch(r"(自己|敌方)获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(3)
+        if mark not in _mark_names():
+            return None
+        return _status(skill, mark_effects=(SkillMarkEffect(
+            "self" if m.group(1) == "自己" else "foe", mark, int(m.group(2))),))
+    # 减伤 + 应对攻击施加印记（潮汐/冰蛋壳/委屈/冥想）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：(.+?)获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(4)
+        if mark not in _mark_names():
+            return None
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_mark_effects=(SkillMarkEffect(
+                "self" if m.group(2) == "自己" else "foe", mark, int(m.group(3))),)),
+            skill)
+    # 将天气改为 X，持续 N 回合（落雨/沙涌/冬至/惊雷）
+    m = re.fullmatch(r"将天气改为(雨天|沙暴|暴风雪|雷鸣)，持续(\d+)回合", desc)
+    if m is not None:
+        return _status(skill, set_weather=m.group(1), weather_turns=int(m.group(2)))
+
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
+
+
+def _mark_names() -> frozenset[str]:
+    """印记目录名集合（编译时校验：未知名印记 → 不编译）。"""
+    from .marks import MARK_CATALOG
+
+    return frozenset(MARK_CATALOG)
 
 
 def _load_p1_names() -> frozenset[str]:
@@ -389,6 +447,22 @@ for _name in sorted(_load_p2_names()):
         P2_EFFECTS[_name] = _effect
 
 
+# 印记/天气白名单（2026-08-30）：扫描 FULL 表，编译命中印记/天气模式的技能。
+# 施加类（获得N层印记 / 应对施印 / 连击施印 / 设置天气）；驱散/偷取/转化/条件类
+# 不匹配任何模式 → 自动排除（下批）。FULL 表存在「模式形状但数值不可解析」的描述
+# （如「自己获得全技能威力+10%」命中 P1 状态分支后 parse 失败）→ ValueError 视为
+# 未命中；批次锚定表（P1/P2）的严格校验由各自测试钉死，不受此容错影响。
+MW_EFFECTS: dict[str, SkillEffect] = {}
+for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
+    try:
+        _effect = compile_effect(_skill)
+    except ValueError:
+        _effect = None
+    if _effect is not None and (_effect.mark_effects or _effect.counter_mark_effects
+                                or _effect.set_weather):
+        MW_EFFECTS[_name] = _effect
+
+
 def battle_ready(name: str) -> bool:
-    """可对战白名单：P1 效果表 ∪ P2 效果表都覆盖的技能名。"""
-    return name in P1_EFFECTS or name in P2_EFFECTS
+    """可对战白名单：P1 效果表 ∪ P2 效果表 ∪ 印记/天气（MW）效果表。"""
+    return name in P1_EFFECTS or name in P2_EFFECTS or name in MW_EFFECTS

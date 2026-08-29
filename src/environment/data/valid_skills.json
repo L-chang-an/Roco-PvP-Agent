@@ -96,6 +96,22 @@
     "energy": "2"
   },
   {
+    "name": "主场优势",
+    "type": "普通",
+    "kind": "状态",
+    "desc": "自己获得1层攻击印记。",
+    "strong": null,
+    "energy": "3"
+  },
+  {
+    "name": "棘刺",
+    "type": "普通",
+    "kind": "状态",
+    "desc": "敌方获得1层棘刺印记。",
+    "strong": null,
+    "energy": "2"
+  },
+  {
     "name": "防御",
     "type": "普通",
     "kind": "防御",
@@ -318,6 +334,14 @@
     "desc": "自己获得物攻和魔攻+140%。",
     "strong": null,
     "energy": "3"
+  },
+  {
+    "name": "光合作用",
+    "type": "草",
+    "kind": "状态",
+    "desc": "自己获得1层光合印记。",
+    "strong": null,
+    "energy": "4"
   },
   {
     "name": "汲取",
@@ -552,6 +576,22 @@
     "energy": "7"
   },
   {
+    "name": "打湿",
+    "type": "水",
+    "kind": "状态",
+    "desc": "自己获得1层湿润印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
+    "name": "落雨",
+    "type": "水",
+    "kind": "状态",
+    "desc": "将天气改为雨天，持续8回合。",
+    "strong": null,
+    "energy": "5"
+  },
+  {
     "name": "水光冲击",
     "type": "水",
     "kind": "魔攻",
@@ -613,6 +653,14 @@
     "kind": "魔攻",
     "desc": "对敌方精灵造成魔法伤害。",
     "strong": "120",
+    "energy": "4"
+  },
+  {
+    "name": "潮汐",
+    "type": "水",
+    "kind": "防御",
+    "desc": "减伤60%，应对攻击：自己获得1层湿润印记。",
+    "strong": null,
     "energy": "4"
   },
   {
@@ -728,6 +776,14 @@
     "energy": "10"
   },
   {
+    "name": "沙涌",
+    "type": "地",
+    "kind": "状态",
+    "desc": "将天气改为沙暴，持续8回合。",
+    "strong": null,
+    "energy": "7"
+  },
+  {
     "name": "泥浆",
     "type": "地",
     "kind": "魔攻",
@@ -790,6 +846,14 @@
     "desc": "自己获得物防+140%和速度-30。",
     "strong": null,
     "energy": "3"
+  },
+  {
+    "name": "蓄势待发",
+    "type": "地",
+    "kind": "状态",
+    "desc": "自己获得1层蓄势印记。",
+    "strong": null,
+    "energy": "4"
   },
   {
     "name": "风吹雪",
@@ -856,6 +920,30 @@
     "energy": "3"
   },
   {
+    "name": "速冻",
+    "type": "冰",
+    "kind": "状态",
+    "desc": "敌方获得2层减速印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
+    "name": "冰蛋壳",
+    "type": "冰",
+    "kind": "防御",
+    "desc": "减伤70%，应对攻击：敌方获得2层减速印记。",
+    "strong": null,
+    "energy": "3"
+  },
+  {
+    "name": "冬至",
+    "type": "冰",
+    "kind": "状态",
+    "desc": "将天气改为暴风雪，持续8回合。",
+    "strong": null,
+    "energy": "7"
+  },
+  {
     "name": "霜冻",
     "type": "冰",
     "kind": "状态",
@@ -904,6 +992,14 @@
     "energy": "5"
   },
   {
+    "name": "龙威",
+    "type": "龙",
+    "kind": "状态",
+    "desc": "自己获得1层龙噬印记 。",
+    "strong": null,
+    "energy": "3"
+  },
+  {
     "name": "导电撞击",
     "type": "电",
     "kind": "物攻",
@@ -917,6 +1013,14 @@
     "kind": "魔攻",
     "desc": "对敌方精灵造成魔法伤害。",
     "strong": "80",
+    "energy": "2"
+  },
+  {
+    "name": "增程电池",
+    "type": "电",
+    "kind": "状态",
+    "desc": "自己获得1层蓄电印记。",
+    "strong": null,
     "energy": "2"
   },
   {
@@ -968,6 +1072,14 @@
     "energy": "1"
   },
   {
+    "name": "惊雷",
+    "type": "电",
+    "kind": "状态",
+    "desc": "将天气改为雷鸣，持续8回合。",
+    "strong": null,
+    "energy": "5"
+  },
+  {
     "name": "毒泡泡",
     "type": "毒",
     "kind": "魔攻",
@@ -997,6 +1109,14 @@
     "kind": "魔攻",
     "desc": "对敌方精灵造成魔法伤害。",
     "strong": "100",
+    "energy": "3"
+  },
+  {
+    "name": "疫病吐息",
+    "type": "毒",
+    "kind": "状态",
+    "desc": "敌方获得1层中毒印记。",
+    "strong": null,
     "energy": "3"
   },
   {
@@ -1128,6 +1248,14 @@
     "energy": "2"
   },
   {
+    "name": "风起",
+    "type": "翼",
+    "kind": "状态",
+    "desc": "自己获得1层风起印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
     "name": "暴风眼",
     "type": "翼",
     "kind": "状态",
@@ -1224,6 +1352,14 @@
     "energy": "5"
   },
   {
+    "name": "委屈",
+    "type": "萌",
+    "kind": "防御",
+    "desc": "减伤70%，应对攻击：自己获得1层萌芽印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
     "name": "可爱",
     "type": "萌",
     "kind": "魔攻",
@@ -1232,12 +1368,28 @@
     "energy": "3"
   },
   {
+    "name": "加油",
+    "type": "萌",
+    "kind": "状态",
+    "desc": "自己获得1层萌芽印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
     "name": "鬼火",
     "type": "幽",
     "kind": "魔攻",
     "desc": "造成魔伤，自己回复1能量。",
     "strong": "30",
     "energy": "0"
+  },
+  {
+    "name": "降灵",
+    "type": "幽",
+    "kind": "状态",
+    "desc": "敌方获得1层降灵印记。",
+    "strong": null,
+    "energy": "2"
   },
   {
     "name": "恐吓",
@@ -1376,6 +1528,14 @@
     "energy": "6"
   },
   {
+    "name": "纺纱",
+    "type": "恶",
+    "kind": "状态",
+    "desc": "敌方获得1层暗涌印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
     "name": "念力膨胀",
     "type": "幻",
     "kind": "物攻",
@@ -1390,6 +1550,30 @@
     "desc": "造成物伤，自己回复1能量。",
     "strong": "30",
     "energy": "0"
+  },
+  {
+    "name": "超维投射",
+    "type": "幻",
+    "kind": "状态",
+    "desc": "敌方获得4层星陨印记。",
+    "strong": null,
+    "energy": "4"
+  },
+  {
+    "name": "星轨裂变",
+    "type": "幻",
+    "kind": "状态",
+    "desc": "敌方获得2层星陨印记。",
+    "strong": null,
+    "energy": "1"
+  },
+  {
+    "name": "星链",
+    "type": "幻",
+    "kind": "状态",
+    "desc": "2连击，每次连击使敌方获得1层星陨印记。",
+    "strong": null,
+    "energy": "3"
   },
   {
     "name": "粒子对撞",
@@ -1429,6 +1613,14 @@
     "kind": "魔攻",
     "desc": "对敌方精灵造成魔法伤害。",
     "strong": "100",
+    "energy": "3"
+  },
+  {
+    "name": "冥想",
+    "type": "幻",
+    "kind": "防御",
+    "desc": "减伤80%，应对攻击：敌方获得2层星陨印记。",
+    "strong": null,
     "energy": "3"
   }
 ]

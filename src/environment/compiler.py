@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .atom import (
-    AddModifier, BenchEnergy, DealDamage, FoeCostGain, GainEnergy, HealPct,
-    Lifesteal, RevealSkill, SpendEnergy, StealEnergy,
+    AddModifier, ApplyMark, BenchEnergy, DealDamage, FoeCostGain, GainEnergy,
+    HealPct, Lifesteal, RevealSkill, SetWeather, SpendEnergy, StealEnergy,
 )
 from .modifiers import effectiveness as eff_of
 from .modifiers import stab as stab_of
@@ -118,8 +118,28 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
         if effect.bench_energy_gain:
             atoms.append(BenchEnergy(side=side, self_unit=unit,
                                      amount=effect.bench_energy_gain, source=skill.name))
-    # DEFENSE：减伤已在 build_turn_context 武装，无额外 Atom（保持旧行为：防御不产事件）
+        if effect.mark_effects:
+            # 印记施加：每连击应用（普通施加以 hits=1；星链类按连击数逐次施印）
+            hits = _effective_hits(state, unit, skill, side)
+            for _ in range(hits):
+                atoms.extend(_mark_atoms(side, unit, skill, effect.mark_effects))
+    # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记（印记/天气批）
+    if effect.counter_mark_effects and ctx.counters(side):
+        atoms.extend(_mark_atoms(side, unit, skill, effect.counter_mark_effects))
+    # 天气设置（落雨/沙涌/冬至/惊雷）
+    if effect.set_weather:
+        atoms.append(SetWeather(kind=effect.set_weather, turns=effect.weather_turns,
+                                source=skill.name))
     return atoms
+
+
+def _mark_atoms(side: str, unit: "Unit", skill: "Skill", effects) -> list["Atom"]:
+    """印记施加原子：target=foe → 敌方阵营；space 按施法者特性路由
+    （吟游之弦 → exclusive 独立空间，共存不顶替）。"""
+    foe = "b" if side == "a" else "a"
+    space = "exclusive" if (unit.trait and unit.trait.name == "吟游之弦") else "normal"
+    return [ApplyMark(side=side if me.target == "self" else foe, name=me.name,
+                      layers=me.layers, source=skill.name, space=space) for me in effects]
 
 
 def _effective_hits(state, unit, skill, side) -> int:

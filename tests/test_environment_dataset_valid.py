@@ -1,4 +1,4 @@
-"""E3 valid_skills.json 数据层测试：179 个已实装效果的技能、格式与 full_skills 一致。"""
+"""E3 valid_skills.json 数据层测试：已实装效果的技能（P1∪P2∪MW）、格式与 full_skills 一致。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from environment.dataset import DataSource, load_skills, load_spirits
-from environment.skillbook import P1_EFFECTS, P2_EFFECTS, battle_ready
+from environment.skillbook import MW_EFFECTS, P1_EFFECTS, P2_EFFECTS, battle_ready
 
 DATA = Path(__file__).resolve().parents[1] / "src" / "environment" / "data"
 VALID = DataSource.VALID
@@ -17,10 +17,10 @@ def _raw_file(path: Path) -> list[dict]:
 
 
 def test_valid_skills_count_and_set() -> None:
-    """179 个 = P1∪P2 白名单 = battle_ready 集合。"""
+    """valid 池 = P1∪P2∪MW 白名单 = battle_ready 集合。"""
     valid = load_skills(VALID)
-    assert len(valid) == len(P1_EFFECTS) + len(P2_EFFECTS) == 179
-    assert set(valid) == set(P1_EFFECTS) | set(P2_EFFECTS)
+    assert len(valid) == len(P1_EFFECTS) + len(P2_EFFECTS) + len(MW_EFFECTS) == 203
+    assert set(valid) == set(P1_EFFECTS) | set(P2_EFFECTS) | set(MW_EFFECTS)
     full = load_skills(DataSource.FULL)
     assert {n for n in full if battle_ready(n)} == set(valid)
 
