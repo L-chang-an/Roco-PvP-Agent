@@ -62,6 +62,14 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                 effectiveness=eff, stab=stab, counter_cat=counter_cat,
                 acted_first=acted_first,
             ))
+            # 每连击状态附加（DOT 批 2026-08-30：毒针/易燃物质类——逐击施加）
+            for se in effect.stat_effects:
+                tgt = unit if se.target == "self" else target
+                atoms.append(AddModifier(side=side, unit=tgt, stat=se.stat,
+                                         mode=se.mode, layers=se.layers,
+                                         source=skill.name, target=se.target,
+                                         counter_cat=counter_cat,
+                                         kwargs=dict(se.kwargs)))
         if effect.self_energy_gain:
             atoms.append(GainEnergy(side=side, unit=unit, amount=effect.self_energy_gain,
                                     source=skill.name, target="self"))
@@ -83,7 +91,8 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
     elif effect.category == SkillCategory.STATUS:
         counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
         if effect.stat_effects:
-            # P1/P2 状态系：每连击应用 stat_effects（花炮/冰捆缚/缓一缓…）
+            # P1/P2 状态系：每连击应用 stat_effects（花炮/冰捆缚/缓一缓…；
+            # DOT 批：状态施加同样走此路径，kwargs 随记录进 stat_mods）
             hits = _effective_hits(state, unit, skill, side)
             for _ in range(hits):
                 for se in effect.stat_effects:
@@ -91,7 +100,8 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                     atoms.append(AddModifier(side=side, unit=tgt, stat=se.stat,
                                              mode=se.mode, layers=se.layers,
                                              source=skill.name, target=se.target,
-                                             counter_cat=counter_cat))
+                                             counter_cat=counter_cat,
+                                             kwargs=dict(se.kwargs)))
         elif effect.stat or effect.layers:
             # E0 教学：单条自身状态
             layers = effect.layers + (effect.counter_extra_layers if ctx.counters(side) else 0)

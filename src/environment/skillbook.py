@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
 from .dataset import DataSource, RawSkill, load_skills
+from .statuses import STATUS_TABLE, status_kwargs
 
 
 class SkillCategory(str, Enum):
@@ -56,12 +57,15 @@ class SkillStatEffect:
       - "combo"：连击数buff（flat 1 层 = +1 连击；pct 1 层 = +10%）
       - "lifesteal"：吸血buff（flat 1 层 = +100% 吸血）
       - "energy_cost"：全技能能耗（正值 = 能耗+N → 内部 EnergyCostMod 层 -N）
+      - 纯负面中文名（中毒/灼烧/寄生/冻结/引电/萌化）：mode = dot/special，
+        kwargs 从 statuses.STATUS_TABLE 取（DOT 批 2026-08-30）
     """
 
     target: str        # "self" | "foe"
-    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost
-    mode: str          # "pct" | "flat"
+    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost/中毒/…
+    mode: str          # "pct" | "flat" | "dot" | "special"
     layers: int        # 有符号（-6 = -60% 等）
+    kwargs: dict = field(default_factory=dict)   # 纯负面 buff 扩展参数
 
 
 @dataclass(frozen=True)
@@ -253,6 +257,16 @@ def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
             return None
         return _status(skill, hits=int(m.group(1)), combo_eligible=True,
                        mark_effects=(SkillMarkEffect("foe", mark, int(m.group(2))),))
+    # 连击 + 状态（DOT 批 2026-08-30）：N连击，每次连击(使?敌方)获得M层X
+    m = re.fullmatch(r"(\d+)连击，每次连击使?敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _status(skill, hits=int(m.group(1)), combo_eligible=True,
+                       stat_effects=tuple(_status_effect("foe", m.group(3), int(m.group(2)))))
+    # 连击伤害 + 状态（DOT 批）：造成X，N连击，每次连击使?敌方获得M层X（易燃物质/连续毒针）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击，每次连击使?敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       stat_effects=tuple(_status_effect("foe", m.group(3), int(m.group(2)))))
     # 虫鸣：队伍中每携带 1 个 X，本次技能连击数 +1
     m = re.fullmatch(rf"造成{_DMG}，队伍中的精灵每携带1个(.+?)，本次技能连击数\+1", desc)
     if m is not None:
@@ -400,8 +414,24 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     if m is not None:
         return _status(skill, set_weather=m.group(1), weather_turns=int(m.group(2)))
 
+    # ── DOT 状态模式（2026-08-30：A 类施加；应对/条件/驱散/转化类不匹配 → 下批）──
+    # 敌方获得 N 层 X（退化/孢子/引燃/霜降/毒孢子）
+    m = re.fullmatch(r"敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _status(skill, stat_effects=tuple(_status_effect("foe", m.group(2), int(m.group(1)))))
+    # 造成(物|魔)伤，敌方获得 N 层 X（毒针/腐蚀酸液/烈焰风暴/花火/暴风雪/通电）
+    m = re.fullmatch(rf"造成{_DMG}，敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _attack(skill, stat_effects=tuple(_status_effect("foe", m.group(2), int(m.group(1)))))
+
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
+
+
+def _status_effect(target: str, name: str, layers: int) -> tuple[SkillStatEffect, ...]:
+    """状态施加效果：mode/kwargs 从 statuses.STATUS_TABLE 取（单一事实源）。"""
+    mode, _ = STATUS_TABLE[name]
+    return (SkillStatEffect(target, name, mode, layers, kwargs=status_kwargs(name)),)
 
 
 def _mark_names() -> frozenset[str]:
@@ -463,6 +493,23 @@ for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
         MW_EFFECTS[_name] = _effect
 
 
+# DOT 状态白名单（2026-08-30）：扫描 FULL 表，编译命中且含状态类 stat_effects 的技能。
+# A 类施加（获得N层X / 伤害+获得N层X / 连击逐击）；应对/条件/驱散/转化类不匹配 → 下批。
+def _has_status_effects(effect: SkillEffect) -> bool:
+    return any(se.stat in STATUS_TABLE for se in effect.stat_effects) \
+        or any(se.stat in STATUS_TABLE for se in effect.buff_effects)
+
+
+ST_EFFECTS: dict[str, SkillEffect] = {}
+for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
+    try:
+        _effect = compile_effect(_skill)
+    except ValueError:
+        _effect = None
+    if _effect is not None and _has_status_effects(_effect):
+        ST_EFFECTS[_name] = _effect
+
+
 def battle_ready(name: str) -> bool:
-    """可对战白名单：P1 效果表 ∪ P2 效果表 ∪ 印记/天气（MW）效果表。"""
-    return name in P1_EFFECTS or name in P2_EFFECTS or name in MW_EFFECTS
+    """可对战白名单：P1 效果表 ∪ P2 效果表 ∪ 印记/天气（MW）∪ DOT 状态（ST）。"""
+    return name in P1_EFFECTS or name in P2_EFFECTS or name in MW_EFFECTS or name in ST_EFFECTS

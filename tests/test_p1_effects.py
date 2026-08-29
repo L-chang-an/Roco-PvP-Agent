@@ -11,7 +11,7 @@ from pathlib import Path
 
 from environment.dataset import DataSource, load_skills
 from environment.skillbook import (
-    MW_EFFECTS,
+    MW_EFFECTS, ST_EFFECTS,
     P1_EFFECTS, P2_EFFECTS, P1_SKILLS_FILE, SkillCategory, SkillStatEffect,
     battle_ready, compile_p1_effect,
 )
@@ -126,9 +126,9 @@ def test_battle_ready_union() -> None:
 
 
 def test_battle_ready_has_179() -> None:
-    """可对战白名单 = P1 125 ∪ P2 54 ∪ MW 24 → 203（印记/天气批 2026-08-30）。"""
+    """可对战白名单 = P1 125 ∪ P2 54 ∪ MW 24 ∪ ST 14 → 217（DOT 批 2026-08-30）。"""
     ready = {n for n in FULL if battle_ready(n)}
-    assert len(ready) == len(P1_EFFECTS) + len(P2_EFFECTS) + len(MW_EFFECTS) == 203
+    assert len(ready) == len(P1_EFFECTS) + len(P2_EFFECTS) + len(MW_EFFECTS) + len(ST_EFFECTS) == 217
 
 
 # ── 数据一致性 ──

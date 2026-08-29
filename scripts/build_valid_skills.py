@@ -39,10 +39,10 @@ def main() -> int:
         loaded = json.loads(VALID_SKILLS.read_text("utf-8"))
         loaded_names = {s["name"] for s in loaded}
         problems = []
-        from environment.skillbook import MW_EFFECTS, P1_EFFECTS, P2_EFFECTS
-        expected = len(P1_EFFECTS) + len(P2_EFFECTS) + len(MW_EFFECTS)
+        from environment.skillbook import MW_EFFECTS, P1_EFFECTS, P2_EFFECTS, ST_EFFECTS
+        expected = len(P1_EFFECTS) + len(P2_EFFECTS) + len(MW_EFFECTS) + len(ST_EFFECTS)
         if len(loaded) != expected:
-            problems.append(f"应 {expected} 条（P1∪P2∪MW），实际 {len(loaded)}")
+            problems.append(f"应 {expected} 条（P1∪P2∪MW∪ST），实际 {len(loaded)}")
         if loaded_names != _battle_ready_names():
             problems.append("集合 ≠ battle_ready 集合")
         if any(s["name"] not in {x["name"] for x in _valid_entries()} for s in loaded):
