@@ -22,13 +22,14 @@ models/modifiers/primitives。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from .atom import (
     AddModifier, ApplyMark, BenchEnergy, ConsumeMarkLayers, DealDamage,
     FoeCostGain, GainEnergy, HealFlat, HealPct, Lifesteal, LoseEnergy, LoseHp,
-    RevealSkill, SetModLayers, SetWeather, SpendEnergy, StealEnergy, TraitGain,
+    RevealSkill, SetCooldown, SetModLayers, SetWeather, SpendEnergy,
+    StealEnergy, TraitGain,
 )
 from .damage import apply_heal, apply_hp_loss
 from .domain import (DamageApplied, EnergyChanged, HpChanged, MarkChanged,
@@ -303,6 +304,15 @@ def _reduce_set_mod_layers(state, atom: SetModLayers, frame: Frame) -> list[dict
     return []
 
 
+def _reduce_set_cooldown(state, atom: SetCooldown, frame: Frame) -> list[dict]:
+    """防御冷却（2026-08-30 拍板）：该精灵所有 kind=="防御" 的 current_skills 设
+    cd = max(现有, turns)。展示事件 cooldown（冷却值对敌可见，与 stat_mods 同口径）。"""
+    u = atom.unit
+    u.current_skills = [replace(s, cooldown=max(s.cooldown, atom.turns))
+                        if s.kind == "防御" else s for s in u.current_skills]
+    return [ev("cooldown", atom.side, unit=u.name, turns=atom.turns, source=atom.source)]
+
+
 def _reduce_lose_energy(state, atom: LoseEnergy, frame: Frame) -> list[dict]:
     u = atom.unit
     lost = min(atom.amount, u.energy)
@@ -343,6 +353,7 @@ _DISPATCH: dict[type, object] = {
     ConsumeMarkLayers: _reduce_consume_mark,
     HealFlat: _reduce_heal_flat,
     SetModLayers: _reduce_set_mod_layers,
+    SetCooldown: _reduce_set_cooldown,
 }
 
 

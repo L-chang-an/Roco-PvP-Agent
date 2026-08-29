@@ -77,10 +77,11 @@ def test_multihit_events_in_real_battle() -> None:
     # 若对局中出现连击伤害（随机出招可能没有），则事件必须带 hit/hits 且合法
     for e in multi:
         assert 1 <= e["hit"] <= e["hits"]
-    assert all(e["type"] in ("damage", "energy_gain", "steal", "stat_change", "heal",
-                             "recharge", "switch", "replace", "faint", "life_loss", "battle_end",
-                             "skipped", "item_use", "reduce_arm", "error")
-               for e in all_events)
+    # 所有事件类型必须在登记表内（mark/weather/energy_loss/cooldown 等后续批次
+    # 新增类型随之覆盖——对照 EVENT_TYPES 而非硬编码清单）
+    from environment.events import EVENT_TYPES
+
+    assert all(e["type"] in EVENT_TYPES for e in all_events)
 
 
 def test_markov_step_with_p2_skill() -> None:

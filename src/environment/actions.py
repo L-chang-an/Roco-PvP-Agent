@@ -42,15 +42,17 @@ class Decision:
 def skill_block_reason(state, side: str, unit, index) -> str | None:
     """唯一的技能门控谓词：可用 → None，否则中文原因。
     `legal_actions` 与 `validate_decision` **只能**通过它判断技能可用性。
-    E0 的门只有两道：① 槽位越界（含非 int）② 能量不足。
-    将来的冷却 / 禁足 / 蓄力锁 / 号位锁全部只加进本函数。
-    数据协议 v2：读 `current_skills`（当前生效视图，能耗以 current_skills 为准）；
+    三道门：① 槽位越界（含非 int）② 冷却中（防御冷却 2026-08-30）③ 能量不足。
+    将来的禁足 / 蓄力锁 / 号位锁全部只加进本函数。
+    数据协议 v2：读 `current_skills`（当前生效视图，能耗/冷却以 current_skills 为准）；
     印记/天气批（2026-08-30）：能耗含湿润/蓄势印记与沙暴修正。"""
     if isinstance(index, bool) or not isinstance(index, int):
         return f"技能槽位必须是整数，实际 {index!r}。"
     if index < 0 or index >= len(unit.current_skills):
         return f"技能槽位 {index} 越界（该单位有 {len(unit.current_skills)} 个技能）。"
     skill = unit.current_skills[index]
+    if skill.cooldown > 0:
+        return f"技能「{skill.name}」冷却中（剩余 {skill.cooldown} 回合）。"
     cost = skill_energy_cost(state, side, unit, skill.energy_cost, skill)
     if unit.energy < cost:
         return f"能量不足（技能「{skill.name}」需 {cost}，现有 {unit.energy}）。"

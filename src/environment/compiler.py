@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 
 from .atom import (
     AddModifier, ApplyMark, BenchEnergy, DealDamage, FoeCostGain, GainEnergy,
-    HealPct, Lifesteal, RevealSkill, SetWeather, SpendEnergy, StealEnergy,
+    HealPct, Lifesteal, RevealSkill, SetCooldown, SetWeather, SpendEnergy,
+    StealEnergy,
 )
 from .modifiers import effectiveness as eff_of
 from .modifiers import stab as stab_of
@@ -133,9 +134,12 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
             hits = _effective_hits(state, unit, skill, side)
             for _ in range(hits):
                 atoms.extend(_mark_atoms(side, unit, skill, effect.mark_effects))
-    # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记（印记/天气批）
+    # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记（印记/天气批）；
+    # 使用防御技能 → 该精灵所有防御技冷却一回合（2026-08-30 拍板，规则声明化）
     if effect.counter_mark_effects and ctx.counters(side):
         atoms.extend(_mark_atoms(side, unit, skill, effect.counter_mark_effects))
+    if effect.category == SkillCategory.DEFENSE:
+        atoms.append(SetCooldown(side=side, unit=unit, turns=1, source=skill.name))
     # 天气设置（落雨/沙涌/冬至/惊雷）
     if effect.set_weather:
         atoms.append(SetWeather(kind=effect.set_weather, turns=effect.weather_turns,

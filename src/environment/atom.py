@@ -203,6 +203,17 @@ class SetModLayers:
 
 
 @dataclass(frozen=True)
+class SetCooldown:
+    """防御技能冷却（2026-08-30 拍板）：该精灵所有 kind=="防御" 的 current_skills
+    设 cd = max(现有, turns)。使用防御技能 → 全防御技冷却一回合。"""
+
+    side: str
+    unit: "Unit"
+    turns: int
+    source: str
+
+
+@dataclass(frozen=True)
 class LoseEnergy:
     """失去能量（夹 0）。"""
 
@@ -242,5 +253,5 @@ Atom: TypeAlias = (
     SpendEnergy | RevealSkill | DealDamage | HealPct | AddModifier
     | GainEnergy | BenchEnergy | Lifesteal | StealEnergy | FoeCostGain | TraitGain
     | ApplyMark | SetWeather | LoseHp | LoseEnergy | ConsumeMarkLayers
-    | HealFlat | SetModLayers
+    | HealFlat | SetModLayers | SetCooldown
 )

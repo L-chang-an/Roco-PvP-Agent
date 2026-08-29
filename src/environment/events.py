@@ -15,6 +15,8 @@ EVENT_TYPES: frozenset[str] = frozenset({
     "energy_gain", "steal",
     # 印记/天气批（2026-08-30）
     "mark", "weather", "energy_loss",
+    # 防御冷却（2026-08-30）
+    "cooldown",
 })
 
 
