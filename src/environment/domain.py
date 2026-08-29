@@ -86,3 +86,16 @@ class TurnEnded:
     """回合结束（end_of_turn 开始）。DOT/天气/印记的回合末结算以此为触发点。"""
 
     turn: int
+
+
+@dataclass(frozen=True)
+class TurnStarted:
+    """回合开始（resolve_turn 入口，2026-08-30）。
+
+    `predictions`：双方在场精灵的确定性预估（prediction.predictions_for，逐技能
+    预估威力/预估伤害）——供「回合开始就通过预估伤害触发」的特性绑定读取。
+    预估是派生量，随事件携带（回合内局部），不入 BattleState。
+    """
+
+    turn: int
+    predictions: dict[str, list[dict]]

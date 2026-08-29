@@ -20,11 +20,12 @@ from dataclasses import dataclass
 from .actions import Decision
 from .compiler import compile_skill
 from .damage import apply_heal
-from .domain import SkillResolved
+from .domain import SkillResolved, TurnEnded, TurnStarted
 from .events import ev
 from .models import (ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats,
                      skill_from_instance)
 from .pipeline import run
+from .prediction import predictions_for
 from .reducer import Frame
 from .skillbook import SkillCategory
 from .traits import trait_defs_for
@@ -36,7 +37,8 @@ class TurnContext:
 
     这是核心不变式的关键：回合内临时量一旦住进状态，就必须记得清理（参考项目的
     `_defense_skill_a` 正是如此，`end_of_turn_cleanup` 手工清 8 个字段）。做成局部
-    对象，`end_of_turn()` 函数体是 pass 而且理应如此。
+    对象后，回合末时段的**效果**（DOT / 天气 / 冷却）从 `end_of_turn` 的 TurnEnded
+    管道接入，同样不落状态。
     """
 
     decision_a: Decision
@@ -382,29 +384,40 @@ def apply_replacement(state, side: str, bench_idx: int) -> list[dict]:
     return [ev("replace", side, out=old.name, **{"in": side_state.active_unit.name})]
 
 
-def end_of_turn(state) -> None:
-    """回合末清理的扩展点。**E0b 函数体是 pass，而且理应如此**——回合内临时量都在
-    TurnContext 这个局部对象里。将来的状态叠层 tick / 冷却递减挂进这里。"""
+def end_of_turn(state) -> list[dict]:
+    """回合末时段执行点（v3 骨架 2026-08-30）：构造 TurnEnded → 反应管道。
+
+    属于当前回合的结算时段（在 `turn += 1` **之前**）；E0b 无任何绑定 → 恒返回 []。
+    将来的 DOT / 天气 / 印记 TURN_END 绑定从 TurnEnded 事件接入（collector）；
+    领域事件返回值暂丢弃——DOT 造成回合末阵亡时从这里取 HpChanged 判阵亡
+    （battle_docs §9 的回合末被动补位语义届时一并拍板实施）。
+    """
+    frame = Frame()
+    events, _domain = run(state, [], frame, unit=None,
+                          after=lambda f: [TurnEnded(turn=state.turn)])
+    return events
 
 
 def end_turn(state) -> list[dict]:
     """回合末统一收尾：**整个代码库里唯一推进回合号的地方**。
 
-    终局、超时定胜负、常规回合都经过这里：终局 → battle_end(winner)；
+    终局、超时定胜负、常规回合都经过这里：回合末时段（end_of_turn，DOT/天气/印记/
+    冷却的将来落点）→ 回合号推进 → 终局 → battle_end(winner)；
     超过回合上限 → `timeout_winner` 定出胜方（**不再平局**，E4 规则：命数 → 血量百分比和 →
     随机硬币）；否则只推进回合号。`battle_end` **只在这里发射**。
     """
-    end_of_turn(state)
+    events = end_of_turn(state)
     state.turn += 1
     if state.done:
-        return [ev("battle_end", state.winner or "both", winner=state.winner, turn=state.turn)]
+        return events + [ev("battle_end", state.winner or "both", winner=state.winner,
+                            turn=state.turn)]
     if state.turn > state.rules.max_turns:
         state.done = True
         winner, reason = timeout_winner(state)
         state.winner = winner
-        return [ev("battle_end", winner, winner=winner, turn=state.turn,
-                   message=f"超过回合上限 {state.rules.max_turns}，{reason}。")]
-    return []
+        return events + [ev("battle_end", winner, winner=winner, turn=state.turn,
+                            message=f"超过回合上限 {state.rules.max_turns}，{reason}。")]
+    return events
 
 
 def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], str | None]:
@@ -421,6 +434,16 @@ def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], s
         return [ev("error", "", message="对局已结束。")], None
 
     events: list[dict] = []
+
+    # 0) TURN_START：回合开始执行点（v3 骨架 2026-08-30）——确定性预估随事件携带
+    #（预估与决策无关，双方各一份；「回合开始看预估伤害」的特性将来从此事件接入）。
+    # E0b 无任何绑定 → 零行为变化。
+    start_events, _ = run(state, [], Frame(), unit=None,
+                          after=lambda f: [TurnStarted(
+                              turn=state.turn,
+                              predictions={"a": predictions_for(state, "a"),
+                                           "b": predictions_for(state, "b")})])
+    events += start_events
 
     # 1) DECLARE：双方声明已知 → 定应对关系 + 武装减伤（必须在任何结算之前）
     ctx, arm_events = build_turn_context(state, dec_a, dec_b)

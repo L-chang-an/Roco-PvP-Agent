@@ -132,3 +132,45 @@ def test_trait_gain_emits_stat_mod_changed() -> None:
     assert events == []   # 无展示事件（旧行为）
     assert any(isinstance(e, StatModChanged) and e.stat == "atk"
                and e.total_layers == 2 and e.source == "t" for e in domain)
+
+
+# ── 回合边界执行点（Step C）──
+def test_end_of_turn_empty_and_turn_ended_reaches_collector() -> None:
+    """end_of_turn：恒返回 []（无绑定）、不推进回合；TurnEnded 经管道到达 collector。"""
+    from environment.domain import TurnEnded
+    from environment.engine import end_of_turn
+
+    s = _state()
+    assert end_of_turn(s) == []
+    assert s.turn == 1   # 回合推进只在 end_turn
+
+    seen: list[str] = []
+
+    def collector(state, event, unit, trait_defs, energy_max):
+        seen.append((type(event).__name__, getattr(event, "turn", None)))
+        return []
+
+    run(s, [], Frame(), unit=None, collector=collector,
+        after=lambda f: [TurnEnded(turn=s.turn)])
+    assert seen == [("TurnEnded", 1)]
+
+
+def test_resolve_turn_emits_turn_started_with_predictions(monkeypatch) -> None:
+    """resolve_turn 入口发 TurnStarted（双侧预估随事件携带）——白盒 spy pipeline.run。"""
+    from environment import engine as E
+    from environment.actions import Decision, recharge_action
+
+    captured: dict = {}
+    real_run = E.run
+
+    def spy(state, atoms, frame, **kw):
+        evts = list(kw["after"](frame))
+        captured["events"] = [(type(e).__name__, e.turn) for e in evts]
+        captured["pred_keys"] = sorted(evts[0].predictions) if evts else None
+        return real_run(state, atoms, frame, **kw)
+
+    monkeypatch.setattr(E, "run", spy)
+    s = _state()
+    E.resolve_turn(s, Decision(recharge_action()), Decision(recharge_action()))
+    assert captured["events"] == [("TurnStarted", 1)]
+    assert captured["pred_keys"] == ["a", "b"]   # 双方各一份预估
