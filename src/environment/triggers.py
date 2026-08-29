@@ -5,9 +5,9 @@ v3 核心（`mydocs/battle_docs.md` §6）：Trigger 是**纯收集器**——`c
 「事件 → Trigger 返回 TraitGain Atom → Reducer 写 trait.gains」；骨架阶段保持行为
 逐位等价（tests/test_v3_sentinel.py 把关）。
 
-`hooks.emit` 现在委托本模块（Phase 3）：emit 构造 SkillResolved 事件 → collect_reactions
-→ reduce_all，特性效果与旧直写路径逐位一致。`collect_reactions` 不依赖 state（只依赖
-unit 与事件），测试可 state=None 调用。
+`pipeline.run` 是唯一调用方（Phase 3.1）：事件 → collect_reactions → 新 Atom →
+reduce_all 循环，特性效果与旧直写路径逐位一致。`collect_reactions` 不依赖 state
+（只依赖 unit 与事件），测试可 state=None 调用。
 """
 
 from __future__ import annotations
@@ -24,18 +24,22 @@ if TYPE_CHECKING:
     from .models import Unit
 
 
-def collect_reactions(state, event, unit: "Unit", trait_defs=None,
+def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
                       energy_max: int = 10) -> list["Atom"]:
     """输入：DomainEvent + 施法者（+ 可选特性静态定义）；输出：新 Atom 列表。
 
     骨架阶段只接 SKILL_RESOLVE（SkillResolved 事件）→ 特性绑定。cond 匹配沿用
     hooks._CONDITIONS（dealt_counter / used_fire / used_grass / used_water）。
     `state` 可为 None（特性效果不依赖 state；测试 emit 直调时传 None）。
+    `unit` 可为 None（Phase 3.1：TURN_END 等无单一施法者的事件——当前返回 []，
+    未来印记/天气/DOT 的绑定收集从事件自身反查来源）。
     """
     if not isinstance(event, SkillResolved):
         return []
     from .hooks import _cond_matches
 
+    if unit is None:
+        return []
     if trait_defs is None:
         from .traits import trait_defs_for
         trait_defs = trait_defs_for(unit)

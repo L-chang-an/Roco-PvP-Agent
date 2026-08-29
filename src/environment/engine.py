@@ -16,16 +16,16 @@ decision_a, decision_b)` 决定；阵亡后的补位由阵亡方玩家选择（�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 
 from .actions import Decision
 from .compiler import compile_skill
 from .damage import apply_heal
+from .domain import SkillResolved
 from .events import ev
-from .hooks import Hook, emit
 from .models import (ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats,
                      skill_from_instance)
-from .reducer import Frame, reduce_all
+from .pipeline import run
+from .reducer import Frame
 from .skillbook import SkillCategory
 from .traits import trait_defs_for
 
@@ -241,11 +241,12 @@ def resolve_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
 
 
 def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
-    """支付能量 → 按 effect.category 分三支（**v3 骨架：走 compiler + reducer**）。
+    """支付能量 → 按 effect.category 分三支（**v3 骨架：走 compiler + pipeline**）。
 
     攻击/防御/状态三支的全部效果逻辑从旧的内联 if/else 迁移到
-    `compiler.compile_skill`（技能 → Atom 列表）+ `reducer.reduce_all`（Atom → 事件）。
-    三支之后：SKILL_RESOLVE 特性分发（一次技能恰好一次）——特性触发仍走 emit（保留）。
+    `compiler.compile_skill`（技能 → Atom 列表）+ `pipeline.run`（Atom → 事件 →
+    领域事件 → 特性反应 fixpoint）。SkillResolved 由 after 回调在读
+    `frame.dealt_counter` 后构造——特性触发与旧 emit 路径逐位一致（哨兵把关）。
 
     骨架原则：**行为逐位等价**——事件流与 state_hash 与旧引擎完全一致
     （`tests/test_v3_sentinel.py` 哨兵把关）。
@@ -258,15 +259,16 @@ def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
     skill = _combat_skill(unit, idx)
     if skill is None:
         return [ev("skipped", side, kind="main", unit=unit.name, reason="技能效果未实装")]
-    # 技能 → Atom 列表 → 逐条执行（扣能量/揭示/伤害段/资源效果都在 reducer 里）
+    # 技能 → Atom 列表 → pipeline 执行（扣能量/揭示/伤害段/资源效果都在 reducer 里）；
+    # 特性（SKILL_RESOLVE）作为 after 事件进入同一反应循环。
     frame = Frame()
-    events = reduce_all(state, compile_skill(state, ctx, unit, skill, side), frame)
-    # 特性：技能结算后统一分发（SKILL_RESOLVE）。ctx.unit 指向 entry.actor，
-    # 条件（用了哪系 / 是否克制）由 emit 的谓词解析；dealt_counter 由 reducer 累计。
-    emit(state, Hook.SKILL_RESOLVE,
-         SimpleNamespace(unit=unit, skill=skill, dealt_counter=frame.dealt_counter,
-                         energy_max=state.rules.energy_max),
-         trait_defs_for(unit))
+    events, _domain = run(
+        state, compile_skill(state, ctx, unit, skill, side), frame,
+        unit=unit, trait_defs=trait_defs_for(unit),
+        energy_max=state.rules.energy_max,
+        after=lambda f: [SkillResolved(unit_id=unit.id, skill=skill.name,
+                                       dealt_counter=f.dealt_counter,
+                                       skill_type=skill.type)])
     return events
 
 
