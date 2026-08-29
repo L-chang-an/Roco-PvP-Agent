@@ -81,6 +81,10 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
             )),
         ),
     ),
+    # S4：里拉鳐「吟游之弦」——赋予的印记不会替换其他印记（进 exclusive_marks 独立空间）。
+    # 路由在 compiler._mark_space 读本名判定；此处注册名以阻止 resolve_trait_name
+    # 落到 default 白板。零绑定（效果是印记施加时的路由规则，非事件反应）。
+    "吟游之弦": TraitDef(name="吟游之弦", bindings=()),
 }
 
 

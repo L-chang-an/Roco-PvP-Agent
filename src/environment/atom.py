@@ -16,7 +16,7 @@ reducer，加效果 = 加一个 Atom 类型 + 一个 reducer，引擎零改动�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
@@ -59,6 +59,7 @@ class DealDamage:
     effectiveness: float = 1.0     # 克制倍率
     stab: float = 1.0              # 本系加成
     counter_cat: str = ""          # 应对命中的对手类别（damage 事件展示）
+    acted_first: bool = False      # 本回合执行顺序先于对手（风起印记读钩子）
 
 
 @dataclass(frozen=True)
@@ -73,16 +74,20 @@ class HealPct:
 
 @dataclass(frozen=True)
 class AddModifier:
-    """追加一条属性/连击/吸血/能耗 增减益层（写 stat_mods；能耗走 energy_cost 层）。"""
+    """追加一条属性/连击/吸血/能耗/纯负面 增减益层（写 stat_mods；能耗走 energy_cost 层）。
+
+    `kwargs` 承载扩展参数（冻结 {pct:5}、引电 {pct:25, at:2} 等），随记录进 stat_mods。
+    """
 
     side: str
     unit: "Unit"
-    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost/…
-    mode: str          # pct / flat
+    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost/中毒/…/引电
+    mode: str          # pct / flat / special
     layers: int
     source: str
     target: str = ""   # self / foe（展示用）
     counter_cat: str = ""   # 应对命中的对手类别（stat_change 事件展示）
+    kwargs: dict = field(default_factory=dict)   # 扩展参数（DOT 百分比/冻结阈值/引电触发层数）
 
 
 @dataclass(frozen=True)
@@ -139,6 +144,56 @@ class FoeCostGain:
 
 
 @dataclass(frozen=True)
+class ApplyMark:
+    """施加印记（阵营级）：同种叠加、异种顶替（每极性至多 1）；exclusive 独立空间共存。"""
+
+    side: str            # 目标阵营
+    name: str            # 印记名（查 marks.MARK_CATALOG）
+    layers: int
+    source: str
+    space: str = "normal"   # "normal" | "exclusive"（里拉鳐「吟游之弦」独立空间）
+
+
+@dataclass(frozen=True)
+class SetWeather:
+    """设置天气（全局）：覆盖设置，同种刷新剩余回合。"""
+
+    kind: str            # 雨天 / 沙暴 / 暴风雪 / 雷鸣
+    turns: int
+    source: str
+
+
+@dataclass(frozen=True)
+class LoseHp:
+    """按 max_hp 百分比失去生命（印记/天气伤害，经 apply_hp_loss 唯一漏斗）。"""
+
+    side: str
+    unit: "Unit"
+    pct: int            # 百分比整数（如 3 = 失去 3% max_hp）
+    source: str
+
+
+@dataclass(frozen=True)
+class LoseEnergy:
+    """失去能量（夹 0）。"""
+
+    side: str
+    unit: "Unit"
+    amount: int
+    source: str
+
+
+@dataclass(frozen=True)
+class ConsumeMarkLayers:
+    """消耗印记层数（星陨触发后全清）；层数 ≤0 → 移除印记。"""
+
+    side: str
+    name: str
+    amount: int
+    source: str
+
+
+@dataclass(frozen=True)
 class TraitGain:
     """特性增益：写 unit.trait.gains（trait=True，免疫常规驱散）。
 
@@ -157,4 +212,5 @@ class TraitGain:
 Atom: TypeAlias = (
     SpendEnergy | RevealSkill | DealDamage | HealPct | AddModifier
     | GainEnergy | BenchEnergy | Lifesteal | StealEnergy | FoeCostGain | TraitGain
+    | ApplyMark | SetWeather | LoseHp | LoseEnergy | ConsumeMarkLayers
 )

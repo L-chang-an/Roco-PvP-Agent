@@ -26,11 +26,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .atom import (
-    AddModifier, BenchEnergy, DealDamage, FoeCostGain, GainEnergy, HealPct,
-    Lifesteal, RevealSkill, SpendEnergy, StealEnergy, TraitGain,
+    AddModifier, ApplyMark, BenchEnergy, ConsumeMarkLayers, DealDamage,
+    FoeCostGain, GainEnergy, HealPct, Lifesteal, LoseEnergy, LoseHp,
+    RevealSkill, SetWeather, SpendEnergy, StealEnergy, TraitGain,
 )
 from .damage import apply_heal, apply_hp_loss
-from .domain import DamageApplied, EnergyChanged, HpChanged, StatModChanged
+from .domain import (DamageApplied, EnergyChanged, HpChanged, MarkChanged,
+                     StatModChanged, WeatherChanged)
 from .events import ev
 from .modifiers import DamageQuery, compute
 from .primitives import (
@@ -92,7 +94,8 @@ def _reduce_damage(state, atom: DealDamage, frame: Frame) -> list[dict]:
         frame.dealt_counter = True
     frame.domain_events.append(DamageApplied(
         source_id=atom.source.id, target_id=target.id, amount=loss.applied,
-        effectiveness=atom.effectiveness, skill=atom.skill, total=frame.total_damage))
+        effectiveness=atom.effectiveness, skill=atom.skill, total=frame.total_damage,
+        skill_type=atom.skill_type))
     return [ev(
         "damage", atom.side,
         attacker=atom.source.name, skill=atom.skill, target=target.name,
@@ -112,18 +115,21 @@ def _reduce_heal_pct(state, atom: HealPct, frame: Frame) -> list[dict]:
 
 
 def _add_stat_layers(unit, stat: str, mode: str, layers: int,
-                     source: str, permanent: bool = False) -> int:
+                     source: str, permanent: bool = False,
+                     kwargs: dict | None = None) -> int:
     """属性增减益合并（**与旧 engine 逐位一致**）：按 (stat, mode, permanent) 合并，忽略 source。
 
     注意：不是 `primitives.apply_stat_mod`（它按 source 合并）——旧 `resolve_skill` 走
     `_add_stat_layers`，多条不同来源的同属性层会合并成一条。
+    `kwargs`（纯负面 buff 扩展参数）在新建记录时写入；合并时保留首条记录的值。
     """
     for m in unit.stat_mods:
         if m.stat == stat and m.mode == mode and m.permanent == permanent:
             m.layers += layers
             return m.layers
     unit.stat_mods.append(StatModifier(stat=stat, mode=mode, layers=layers,
-                                       permanent=permanent, source=source))
+                                       permanent=permanent, source=source,
+                                       kwargs=dict(kwargs or {})))
     return layers
 
 
@@ -133,7 +139,8 @@ def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
         total = apply_energy_cost_mod(u, layers=atom.layers, permanent=False,
                                       trait=False, source=atom.source)
     else:
-        total = _add_stat_layers(u, atom.stat, atom.mode, atom.layers, atom.source)
+        total = _add_stat_layers(u, atom.stat, atom.mode, atom.layers, atom.source,
+                                 kwargs=atom.kwargs)
     frame.domain_events.append(StatModChanged(
         u.id, atom.stat, atom.mode, atom.layers, total, atom.source))
     out = {"type": "stat_change", "side": atom.side, "unit": u.name, "skill": atom.source,
@@ -222,6 +229,61 @@ def _reduce_trait_gain(state, atom: TraitGain, frame: Frame) -> list[dict]:
     return []
 
 
+# ── 印记 / 天气 reducer（2026-08-30：状态写入口仍是 reducer 唯一职责）──
+def _reduce_apply_mark(state, atom: ApplyMark, frame: Frame) -> list[dict]:
+    from .primitives import apply_mark
+
+    mark = apply_mark(state.side(atom.side), atom.name, atom.layers,
+                      source=atom.source, space=atom.space)
+    frame.domain_events.append(MarkChanged(side=atom.side, name=mark.name,
+                                           layers=mark.layers, source=atom.source))
+    return [ev("mark", atom.side, name=mark.name, layers=mark.layers,
+               delta=atom.layers, source=atom.source)]
+
+
+def _reduce_set_weather(state, atom: SetWeather, frame: Frame) -> list[dict]:
+    from .weather import set_weather
+
+    set_weather(state, atom.kind, atom.turns, atom.source)
+    frame.domain_events.append(WeatherChanged(kind=atom.kind, turns_left=atom.turns,
+                                              source=atom.source))
+    return [ev("weather", "", kind=atom.kind, turns_left=atom.turns, source=atom.source)]
+
+
+def _reduce_lose_hp(state, atom: LoseHp, frame: Frame) -> list[dict]:
+    """印记/天气伤害：max_hp × pct% 经 apply_hp_loss 唯一漏斗；已阵亡跳过。"""
+    u = atom.unit
+    if u.fainted:
+        return []
+    amount = int(u.max_hp * atom.pct / 100)
+    loss = apply_hp_loss(state, u, amount, source=atom.source)
+    frame.domain_events.append(HpChanged(u.id, u.current_hp + loss.applied,
+                                         u.current_hp, atom.source))
+    return [ev("damage", atom.side, attacker=atom.source, skill=atom.source,
+               target=u.name, damage=loss.applied, target_hp_left=u.current_hp)]
+
+
+def _reduce_lose_energy(state, atom: LoseEnergy, frame: Frame) -> list[dict]:
+    u = atom.unit
+    lost = min(atom.amount, u.energy)
+    u.energy -= lost
+    frame.domain_events.append(EnergyChanged(u.id, u.energy + lost, u.energy, atom.source))
+    return [ev("energy_loss", atom.side, unit=u.name, lost=lost, energy=u.energy,
+               source=atom.source)]
+
+
+def _reduce_consume_mark(state, atom: ConsumeMarkLayers, frame: Frame) -> list[dict]:
+    from .primitives import consume_mark_layers
+
+    mark = consume_mark_layers(state.side(atom.side), atom.name, atom.amount)
+    if mark is None:
+        return []
+    frame.domain_events.append(MarkChanged(side=atom.side, name=mark.name,
+                                           layers=mark.layers, source=atom.source))
+    return [ev("mark", atom.side, name=mark.name, layers=mark.layers,
+               delta=-atom.amount, source=atom.source)]
+
+
 _DISPATCH: dict[type, object] = {
     SpendEnergy: _reduce_spend,
     RevealSkill: _reduce_reveal,
@@ -234,6 +296,11 @@ _DISPATCH: dict[type, object] = {
     StealEnergy: _reduce_steal,
     FoeCostGain: _reduce_foe_cost,
     TraitGain: _reduce_trait_gain,
+    ApplyMark: _reduce_apply_mark,
+    SetWeather: _reduce_set_weather,
+    LoseHp: _reduce_lose_hp,
+    LoseEnergy: _reduce_lose_energy,
+    ConsumeMarkLayers: _reduce_consume_mark,
 }
 
 
@@ -242,13 +309,15 @@ def _query_for(state, attacker, defender, atom: DealDamage) -> DamageQuery:
     from .damage import build_damage_terms
 
     terms = build_damage_terms(state, attacker, defender, damage_kind=atom.damage_kind,
-                               power=atom.power, counter_mult=atom.counter_mult)
+                               power=atom.power, counter_mult=atom.counter_mult,
+                               side=atom.side, skill_type=atom.skill_type,
+                               acted_first=atom.acted_first)
     return DamageQuery(
         attacker_id=attacker.id, defender_id=defender.id,
         damage_kind=atom.damage_kind, skill_type=atom.skill_type,
         attacker_types=list(attacker.types), defender_types=list(defender.types),
         power_term=terms.power_term, ratio_num=terms.ratio_num, ratio_den=terms.ratio_den,
         power_pct=terms.power_pct,
-        stab=atom.stab, effectiveness=atom.effectiveness, weather=1.0,
+        stab=atom.stab, effectiveness=atom.effectiveness, weather=terms.weather,
         reduction=atom.reduction, base_atk=terms.atk, base_def=terms.defense,
     )

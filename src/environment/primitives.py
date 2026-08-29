@@ -13,7 +13,9 @@ S2 补 heal_pct（喵喵·氧循环）/ energy_cost_mod（水蓝蓝·浸润）+ 
 from __future__ import annotations
 
 from .damage import HealResult, apply_heal
-from .models import StatModifier, buff_layers
+from .marks import cost_adjust
+from .models import MarkState, StatModifier, buff_layers
+from .weather import cost_halved
 
 
 def apply_stat_mod(unit, *, stat: str, mode: str, layers: int,
@@ -59,13 +61,20 @@ def apply_energy_cost_mod(unit, *, layers: int, permanent: bool = False,
     return layers
 
 
-def skill_energy_cost(unit, base_cost: int) -> int:
-    """全技能能耗的实际值：`base + Σ(energy_cost 层)`，夹到 0。
+def skill_energy_cost(state, side: str, unit, base_cost: int, skill=None) -> int:
+    """全技能能耗实际值（2026-08-30 扩展）：base + Σ(energy_cost 层) → 印记修正
+    （湿润 −1×层全技能 / 蓄势 +1×层仅攻击）→ 沙暴地系减半 → 最终夹 0。
 
     唯一读取能耗修正的地方（actions 的门控 / engine 的支付都走它），保证「付得起」
-    与「扣多少」永远一致。读取 stat_mods + trait.gains 两处。
+    与「扣多少」永远一致。读取 stat_mods + trait.gains 两处；`state=None`（单测 /
+    无印记上下文）→ 只算单位自身层数。
     """
-    return max(0, base_cost + buff_layers(unit, "energy_cost", "flat"))
+    cost = max(0, base_cost + buff_layers(unit, "energy_cost", "flat"))
+    if state is not None:
+        cost = max(0, cost + cost_adjust(state.side(side), kind=getattr(skill, "kind", "")))
+        if cost_halved(state, getattr(skill, "type", "")):
+            cost = max(0, cost // 2)
+    return cost
 
 
 def combo_bonus(unit) -> tuple[int, int]:
@@ -103,4 +112,62 @@ def dispel_gains(unit, scope: str = "regular") -> int:
     removed = sum(m.layers for m in unit.stat_mods if not m.trait)
     unit.stat_mods = [m for m in unit.stat_mods if m.trait]
     # 特性增益（trait.gains）保留——免疫常规驱散
+    return removed
+
+
+# ── 印记原语（2026-08-30：阵营级，三槽）──
+def apply_mark(side_state, name: str, layers: int, *, source: str = "",
+               space: str = "normal") -> MarkState:
+    """施加印记：同种叠加、异种顶替（每极性至多 1）；exclusive 独立空间共存。
+
+    极性查 `marks.MARK_CATALOG`（未知名 → ValueError，调用方保证只施加目录内印记）。
+    返回施加后的 MarkState（layers = 总层数）。
+    """
+    from .marks import MARK_CATALOG
+
+    mdef = MARK_CATALOG.get(name)
+    if mdef is None:
+        raise ValueError(f"未知印记「{name}」（不在 marks.MARK_CATALOG）。")
+    if space == "exclusive":
+        for m in side_state.exclusive_marks:
+            if m.name == name:
+                m.layers += layers
+                return m
+        mark = MarkState(name=name, layers=layers, source=source)
+        side_state.exclusive_marks.append(mark)
+        return mark
+    bucket = (side_state.positive_marks if mdef.polarity == "positive"
+              else side_state.negative_marks)
+    if bucket and bucket[0].name == name:
+        bucket[0].layers += layers
+        return bucket[0]
+    mark = MarkState(name=name, layers=layers, source=source)
+    bucket.clear()          # 异种顶替：每极性至多 1 个
+    bucket.append(mark)
+    return mark
+
+
+def consume_mark_layers(side_state, name: str, amount: int) -> MarkState | None:
+    """消耗印记层数（三槽查找）；层数 ≤0 → 移除印记并返回 None。"""
+    for bucket in (side_state.positive_marks, side_state.negative_marks,
+                   side_state.exclusive_marks):
+        for i, m in enumerate(bucket):
+            if m.name == name:
+                m.layers -= amount
+                if m.layers <= 0:
+                    del bucket[i]
+                    return None
+                return m
+    return None
+
+
+def dispel_marks(side_state, scope: str = "normal") -> int:
+    """清除印记，返回清除的总层数。normal=只清正负普通空间；all=连独立空间。"""
+    removed = sum(m.layers for m in side_state.positive_marks) \
+        + sum(m.layers for m in side_state.negative_marks)
+    side_state.positive_marks.clear()
+    side_state.negative_marks.clear()
+    if scope == "all":
+        removed += sum(m.layers for m in side_state.exclusive_marks)
+        side_state.exclusive_marks.clear()
     return removed

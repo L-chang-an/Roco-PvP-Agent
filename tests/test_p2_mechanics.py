@@ -290,7 +290,7 @@ def test_per_hit_foe_energy_cost() -> None:
     a, b = _mk("甲", ["普通"], ["冰捆缚"]), _mk("乙", ["普通"], ["抓挠"])
     s = _battle(a, b)
     _turn(s, skill_action(0))
-    assert skill_energy_cost(b, 2) == 4              # 抓挠 base 2 → 4
+    assert skill_energy_cost(None, "a", b, 2) == 4  # 抓挠 base 2 → 4
     assert [m.layers for m in b.stat_mods if m.stat == "energy_cost"] == [2]
 
 

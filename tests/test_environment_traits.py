@@ -63,8 +63,9 @@ def _emit_skill(u: Unit, s_type: str, *, dealt_counter: bool = False) -> None:
 
 # ── 目录与查找 ──
 def test_catalog_registers_default_and_four_traits() -> None:
-    """目录 = 白板 default + 已实现特性（三系 + 迪莫）。"""
-    assert set(TRAIT_CATALOG) == {DEFAULT_TRAIT_NAME, "助燃", "氧循环", "浸润", "最好的伙伴"}
+    """目录 = 白板 default + 已实现特性（三系 + 迪莫）+ 吟游之弦（S4 印记路由注册，零绑定）。"""
+    assert set(TRAIT_CATALOG) == {DEFAULT_TRAIT_NAME, "助燃", "氧循环", "浸润", "最好的伙伴",
+                                  "吟游之弦"}
 
 
 def test_default_trait_has_no_bindings() -> None:
@@ -151,15 +152,15 @@ def test_jinrun_adds_cost_mod_after_water() -> None:
     cost_mods = [m for m in u.trait.gains if m.stat == "energy_cost"]
     assert [m.layers for m in cost_mods] == [-1]          # 能耗修正值 −1 = 能耗−1
     assert cost_mods[0].trait is True and cost_mods[0].permanent is False
-    assert skill_energy_cost(u, 3) == 2
+    assert skill_energy_cost(None, "a", u, 3) == 2
 
 
 def test_jinrun_stacks_and_clamps_to_zero() -> None:
     u = _unit("水蓝蓝", "水", trait="浸润")
     for _ in range(3):
         _emit_skill(u, "水")
-    assert skill_energy_cost(u, 3) == 0
-    assert skill_energy_cost(u, 1) == 0
+    assert skill_energy_cost(None, "a", u, 3) == 0
+    assert skill_energy_cost(None, "a", u, 1) == 0
 
 
 def test_jinrun_ignores_non_water() -> None:
@@ -311,7 +312,7 @@ def test_engine_jinrun_opens_energy_gate() -> None:
     b = _unit("沙包", "火")
     s = _battle(a, b)
     apply_energy_cost_mod(a, layers=-1, trait=True, source="浸润")   # 能耗 3→2
-    assert skill_block_reason(s, a, 0) is None                      # 2 ≥ 2 放行
+    assert skill_block_reason(s, "a", a, 0) is None               # 2 ≥ 2 放行
 
 
 def test_engine_switch_clears_energy_cost_mods() -> None:

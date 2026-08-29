@@ -130,6 +130,20 @@ class StatModifier:
     trait: bool = False       # True = 特性增益（免疫常规驱散）
 
 
+def side_of(state: "BattleState", unit: Unit) -> str:
+    """unit 所属阵营："a"/"b"；不属于任何一方 → ""。
+
+    unit_id 前缀（`{side}-{槽位}-{名}`）优先；测试直构 id="" 走线性查找兜底。
+    """
+    for s in SIDES:
+        if unit.id.startswith(s + "-"):
+            return s
+    for s in SIDES:
+        if unit in state.side(s).units:
+            return s
+    return ""
+
+
 def buff_layers(unit: "Unit", stat: str, mode: str = "") -> int:
     """某 stat 在 `stat_mods` + `trait.gains` 两处的层数总和（有符号）。
 

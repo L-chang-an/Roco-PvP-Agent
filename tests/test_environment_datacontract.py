@@ -75,7 +75,7 @@ def test_energy_cost_mod_merged_into_stat_mods() -> None:
              stats={"hp": 100, "atk": 80, "sp_atk": 80, "def": 80, "sp_def": 80, "speed": 80})
     apply_energy_cost_mod(u, layers=-1, source="浸润")
     assert u.stat_mods[0].stat == "energy_cost" and u.stat_mods[0].mode == "flat"
-    assert skill_energy_cost(u, 3) == 2
+    assert skill_energy_cost(None, "a", u, 3) == 2   # state=None：只算单位自身层数
     # 与属性 buff 同列表（合一）
     u.stat_mods.append(StatModifier(stat="atk", mode="pct", layers=2, source="力量增效"))
     assert len(u.stat_mods) == 2

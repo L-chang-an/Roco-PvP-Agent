@@ -28,18 +28,26 @@ def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
                       energy_max: int = 10) -> list["Atom"]:
     """输入：DomainEvent + 施法者（+ 可选特性静态定义）；输出：新 Atom 列表。
 
-    骨架阶段只接 SKILL_RESOLVE（SkillResolved 事件）→ 特性绑定。cond 匹配沿用
-    hooks._CONDITIONS（dealt_counter / used_fire / used_grass / used_water）。
-    `state` 可为 None（特性效果不依赖 state；测试 emit 直调时传 None）。
-    `unit` 可为 None（Phase 3.1：TURN_END 等无单一施法者的事件——当前返回 []，
-    未来印记/天气/DOT 的绑定收集从事件自身反查来源）。
+    **多源收集（2026-08-30 印记/天气批）**：特性（SKILL_RESOLVE，现状）→
+    印记（marks.collect：双方阵营按事件收集）→ 天气（weather.collect：TurnEnded）。
+    印记/天气收集需要 state（`state=None` 时跳过——测试 emit 直调兼容）。
+    `unit` 可为 None（TURN_END 等无单一施法者的事件）。
     """
-    if not isinstance(event, SkillResolved):
-        return []
+    atoms: list["Atom"] = []
+    if isinstance(event, SkillResolved) and unit is not None:
+        atoms += _trait_atoms(state, event, unit, trait_defs, energy_max)
+    if state is not None:
+        from .marks import collect as collect_marks
+        from .weather import collect as collect_weather
+
+        atoms += collect_marks(state, event)
+        atoms += collect_weather(state, event)
+    return atoms
+
+
+def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> list["Atom"]:
     from .hooks import _cond_matches
 
-    if unit is None:
-        return []
     if trait_defs is None:
         from .traits import trait_defs_for
         trait_defs = trait_defs_for(unit)

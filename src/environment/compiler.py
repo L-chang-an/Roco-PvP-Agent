@@ -29,8 +29,9 @@ if TYPE_CHECKING:
 
 
 def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
-                  skill: "Skill", side: str) -> list["Atom"]:
-    """输入：state / TurnContext / 施法者 / 技能 / 归属方；输出：有序 Atom 列表。
+                  skill: "Skill", side: str, acted_first: bool = False) -> list["Atom"]:
+    """输入：state / TurnContext / 施法者 / 技能 / 归属方 / acted_first（本回合执行
+    顺序先于对手——风起印记读钩子）；输出：有序 Atom 列表。
 
     顺序与旧 `resolve_skill` 完全一致：扣能量 → 揭示 → 类别分支（攻击逐段伤害 /
     状态逐层增减益 / 防御减伤已在 DECLARE 武装）→ 一次性资源效果（回能/回血/吸血/
@@ -40,7 +41,8 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
     foe = "b" if side == "a" else "a"
     target = state.active(foe)
     atoms: list["Atom"] = [
-        SpendEnergy(unit=unit, amount=skill_energy_cost(unit, skill.energy_cost),
+        SpendEnergy(unit=unit, amount=skill_energy_cost(state, side, unit,
+                                                        skill.energy_cost, skill),
                     source=skill.name),
         RevealSkill(unit=unit, side=side, skill=skill.name),
     ]
@@ -58,6 +60,7 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                 power=skill.power, skill_type=skill.type, damage_kind=skill.kind,
                 hit=i, total_hits=hits, counter_mult=mult, reduction=reduced,
                 effectiveness=eff, stab=stab, counter_cat=counter_cat,
+                acted_first=acted_first,
             ))
         if effect.self_energy_gain:
             atoms.append(GainEnergy(side=side, unit=unit, amount=effect.self_energy_gain,

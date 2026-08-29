@@ -60,14 +60,16 @@ class DamageTerms:
     """一次伤害计算的输入项（公式规范 2026-08-30）：`build_damage_terms` 的产物。
 
     纯数据、不写状态；预估体系（prediction.py）与真实伤害共用同一份项计算。
+    `weather`（2026-08-30 印记/天气批）：天气威力乘子（雨天水系 ×1.75，否则 1.0）。
     """
 
     atk: int             # 攻击侧六维（基线 + flat 层，下限 1）
     defense: int         # 防御侧六维（基线 + flat 层，下限 1）
-    power_term: float    # 基础威力 × 应对倍率 + attack_power flat 层 ×10
+    power_term: float    # 基础威力 × 应对倍率 + attack_power flat 层 ×10 + 蓄电印记
     ratio_num: float     # 1 + 0.1×(我方atk增益pct + 敌方def减益pct)
     ratio_den: float     # 1 + 0.1×(我方atk减益pct + 敌方def增益pct)
-    power_pct: float     # 1 + 0.1×attack_power pct 层
+    power_pct: float     # 1 + 0.1×attack_power pct 层 + 印记威力修正
+    weather: float = 1.0     # 天气威力乘子（雨天水系 1.75）
 
 
 def _clamp(layers: float, cap: int) -> float:
@@ -91,13 +93,19 @@ def _pct_parts(unit, stat: str) -> tuple[float, float]:
 
 
 def build_damage_terms(state, attacker, defender, *, damage_kind: str,
-                       power: int, counter_mult: float) -> DamageTerms:
-    """物/魔选边 → 计算 DamageTerms（公式规范 2026-08-30）。
+                       power: int, counter_mult: float, side: str = "",
+                       skill_type: str = "", acted_first: bool = False) -> DamageTerms:
+    """物/魔选边 → 计算 DamageTerms（公式规范 2026-08-30 + 印记/天气批）。
 
     - atk/def = 六维基线 + flat 层（±10×层），下限 1；
     - pct 层四分量（我方atk增益/减益、敌方def增益/减益）各自夹 cap；
-    - attack_power 的 flat（+10×层）进威力绝对值、pct（+10%×层）进威力百分比。
+    - attack_power 的 flat（+10×层）进威力绝对值、pct（+10%×层）进威力百分比；
+    - **印记**（side 非空时读攻击方阵营）：攻击/蓄势/风起 → power_pct；蓄电 → power_term；
+    - **天气**：雨天水系 ×1.75（weather 项）。
     """
+    from .marks import power_flat_bonus, power_pct_bonus
+    from .weather import power_multiplier
+
     rules = state.rules
     physical = damage_kind == "物攻"
     atk_key = "atk" if physical else "sp_atk"
@@ -116,13 +124,17 @@ def build_damage_terms(state, attacker, defender, *, damage_kind: str,
 
     power_flat = _clamp(buff_layers(attacker, "attack_power", "flat"), cap)
     power_pct = _clamp(buff_layers(attacker, "attack_power", "pct"), cap)
+    side_state = state.side(side) if side else None
+    mark_pct = power_pct_bonus(side_state, acted_first=acted_first) if side_state else 0.0
+    mark_flat = power_flat_bonus(side_state) if side_state else 0
     return DamageTerms(
         atk=max(1, int(atk)),
         defense=max(1, int(defense)),
-        power_term=power * counter_mult + rules.stat_flat_per_layer * power_flat,
+        power_term=power * counter_mult + rules.stat_flat_per_layer * power_flat + mark_flat,
         ratio_num=ratio_num,
         ratio_den=ratio_den,
-        power_pct=1 + rules.stat_pct_per_layer * power_pct,
+        power_pct=1 + rules.stat_pct_per_layer * power_pct + mark_pct,
+        weather=power_multiplier(state, skill_type),
     )
 
 
@@ -149,13 +161,19 @@ def compute_damage(state, attacker, defender, skill, *,
 
     纯函数：零副作用、零 RNG、零事件。应对乘子 / 减伤 / 克制倍率 / STAB 都是
     **显式入参**，不读 TurnContext——可单测、可被预估复用（预估侧 counter_mult=1.0）。
+    印记/天气修正从 state 派生（side 由 `models.side_of` 反查；acted_first=False，
+    无回合上下文）。
     """
+    from .models import side_of
+
     terms = build_damage_terms(state, attacker, defender, damage_kind=skill.kind,
-                               power=skill.power, counter_mult=counter_mult)
+                               power=skill.power, counter_mult=counter_mult,
+                               side=side_of(state, attacker), skill_type=skill.type,
+                               acted_first=False)
     return formula(atk=terms.atk, defense=terms.defense, power_term=terms.power_term,
                    ratio_num=terms.ratio_num, ratio_den=terms.ratio_den,
                    power_pct=terms.power_pct, stab=stab, effectiveness=effectiveness,
-                   weather=1.0, reduction=reduction,
+                   weather=terms.weather, reduction=reduction,
                    coefficient=state.rules.damage_coefficient,
                    min_damage=state.rules.min_damage)
 

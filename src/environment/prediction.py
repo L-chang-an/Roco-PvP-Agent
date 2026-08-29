@@ -28,28 +28,36 @@ if TYPE_CHECKING:
     from .models import BattleState, Skill, Unit
 
 
-def _outer_multipliers(attacker: "Unit", defender: "Unit", skill: "Skill") -> tuple[float, float, float]:
-    """STAB / 克制 / 天气（天气效果未实现，恒 1.0）。"""
+def _outer_multipliers(attacker: "Unit", defender: "Unit", skill: "Skill") -> tuple[float, float]:
+    """STAB / 克制（天气乘子由 build_damage_terms 的 terms.weather 提供）。"""
     eff = type_effectiveness(skill.type, defender.types)
     stab = stab_multiplier(skill.type, attacker.types)
-    return stab, eff, 1.0
+    return stab, eff
 
 
 def _terms_and_mult(state: "BattleState", attacker: "Unit", defender: "Unit",
                     skill: "Skill") -> tuple:
-    """项计算（counter_mult=1.0：预估不含应对倍率）+ STAB/克制/天气。"""
+    """项计算（counter_mult=1.0：预估不含应对倍率）+ STAB/克制。
+
+    印记/天气修正随 state 派生（双方可见的确定性事实）；`acted_first=False`——
+    先手未知，预估不含风起（与不含应对倍率同理）。
+    """
+    from .models import side_of
+
     terms = build_damage_terms(state, attacker, defender, damage_kind=skill.kind,
-                               power=skill.power, counter_mult=1.0)
+                               power=skill.power, counter_mult=1.0,
+                               side=side_of(state, attacker), skill_type=skill.type,
+                               acted_first=False)
     return terms, _outer_multipliers(attacker, defender, skill)
 
 
 def predict_power(state: "BattleState", attacker: "Unit", defender: "Unit",
                   skill: "Skill") -> float:
-    """预估威力 = [基础威力 + attack_power flat] × 比值项 × [1 + attack_power pct]
-    × STAB × 克制 × 天气。不含应对倍率（对手决策未知）与连击数。"""
-    terms, (stab, eff, weather) = _terms_and_mult(state, attacker, defender, skill)
+    """预估威力 = [基础威力 + attack_power flat] × 比值项 × [1 + attack_power pct
+    + 印记威力] × STAB × 克制 × 天气。不含应对倍率（对手决策未知）与连击数。"""
+    terms, (stab, eff) = _terms_and_mult(state, attacker, defender, skill)
     return terms.power_term * (terms.ratio_num / terms.ratio_den) * terms.power_pct \
-        * stab * eff * weather
+        * stab * eff * terms.weather
 
 
 def predict_damage(state: "BattleState", attacker: "Unit", defender: "Unit",
@@ -58,9 +66,9 @@ def predict_damage(state: "BattleState", attacker: "Unit", defender: "Unit",
 
     无 min_damage 保底（按公式字面）；`_effective_hits` 需 side（虫鸣类
     队伍技能计数按归属方）。"""
-    terms, (stab, eff, weather) = _terms_and_mult(state, attacker, defender, skill)
+    terms, (stab, eff) = _terms_and_mult(state, attacker, defender, skill)
     power = terms.power_term * (terms.ratio_num / terms.ratio_den) * terms.power_pct \
-        * stab * eff * weather
+        * stab * eff * terms.weather
     hits = _effective_hits(state, attacker, skill, side)
     return int((terms.atk / terms.defense) * state.rules.damage_coefficient * power * hits)
 

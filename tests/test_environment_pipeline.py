@@ -156,21 +156,27 @@ def test_end_of_turn_empty_and_turn_ended_reaches_collector() -> None:
 
 
 def test_resolve_turn_emits_turn_started_with_predictions(monkeypatch) -> None:
-    """resolve_turn 入口发 TurnStarted（双侧预估随事件携带）——白盒 spy pipeline.run。"""
+    """resolve_turn 入口发 TurnStarted（双侧预估随事件携带）——白盒 spy pipeline.run。
+
+    印记/天气批（2026-08-30）：resolve_turn 还会发首回合 UnitEntered——spy 累积
+    多次 run 的事件，只对 TurnStarted 断言。
+    """
     from environment import engine as E
     from environment.actions import Decision, recharge_action
 
-    captured: dict = {}
+    captured: dict = {"seen": []}
     real_run = E.run
 
     def spy(state, atoms, frame, **kw):
-        evts = list(kw["after"](frame))
-        captured["events"] = [(type(e).__name__, e.turn) for e in evts]
-        captured["pred_keys"] = sorted(evts[0].predictions) if evts else None
+        for e in kw["after"](frame):
+            captured["seen"].append(type(e).__name__)
+            if type(e).__name__ == "TurnStarted":
+                captured["pred_keys"] = sorted(e.predictions)
         return real_run(state, atoms, frame, **kw)
 
     monkeypatch.setattr(E, "run", spy)
     s = _state()
     E.resolve_turn(s, Decision(recharge_action()), Decision(recharge_action()))
-    assert captured["events"] == [("TurnStarted", 1)]
+    assert "TurnStarted" in captured["seen"]
+    assert "UnitEntered" in captured["seen"]    # 首回合入场（印记/天气批）
     assert captured["pred_keys"] == ["a", "b"]   # 双方各一份预估

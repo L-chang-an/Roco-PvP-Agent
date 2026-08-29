@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from .actions import Decision
 from .compiler import compile_skill
 from .damage import apply_heal
-from .domain import SkillResolved, TurnEnded, TurnStarted
+from .domain import SkillResolved, TurnEnded, TurnStarted, UnitEntered, UnitExited
 from .events import ev
+from .marks import speed_penalty
 from .models import (ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats,
                      skill_from_instance)
 from .pipeline import run
@@ -203,7 +204,8 @@ def build_queue(state, ctx: TurnContext) -> list[QueuedEntry]:
     for side in SIDES:
         dec = ctx.decision(side)
         unit = state.active(side)
-        speed = aggregate_stats(unit, state.rules)["speed"]
+        # 减速印记：该方在场速度 −10×层（印记/天气批 2026-08-30 读钩子）
+        speed = aggregate_stats(unit, state.rules)["speed"] - speed_penalty(state.side(side))
         if dec.item:
             entries.append(QueuedEntry(side, "item", unit, state.rules.item_priority, speed))
         entries.append(QueuedEntry(side, "main", unit, entry_priority(state, ctx, side, "main"), speed))
@@ -242,7 +244,8 @@ def resolve_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
     ]
 
 
-def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
+def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry,
+                  acted_first: bool = False) -> list[dict]:
     """支付能量 → 按 effect.category 分三支（**v3 骨架：走 compiler + pipeline**）。
 
     攻击/防御/状态三支的全部效果逻辑从旧的内联 if/else 迁移到
@@ -265,7 +268,7 @@ def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
     # 特性（SKILL_RESOLVE）作为 after 事件进入同一反应循环。
     frame = Frame()
     events, _domain = run(
-        state, compile_skill(state, ctx, unit, skill, side), frame,
+        state, compile_skill(state, ctx, unit, skill, side, acted_first=acted_first), frame,
         unit=unit, trait_defs=trait_defs_for(unit),
         energy_max=state.rules.energy_max,
         after=lambda f: [SkillResolved(unit_id=unit.id, skill=skill.name,
@@ -275,7 +278,9 @@ def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
 
 
 def resolve_switch(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
-    """改 active 下标 → **清除离场单位的全部非永久增益层**（stat_mods + trait.gains）→ switch 事件带 cleared_layers。"""
+    """改 active 下标 → **清除离场单位的全部非永久增益层**（stat_mods + trait.gains）→
+    switch 事件带 cleared_layers → ENTER/EXIT 领域事件（先 EXIT 后 ENTER：
+    暗涌印记先于降灵/棘刺作用于同一入场者，见 marks.collect）。"""
     side = entry.side
     idx = ctx.decision(side).action.get("value")
     side_state = state.side(side)
@@ -289,7 +294,12 @@ def resolve_switch(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
         old.trait.gains = [m for m in old.trait.gains if m.permanent]
     side_state.active = idx
     new = side_state.active_unit
-    return [ev("switch", side, out=old.name, **{"in": new.name}, cleared_layers=cleared)]
+    events = [ev("switch", side, out=old.name, **{"in": new.name}, cleared_layers=cleared)]
+    exit_ev = UnitExited(unit_id=old.id, incoming_id=new.id)
+    enter_ev = UnitEntered(unit_id=new.id, from_faint=False)
+    re_events, _ = run(state, [], Frame(), unit=None,
+                       after=lambda f, es=(exit_ev, enter_ev): list(es))
+    return events + re_events
 
 
 def resolve_recharge(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
@@ -301,10 +311,12 @@ def resolve_recharge(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
     return [ev("recharge", side, unit=unit.name, gained=gained, energy=unit.energy)]
 
 
-def resolve_entry(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
+def resolve_entry(state, ctx: TurnContext, entry: QueuedEntry,
+                  acted_first: bool = False) -> list[dict]:
     """分派一条队列条目到对应的结算函数。
 
-    输入：state / ctx（本回合派生量）/ entry（待结算动作）。
+    输入：state / ctx（本回合派生量）/ entry（待结算动作）/ acted_first（本回合
+    执行顺序先于对手——风起印记读钩子）。
     输出：该条目产生的事件列表；未知动作类型 → skipped 事件。
     按 entry.kind 与决策动作类型分派：item → resolve_item；skill/switch/recharge → 各自结算。
     """
@@ -312,7 +324,7 @@ def resolve_entry(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
         return resolve_item(state, ctx, entry)
     atype = ctx.decision(entry.side).action.get("type")
     if atype == ActionType.SKILL.value:
-        return resolve_skill(state, ctx, entry)
+        return resolve_skill(state, ctx, entry, acted_first=acted_first)
     if atype == ActionType.SWITCH.value:
         return resolve_switch(state, ctx, entry)
     if atype == ActionType.RECHARGE.value:
@@ -377,24 +389,32 @@ def timeout_winner(state) -> tuple[str, str]:
 
 
 def apply_replacement(state, side: str, bench_idx: int) -> list[dict]:
-    """应用玩家选择的补位：active = bench_idx，发 replace 事件。阵亡单位已死，无需清层。"""
+    """应用玩家选择的补位：active = bench_idx，发 replace 事件。阵亡单位已死，无需清层。
+
+    入场领域事件 UnitEntered(from_faint=True)——暗涌印记「持有者阵亡离场后、补位入场
+    者承接收减益」的落点（见 marks.collect）。"""
     side_state = state.side(side)
     old = side_state.active_unit
     side_state.active = bench_idx
-    return [ev("replace", side, out=old.name, **{"in": side_state.active_unit.name})]
+    events = [ev("replace", side, out=old.name, **{"in": side_state.active_unit.name})]
+    enter_ev = UnitEntered(unit_id=side_state.active_unit.id, from_faint=True)
+    re_events, _ = run(state, [], Frame(), unit=None, after=lambda f, e=enter_ev: [e])
+    return events + re_events
 
 
 def end_of_turn(state) -> list[dict]:
     """回合末时段执行点（v3 骨架 2026-08-30）：构造 TurnEnded → 反应管道。
 
-    属于当前回合的结算时段（在 `turn += 1` **之前**）；E0b 无任何绑定 → 恒返回 []。
-    将来的 DOT / 天气 / 印记 TURN_END 绑定从 TurnEnded 事件接入（collector）；
-    领域事件返回值暂丢弃——DOT 造成回合末阵亡时从这里取 HpChanged 判阵亡
-    （battle_docs §9 的回合末被动补位语义届时一并拍板实施）。
+    属于当前回合的结算时段（在 `turn += 1` **之前**）；TurnEnded 反应收集序 =
+    天气（暴风雪/雷鸣）→ 印记（光合/中毒），效果先结算、再天气递减过期
+    （`weather.tick`）。DOT 造成回合末阵亡的补位由 resolve_turn 开场兜底处理。
     """
     frame = Frame()
     events, _domain = run(state, [], frame, unit=None,
                           after=lambda f: [TurnEnded(turn=state.turn)])
+    from .weather import tick
+
+    tick(state)
     return events
 
 
@@ -437,7 +457,6 @@ def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], s
 
     # 0) TURN_START：回合开始执行点（v3 骨架 2026-08-30）——确定性预估随事件携带
     #（预估与决策无关，双方各一份；「回合开始看预估伤害」的特性将来从此事件接入）。
-    # E0b 无任何绑定 → 零行为变化。
     start_events, _ = run(state, [], Frame(), unit=None,
                           after=lambda f: [TurnStarted(
                               turn=state.turn,
@@ -445,17 +464,40 @@ def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], s
                                            "b": predictions_for(state, "b")})])
     events += start_events
 
+    # 0.5) 开场兜底（印记/天气批 2026-08-30）：TURN_END 效果（中毒印记等）可能在
+    # 回合末造成阵亡——复用现有补位暂停流（本回合决策已提交，视为「阵亡 → 回合
+    # 在此结束、等补位」语义顺延一个相位）。
+    faint_events, need_side = settle_faints(state)
+    events += faint_events
+    if need_side is not None:
+        winner = check_winner(state)
+        if winner is not None:
+            state.winner, state.done = winner, True
+            return events, None
+        return events, need_side
+
+    # 0.6) 首回合入场：双方在场 UnitEntered（入场类印记/特性的统一落点；本批无印记
+    # 可在开局存在，为蓄电池等入场特性铺路）。
+    if state.turn == 1:
+        entered = [UnitEntered(unit_id=state.active(s).id, from_faint=False) for s in SIDES]
+        enter_events, _ = run(state, [], Frame(), unit=None,
+                              after=lambda f, es=entered: es)
+        events += enter_events
+
     # 1) DECLARE：双方声明已知 → 定应对关系 + 武装减伤（必须在任何结算之前）
     ctx, arm_events = build_turn_context(state, dec_a, dec_b)
     events += arm_events
 
-    # 2) + 3) ORDER + ACT
+    # 2) + 3) ORDER + ACT（acted 跟踪 = 风起印记「先手」口径：对手尚未执行任何条目）
+    acted: set[str] = set()
     for entry in build_queue(state, ctx):
         if entry.actor.fainted:
             events.append(ev("skipped", entry.side, kind=entry.kind,
                              unit=entry.actor.name, reason="已被击倒"))
             continue   # 防御性兜底：正常流程阵亡即暂停，到不了这里
-        events += resolve_entry(state, ctx, entry)
+        foe = "b" if entry.side == "a" else "a"
+        events += resolve_entry(state, ctx, entry, acted_first=foe not in acted)
+        acted.add(entry.side)
         faint_events, need_side = settle_faints(state)
         events += faint_events
         if need_side is not None:

@@ -23,6 +23,7 @@ class DamageApplied:
     effectiveness: float
     skill: str
     total: int
+    skill_type: str = ""   # 技能系别（星陨「非幻系」判定读它）
 
 
 @dataclass(frozen=True)
@@ -69,16 +70,19 @@ class SkillResolved:
 
 @dataclass(frozen=True)
 class UnitEntered:
-    """精灵入场（换人 / 补位 / 开局）。"""
+    """精灵入场（换人 / 补位 / 开局）。`from_faint` = 补位入场（前一在场者阵亡）。"""
 
     unit_id: str
+    from_faint: bool = False
 
 
 @dataclass(frozen=True)
 class UnitExited:
-    """精灵离场（换人 / 脱离）。"""
+    """精灵离场（换人 / 脱离）。`incoming_id` = 换人时立即入场的精灵（暗涌印记读它；
+    阵亡离场无 incoming → ""，由后续补位的 UnitEntered(from_faint=True) 承接）。"""
 
     unit_id: str
+    incoming_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,3 +103,22 @@ class TurnStarted:
 
     turn: int
     predictions: dict[str, list[dict]]
+
+
+@dataclass(frozen=True)
+class MarkChanged:
+    """印记层数变化（施加/消耗/移除）。`layers` = 变更后总层数（0 = 已移除）。"""
+
+    side: str
+    name: str
+    layers: int
+    source: str
+
+
+@dataclass(frozen=True)
+class WeatherChanged:
+    """天气设置/变化（全局）。"""
+
+    kind: str
+    turns_left: int
+    source: str
