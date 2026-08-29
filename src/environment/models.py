@@ -464,6 +464,21 @@ def _rules_from_dict(d: dict) -> BattleRules:
     return BattleRules(**{k: v for k, v in d.items() if k in known})
 
 
+def skill_from_instance(inst: SkillInstance) -> Skill | None:
+    """从 `SkillInstance`（当前回合技能详情）构建引擎 Skill。
+
+    数据协议 v2：五要素取实例（愿力替换 / 冷却后的能耗、威力、类别以 current_skills
+    为准），效果按名查 P1∪P2 表；不在白名单 → None。engine._combat_skill 与
+    prediction（预估）共用此构造，消灭复制。
+    """
+    effect = P1_EFFECTS.get(inst.name) or P2_EFFECTS.get(inst.name)
+    if effect is None:
+        return None
+    return Skill(name=inst.name, kind=inst.kind, type=inst.type, power=inst.power,
+                 energy_cost=inst.energy_cost, effect=effect,
+                 priority=effect.priority, desc=inst.desc)
+
+
 def _skill_from_name(name: str) -> Skill:
     """按名从可对战白名单（P1 ∪ P2）重建 Skill（from_dict 用）。
 

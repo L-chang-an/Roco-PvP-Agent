@@ -23,9 +23,10 @@ from .compiler import compile_skill
 from .damage import apply_heal
 from .events import ev
 from .hooks import Hook, emit
-from .models import ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats
+from .models import (ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats,
+                     skill_from_instance)
 from .reducer import Frame, reduce_all
-from .skillbook import P1_EFFECTS, P2_EFFECTS, SkillCategory
+from .skillbook import SkillCategory
 from .traits import trait_defs_for
 
 
@@ -93,15 +94,10 @@ def _combat_skill(unit: Unit, idx: int) -> Skill | None:
 
     数据协议 v2：Unit.skills / current_skills 只存五要素（无 effect）；引擎需要效果时
     按技能名查 P1∪P2 效果表重建——五要素取**当前回合视图**（愿力替换 / 冷却后的能耗、
-    威力、类别以 current_skills 为准）。
+    威力、类别以 current_skills 为准）。构造逻辑上提到 models.skill_from_instance
+    （与 prediction 预估共用）。
     """
-    inst = unit.current_skills[idx]
-    effect = P1_EFFECTS.get(inst.name) or P2_EFFECTS.get(inst.name)
-    if effect is None:
-        return None
-    return Skill(name=inst.name, kind=inst.kind, type=inst.type, power=inst.power,
-                 energy_cost=inst.energy_cost, effect=effect,
-                 priority=effect.priority, desc=inst.desc)
+    return skill_from_instance(unit.current_skills[idx])
 
 
 def _declared_skill(state, side: str, dec: Decision):

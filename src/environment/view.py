@@ -16,6 +16,8 @@ viewer 的**己方全见**；敌方只可见白名单（负责人 2026-08-25，�
 `skills`+`current_skills`（技能详情五要素 + cooldown）/ `trait{name,desc,kwargs,gains}`（特性增益转移到
 gains）；`energy_cost_mods` 字段取消（能耗减益已并入 stat_mods 的 stat="energy_cost"）。
 
+**2026-08-30 公式规范**：me 侧新增 `predictions`（在场精灵逐技能预估威力/预估伤害，确定性派生量）。
+
 `mode="partial"` 是玩家唯一能看到的口径；`mode="global"` = `state.to_dict()`（引擎回放/CLI
 全量输出用）。本模块是**纯函数**：不写状态、不揭示、不发事件——揭示发生在 engine.resolve_skill。
 """
@@ -144,6 +146,12 @@ def observe(state: BattleState, viewer: str, mode: str = "partial") -> dict:
         raise ValueError(f"viewer 必须是 a 或 b，实际 {viewer!r}。")
     foe = "b" if viewer == "a" else "a"
     r = state.rules
+    me_view = _side_view(state.side(viewer), masked=False)
+    # 预估提示（公式规范 2026-08-30）：me 侧新增 predictions——确定性派生量，
+    # 不入状态（state_hash 不变）；玩家在「下一回合开始前」的快照上看到它。
+    from .prediction import predictions_for
+
+    me_view["predictions"] = predictions_for(state, viewer)
     return {
         "battle_id": state.battle_id,
         "side": viewer,
@@ -160,6 +168,6 @@ def observe(state: BattleState, viewer: str, mode: str = "partial") -> dict:
             "skill_slots": r.skill_slots,
             "iv_max": r.iv_max,
         },
-        "me": _side_view(state.side(viewer), masked=False),
+        "me": me_view,
         "opponent": _side_view(state.side(foe), masked=True),
     }

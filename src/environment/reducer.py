@@ -212,19 +212,18 @@ _DISPATCH: dict[type, object] = {
 }
 
 
-# ── 内部辅助（行为等价于 engine 同名逻辑）──
+# ── 内部辅助（公式规范 2026-08-30：项由 damage.build_damage_terms 统一产出）──
 def _query_for(state, attacker, defender, atom: DealDamage) -> DamageQuery:
-    from .models import aggregate_stats
+    from .damage import build_damage_terms
 
-    physical = atom.damage_kind == "物攻"
-    atk_key = "atk" if physical else "sp_atk"
-    def_key = "def" if physical else "sp_def"
-    ag = aggregate_stats(attacker, state.rules)
-    dg = aggregate_stats(defender, state.rules)
+    terms = build_damage_terms(state, attacker, defender, damage_kind=atom.damage_kind,
+                               power=atom.power, counter_mult=atom.counter_mult)
     return DamageQuery(
-        attacker_id=attacker.id, defender_id=defender.id, power=atom.power,
+        attacker_id=attacker.id, defender_id=defender.id,
         damage_kind=atom.damage_kind, skill_type=atom.skill_type,
         attacker_types=list(attacker.types), defender_types=list(defender.types),
-        multiplier=atom.effectiveness * atom.stab * atom.counter_mult,
-        reduction=atom.reduction, base_atk=max(1, ag[atk_key]), base_def=max(1, dg[def_key]),
+        power_term=terms.power_term, ratio_num=terms.ratio_num, ratio_den=terms.ratio_den,
+        power_pct=terms.power_pct,
+        stab=atom.stab, effectiveness=atom.effectiveness, weather=1.0,
+        reduction=atom.reduction, base_atk=terms.atk, base_def=terms.defense,
     )
