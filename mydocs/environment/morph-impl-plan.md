@@ -1,6 +1,6 @@
 # 萌化相关技能与特性施工排序（2026-08-30）
 
-> 状态：**排序稿**（待负责人审阅，按「复用现有原语程度」分档）
+> 状态：**已全部施工**（2026-08-30；蹦跶含「选择」跳过）　施工记录见 §6
 > 依据：`src/environment/data/full_skills.json` / `full_spirits.json` 全量扫描
 > 前置：**萌化结算已实装**（2026-08-30，见 `reducer._recalc_morph` / `damage.apply_max_hp_change` /
 > `evolution.py`；施加拦截 / 退化重算 / 解除回升 / HP 同比例缩放，9 个测试）
@@ -159,4 +159,7 @@
 | 变更 | 落点 |
 |---|---|
 | **萌化结算（2026-08-30 拍板）**：层数 = 退阶数；实际资质已最低阶 → 施加拦截；退化/解除回升重算 `calc_combat_stats`；特性/名字/技能不变；HP 同比例缩放走 `damage.apply_max_hp_change` | reducer.py / damage.py / statuses.py / tests/test_environment_morph.py |
-| 本排序文档（2026-08-30）：萌化技能 12（已 1 / 待 11）、特性 7（全待），按复用原语程度分三档 | 本文档 |
+| **DOT 持久性（2026-08-30 拍板）**：萌化/冻结 = 永久 debuff（离场保留）；阵亡清层保留永久层（萌化复活后仍在） | reducer.py / engine.py / tests/test_environment_status_persistence.py |
+| **萌化批技能（2026-08-30）**：L1 拆礼物/捧杀/超级糖果/赤子之心/示弱 + L2 撒娇/甜心续航/月光合奏/转圈圈 + L3 反弹（「获得萌化：X」= 施萌化+成功才附加、施萌化排在伤害前；AddModifier permanent 字段）；蹦跶含「选择」跳过；battle_ready 224→234 | skillbook.py / compiler.py / atom.py / reducer.py / tests/test_environment_morph_skills.py |
+| **萌化批特性（2026-08-30）**：L1 无忧无虑（层数上限豁免）/自由飘（萌化→连击）+ L2 守望者（防御应对施萌化，SkillResolved 加 countered）/拉拉队长（施加漏斗转化解除）+ L3 守护者（入场能耗减）/迎宾（离场→入场施萌化）/化茧（致命免伤+萌化，最多 2 次） | traits.py / reducer.py / primitives.py / domain.py / engine.py / hooks.py / triggers.py / tests/test_environment_morph_traits.py |
+| 本排序文档（2026-08-30）：萌化技能 12（已 11，蹦跶选择跳过）、特性 7（全部落地） | 本文档 |

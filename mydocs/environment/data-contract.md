@@ -190,6 +190,17 @@ full_spirits.json 的 evolution 字段去重生成，245 条链）：
 | 引电 | special | 达 2 层 → 立即 25% 生命电系伤害并失去 2 层 | `{pct:25, at:2}` |
 | 萌化 | special | 种族资质退化到上一阶，特性不变 | `{}` |
 
+**DOT 持久性与免疫（2026-08-30 拍板）**：
+
+- 中毒/灼烧/寄生/引电 = **离场清空**的非永久 debuff（`permanent=False`）；
+- 萌化/冻结 = **永久 debuff**（`permanent=True`，离场保留，只靠技能/特性效果清除；
+  冻结阵亡时清除）；
+- 属性免疫：火免疫灼烧 / 草免疫寄生 / 毒免疫中毒 / **冰免疫冻结**；另有特性级
+  「免疫冻结」标记（吉利丁片给入场精灵的 `trait.gains` 层，施加漏斗同拦截）；
+- **阵亡清层**：非永久 buff 与冻结层清除；永久层（萌化等）保留——复活特性复活后
+  仍带永久 buff（除冻结）；
+- 冻结固有副作用：每有 1 层冻结，全技能能耗 +1（`skill_energy_cost` 读钩子）。
+
 ### 2.6 TraitState（特性运行时实例：特性增益转移至此）
 
 | 字段 | 类型 | 意义 |
@@ -319,5 +330,8 @@ full_spirits.json 的 evolution 字段去重生成，245 条链）：
 | **进化链数据（2026-08-30）**：`derive_evolution_chains`（245 条链 {id, path, boss}）+ build 脚本 + evolution.py 索引（prev_of / boss_targets_of / is_lowest / base_stats_of）；修正数据笔误「黑化加尔（黑化的样子）」→「黑化加尔」 | dataset.py / evolution.py / scripts/build_evolution_chains.py |
 | **萌化结算（2026-08-30 拍板）**：层数 = 退阶数；实际资质已最低阶 → 施加拦截；退化/解除回升重算 calc_combat_stats；特性/名字/技能不变；HP 同比例缩放走 `damage.apply_max_hp_change` 新漏斗 | reducer.py / damage.py / statuses.py |
 | **首领化道具（2026-08-30 拍板）**：一阶进化（仅 boss 上一阶可触发，多分支迪莫 4/魔力猫 2）；萌化层数>0 不可首领化；`Decision.item_arg` 选分支；原地替换（unit_id 不变、技能/stat_mods 保留、HP 同比例缩放）；`UnitEntered(from_boss=True)` 入场触发；道具不默认携带 | engine.py / actions.py / domain.py / events.py / rules.py / replay.py |
+| **DOT 持久性（2026-08-30 拍板）**：中毒/灼烧/寄生/引电非永久（离场清除）；萌化/冻结永久（离场保留）；冰免疫冻结 + 特性级「免疫冻结」标记；阵亡清层（非永久+冻结清除、永久保留）；冻结固有副作用每层全技能能耗+1 | statuses.py / reducer.py / engine.py / primitives.py |
+| **冻结批技能+特性（2026-08-30）**：技能 7（碎冰冰/冷凝/霜天/冰点/冰墙/滚雪球/极寒领域；寒潮巧变跳过）；特性 12（灵魂灼伤/冰封/冻土/加个雪球/捉迷藏/冰钻/抓到你了/大雪球/月牙雪糕/吉利丁片/冰雪魂魄/结晶水）；STATUS_APPLIED 时机+source 守卫、ENTER/EXIT 特性收集、ice_skills_used 阵营计数（空不进序列化） | skillbook.py / compiler.py / traits.py / triggers.py / hooks.py / damage.py / models.py |
+| **萌化批技能+特性（2026-08-30）**：技能 10（拆礼物/捧杀/超级糖果/赤子之心/示弱/撒娇/甜心续航/月光合奏/转圈圈/反弹；蹦跶选择跳过——「获得萌化：X」=施萌化+成功才附加）；特性 7（无忧无虑/自由飘/守望者/拉拉队长/守护者/迎宾/化茧）；AddModifier permanent 字段 | skillbook.py / compiler.py / atom.py / reducer.py / primitives.py / domain.py / engine.py |
 
 **待负责人确认**：① roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
