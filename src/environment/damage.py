@@ -134,6 +134,15 @@ def build_damage_terms(state, attacker, defender, *, damage_kind: str,
     # 冰钻特性（2026-08-30）：敌方携带技能总能耗每有 1 点，自己攻击威力 +10%
     if attacker.trait is not None and attacker.trait.name == "冰钻":
         mark_pct += 0.10 * sum(s.energy_cost for s in defender.skills)
+    # 冰雪魂魄特性（2026-08-30）：天气为暴风雪时，敌方队伍每有 1 层冻结，冰系威力 +10%
+    if skill_type == "冰" and attacker.trait is not None \
+            and attacker.trait.name == "冰雪魂魄" and state.weather is not None \
+            and state.weather.kind == "暴风雪":
+        from .models import side_of
+        from .statuses import freeze_layers
+
+        foe_side = side_of(state, defender)
+        mark_pct += 0.10 * sum(freeze_layers(u) for u in state.side(foe_side).units)
     return DamageTerms(
         atk=max(1, int(atk)),
         defense=max(1, int(defense)),

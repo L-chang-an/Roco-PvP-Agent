@@ -57,8 +57,21 @@ _CONDITIONS: dict[str, object] = {
     "used_grass": lambda ctx: _skill_type_is(ctx, "草"),
     "used_water": lambda ctx: _skill_type_is(ctx, "水"),
     "used_ice": lambda ctx: _skill_type_is(ctx, "冰"),
+    "used_attack": lambda ctx: _skill_kind_is(ctx, ("物攻", "魔攻")),
     "freeze_applied": lambda ctx: _freeze_applied(ctx),
 }
+
+
+def _skill_kind_is(ctx, kinds: tuple[str, ...]) -> bool:
+    """SKILL_RESOLVE：施放技能类别 ∈ kinds（从 unit.current_skills 按名查）。"""
+    unit = getattr(ctx, "unit", None)
+    ev = getattr(ctx, "event", None)
+    if unit is None or ev is None:
+        return False
+    for s in unit.current_skills:
+        if s.name == ev.skill:
+            return s.kind in kinds
+    return False
 
 
 def _freeze_applied(ctx) -> bool:

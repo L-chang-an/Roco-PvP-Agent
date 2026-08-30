@@ -5,9 +5,13 @@ v3 核心（`mydocs/battle_docs.md` §6）：Trigger 是**纯收集器**——`c
 「事件 → Trigger 返回 TraitGain Atom → Reducer 写 trait.gains」；骨架阶段保持行为
 逐位等价（tests/test_v3_sentinel.py 把关）。
 
-`pipeline.run` 是唯一调用方（Phase 3.1）：事件 → collect_reactions → 新 Atom →
-reduce_all 循环，特性效果与旧直写路径逐位一致。`collect_reactions` 不依赖 state
-（只依赖 unit 与事件），测试可 state=None 调用。
+特性收集时机（2026-08-30 扩展）：
+- `SkillResolved` → 施法者特性（skill_resolve）；冰系技能计数（结晶水）；
+- `StatModChanged` → 施法者特性（status_applied，source 守卫防循环）；
+- `UnitEntered` → 入场精灵特性（enter）+ 结晶水入场回能；
+- `UnitExited` → 离场精灵特性（exit，吉利丁片对入场精灵施增益）。
+`pipeline.run` 是唯一调用方；`collect_reactions` 不依赖 state（只依赖 unit 与事件），
+测试可 state=None 调用。
 """
 
 from __future__ import annotations
@@ -15,27 +19,43 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from .atom import AddModifier, TraitGain
-from .domain import SkillResolved, StatModChanged
+from .atom import AddModifier, ApplyMark, GainEnergy, TraitGain
+from .domain import (SkillResolved, StatModChanged, UnitEntered, UnitExited)
 from .primitives import apply_energy_gain, heal_pct
 
 if TYPE_CHECKING:
     from .atom import Atom
-    from .models import Unit
+    from .models import BattleState, Unit
+
+
+def _unit_by_id(state: "BattleState", unit_id: str) -> "Unit | None":
+    for s in ("a", "b"):
+        for u in state.side(s).units:
+            if u.id == unit_id:
+                return u
+    return None
 
 
 def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
                       energy_max: int = 10) -> list["Atom"]:
     """输入：DomainEvent + 施法者（+ 可选特性静态定义）；输出：新 Atom 列表。
 
-    **多源收集**：特性（SKILL_RESOLVE）→ DOT（statuses）→ 印记（marks）→ 天气
-    （weather）——TURN_END 固定序 = DOT → 印记 → 天气（2026-08-30 拍板：保持印记
-    先于天气，DOT 插到最前）。印记/天气收集需要 state（`state=None` 时跳过——测试
-    emit 直调兼容）。`unit` 可为 None（TURN_END 等无单一施法者的事件）。
+    **多源收集**：特性（SKILL_RESOLVE / STATUS_APPLIED / ENTER / EXIT）→ DOT（statuses）
+    → 印记（marks）→ 天气（weather）——TURN_END 固定序 = DOT → 印记 → 天气
+    （2026-08-30 拍板：保持印记先于天气，DOT 插到最前）。`unit` 可为 None
+    （TURN_END 等无单一施法者的事件）。
     """
     atoms: list["Atom"] = []
     if isinstance(event, (SkillResolved, StatModChanged)) and unit is not None:
         atoms += _trait_atoms(state, event, unit, trait_defs, energy_max)
+        if isinstance(event, SkillResolved) and state is not None:
+            atoms += _record_ice_skill(state, event, unit)
+    if state is not None and isinstance(event, (UnitEntered, UnitExited)):
+        ent = _unit_by_id(state, event.unit_id)
+        if ent is not None:
+            atoms += _trait_atoms(state, event, ent, None, energy_max)
+            if isinstance(event, UnitEntered):
+                atoms += _crystal_water_gain(state, ent, energy_max)
     if state is not None:
         from .marks import collect as collect_marks
         from .statuses import collect as collect_statuses
@@ -45,6 +65,32 @@ def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
         atoms += collect_marks(state, event)
         atoms += collect_weather(state, event)
     return atoms
+
+
+def _record_ice_skill(state: "BattleState", event: SkillResolved,
+                      unit: "Unit") -> list["Atom"]:
+    """结晶水计数（2026-08-30）：本场战斗己方阵营使用冰系技能的次数。"""
+    from .models import side_of
+
+    if _skill_type(unit, event.skill) != "冰":
+        return []
+    side = side_of(state, unit)
+    state.ice_skills_used[side] = state.ice_skills_used.get(side, 0) + 1
+    return []
+
+
+def _crystal_water_gain(state: "BattleState", unit: "Unit",
+                        energy_max: int) -> list["Atom"]:
+    """结晶水入场回能（2026-08-30）：回 3×（入场前己方使用冰系技能次数）。"""
+    from .models import side_of
+
+    if unit.trait is None or unit.trait.name != "结晶水":
+        return []
+    side = side_of(state, unit)
+    count = state.ice_skills_used.get(side, 0)
+    if count <= 0:
+        return []
+    return [GainEnergy(side=side, unit=unit, amount=3 * count, source="结晶水", target="self")]
 
 
 def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> list["Atom"]:
@@ -63,6 +109,12 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
     elif etype == "StatModChanged":
         ctx = SimpleNamespace(unit=unit, energy_max=energy_max, event=event)
         hook_value = "status_applied"
+    elif etype == "UnitEntered":
+        ctx = SimpleNamespace(unit=unit, energy_max=energy_max, event=event)
+        hook_value = "enter"
+    elif etype == "UnitExited":
+        ctx = SimpleNamespace(unit=unit, energy_max=energy_max, event=event)
+        hook_value = "exit"
     else:
         return []
     atoms: list["Atom"] = []
@@ -74,14 +126,16 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
             if binding.hook != hook_value or not _cond_matches(binding.cond, ctx):
                 continue
             for effect in binding.effects:
-                atoms.extend(_effect_to_atoms(state, unit, effect, tdef.name, energy_max))
+                atoms.extend(_effect_to_atoms(state, unit, event, effect, tdef.name,
+                                              energy_max))
     return atoms
 
 
-def _effect_to_atoms(state, unit: "Unit", effect, source: str,
+def _effect_to_atoms(state, unit: "Unit", event, effect, source: str,
                      energy_max: int) -> list["Atom"]:
     """一条 Effect → Atom 列表（stat_mod / energy_cost_mod → TraitGain；资源类即时执行；
-    foe_status → 对敌方在场施状态（2026-08-30，灵魂灼伤等）。"""
+    foe_status → 对敌方在场施状态；enter_stat_mod → 对入场精灵 TraitGain（吉利丁片）；
+    snowball_record / star_meteor_mark → 冻结批 L3 特殊 op，2026-08-30）。"""
     if effect.op == "stat_mod":
         return [TraitGain(unit=unit, stat=effect.stat, mode=effect.mode,
                           layers=effect.layers, source=source, permanent=effect.permanent)]
@@ -104,7 +158,7 @@ def _effect_to_atoms(state, unit: "Unit", effect, source: str,
                             source=source, target="foe",
                             kwargs=status_kwargs(effect.stat))]
     if effect.op == "foe_energy_cost_mod":
-        # 捉迷藏（2026-08-30）：敌方获得冻结时 → 敌方全技能能耗 +N
+        # 捉迷藏/抓到你了（2026-08-30）：敌方获得冻结时 → 敌方全技能能耗 +N
         if state is None:
             return []
         from .models import side_of
@@ -116,6 +170,52 @@ def _effect_to_atoms(state, unit: "Unit", effect, source: str,
             return []
         return [AddModifier(side=foe_side, unit=foe, stat="energy_cost", mode="flat",
                             layers=effect.layers, source=source, target="foe")]
+    if effect.op == "enter_stat_mod":
+        # 吉利丁片（2026-08-30）：离场 → 对更换入场的精灵 TraitGain（含「免疫冻结」标记）
+        incoming_id = getattr(event, "incoming_id", "")
+        incoming = _unit_by_id(state, incoming_id) if state is not None and incoming_id else None
+        if incoming is None:
+            return []
+        return [TraitGain(unit=incoming, stat=effect.stat, mode=effect.mode,
+                          layers=effect.layers, source=source, permanent=effect.permanent)]
+    if effect.op == "snowball_record":
+        # 大雪球（2026-08-30）：使用 2 次不同的冰系技能 → 敌方 +4 层冻结并重置
+        if state is None or unit.trait is None:
+            return []
+        from .models import side_of
+        from .statuses import STATUS_TABLE, status_kwargs
+
+        used = set(unit.trait.kwargs.get("used_skills", []))
+        used.add(getattr(event, "skill", ""))
+        if len(used) >= 2:
+            unit.trait.kwargs["used_skills"] = []
+            side = side_of(state, unit)
+            foe_side = "b" if side == "a" else "a"
+            foe = state.active(foe_side)
+            if foe is None or foe.fainted:
+                return []
+            return [AddModifier(side=foe_side, unit=foe, stat="冻结",
+                                mode=STATUS_TABLE["冻结"][0], layers=4,
+                                source=source, target="foe",
+                                kwargs=status_kwargs("冻结"))]
+        unit.trait.kwargs["used_skills"] = sorted(used)
+        return []
+    if effect.op == "star_meteor_mark":
+        # 月牙雪糕（2026-08-30）：使用攻击技能时，敌方每有 1 层冻结 → 施 1 层星陨印记
+        if state is None:
+            return []
+        from .models import side_of
+        from .statuses import freeze_layers
+
+        side = side_of(state, unit)
+        foe_side = "b" if side == "a" else "a"
+        foe = state.active(foe_side)
+        if foe is None or foe.fainted:
+            return []
+        n = freeze_layers(foe)
+        if n <= 0:
+            return []
+        return [ApplyMark(side=foe_side, name="星陨印记", layers=n, source=source)]
     # 资源类（energy_gain / heal_pct）：即时执行（旧 emit 同语义，不产生展示事件）
     if effect.op == "energy_gain":
         apply_energy_gain(unit, effect.value, energy_max=energy_max)

@@ -54,9 +54,17 @@ def status_kwargs(name: str) -> dict:
 
 
 def is_immune(unit: "Unit", stat: str) -> bool:
-    """属性免疫：火系免疫灼烧 / 草系免疫寄生 / 毒系免疫中毒（层数施加拦截）。"""
+    """状态免疫：属性级（火免疫灼烧/草免疫寄生/毒免疫中毒/冰免疫冻结）+ 特性级
+    「免疫冻结」标记（吉利丁片离场后给入场精灵的 trait.gains 层，2026-08-30）。"""
     immune_type = IMMUNE_TYPES.get(stat)
-    return bool(immune_type and immune_type in unit.types)
+    if immune_type and immune_type in unit.types:
+        return True
+    if stat == "冻结":
+        gains = unit.trait.gains if unit.trait else []
+        for m in gains:
+            if m.stat == "免疫冻结" and m.mode == "special":
+                return True
+    return False
 
 
 def morph_layers(unit: "Unit") -> int:

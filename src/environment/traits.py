@@ -118,6 +118,49 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
     ),
     # 冰钻：读钩子（敌方技能栏总能耗 → 自己攻击威力 +10%×总能耗，见 damage.build_damage_terms）
     "冰钻": TraitDef(name="冰钻", bindings=()),
+    # 冻结批 L3（2026-08-30）
+    "抓到你了": TraitDef(
+        name="抓到你了",
+        bindings=(
+            EffectBinding(hook=Hook.ENTER, cond="", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_energy_cost_mod", layers=1),
+            )),
+        ),
+    ),
+    "大雪球": TraitDef(
+        name="大雪球",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_ice", effects=(
+                Effect("snowball_record"),   # kwargs 计数：2 次不同冰系技能 → 敌方 +4 冻结并重置
+            )),
+        ),
+    ),
+    "月牙雪糕": TraitDef(
+        name="月牙雪糕",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_attack", effects=(
+                Effect("star_meteor_mark"),   # 敌方每有 1 层冻结 → 施 1 层星陨印记
+            )),
+        ),
+    ),
+    "吉利丁片": TraitDef(
+        name="吉利丁片",
+        bindings=(
+            EffectBinding(hook=Hook.EXIT, cond="", effects=(
+                Effect("enter_stat_mod", stat="def", mode="pct", layers=2, permanent=True),
+                Effect("enter_stat_mod", stat="sp_def", mode="pct", layers=2, permanent=True),
+                Effect("enter_stat_mod", stat="免疫冻结", mode="special", layers=1,
+                       permanent=True),
+            )),
+        ),
+    ),
+    # 冰雪魂魄 / 结晶水：读钩子与特殊结算（见 damage.build_damage_terms /
+    # triggers._crystal_water_gain / models.build_unit 初始能量覆写），零绑定注册名。
+    "冰雪魂魄": TraitDef(name="冰雪魂魄", bindings=()),
+    "结晶水": TraitDef(name="结晶水", bindings=()),
 }
 
 

@@ -301,6 +301,9 @@ class BattleState:
     done: bool = False
     battle_id: str = ""
     weather: WeatherState | None = None
+    # 阵营冰系技能使用计数（结晶水入场回能用，2026-08-30；空时**不进序列化**，
+    # 既有对局快照零漂移）
+    ice_skills_used: dict[str, int] = field(default_factory=dict)
 
     def side(self, s: str) -> SideState:
         """唯一的 a/b 分支点。输入：side；输出：该方 SideState。"""
@@ -330,7 +333,7 @@ class BattleState:
     def to_dict(self) -> dict:
         """全量 JSON 快照。**只含 JSON 原生类型**；`json.dumps` 不许传 `default=`，
         塞进非序列化对象要当场炸。要序列化集合就 sorted()。"""
-        return {
+        d = {
             "side_a": _side_to_dict(self.side_a),
             "side_b": _side_to_dict(self.side_b),
             "rng": self.rng.audit(),
@@ -341,6 +344,9 @@ class BattleState:
             "battle_id": self.battle_id,
             "weather": _weather_to_dict(self.weather),
         }
+        if self.ice_skills_used:
+            d["ice_skills_used"] = dict(self.ice_skills_used)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "BattleState":
@@ -358,6 +364,7 @@ class BattleState:
             done=d["done"],
             battle_id=d.get("battle_id", ""),
             weather=_weather_from_dict(d.get("weather")),
+            ice_skills_used=dict(d.get("ice_skills_used", {})),
         )
 
     def clone(self) -> "BattleState":
@@ -596,6 +603,8 @@ def build_unit(spec: dict, rules: BattleRules = DEFAULT_RULES) -> Unit:
         sp = load_spirits().get(spec["name"])
         if sp is not None:
             trait_desc = sp.trait_desc
+    # 结晶水（2026-08-30）：初始能量为 0（覆写 rules.energy_start）
+    energy = 0 if tname == "结晶水" else rules.energy_start
     unit = Unit(
         id=spec.get("id", ""),
         name=spec["name"],
@@ -609,7 +618,7 @@ def build_unit(spec: dict, rules: BattleRules = DEFAULT_RULES) -> Unit:
         iv=dict(spec.get("iv", {})),
         max_hp=max_hp,
         current_hp=max_hp,
-        energy=rules.energy_start,
+        energy=energy,
         trait=TraitState(name=tname, desc=trait_desc),
     )
     unit.refresh_current_skills()

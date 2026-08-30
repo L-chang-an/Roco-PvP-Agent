@@ -159,3 +159,125 @@ def test_ice_drill_no_trait_no_bonus() -> None:
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
     assert dmg == 90                                    # 无冰钻 → 无加成
+
+
+# ── 抓到你了：入场 → 敌方 +2 冻结；施冻结 → 敌方能耗 +1 ──
+def test_caught_you_enter_freezes_foe() -> None:
+    from environment.actions import switch_action
+    from environment.engine import resolve_turn
+
+    a1 = _unit("甲", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    a2 = _unit("丙", _sk(("抓挠", "普通", "物攻", 1, 30)), trait=_trait("抓到你了"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    a1.id, a2.id, b.id = "a-0-甲", "a-1-丙", "b-0-乙"
+    s = BattleState(side_a=SideState(units=[a1, a2], lives=2),
+                    side_b=SideState(units=[b], lives=2),
+                    rng=BattleRng(7), rules=DEFAULT_RULES, turn=2)
+    resolve_turn(s, Decision(switch_action(1)), Decision(recharge_action()))
+    assert freeze_layers(b) == 2                        # 入场 → 敌方 +2 冻结
+
+
+# ── 大雪球：2 次不同冰系技能 → 敌方 +4 冻结并重置 ──
+def test_big_snowball_two_different_ice_skills() -> None:
+    a = _unit("甲", _sk(("碎冰冰", "冰", "魔攻", 1, 50), ("霜降", "冰", "状态", 1, 0)),
+              trait=_trait("大雪球"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    assert freeze_layers(b) == 0                        # 第 1 个冰系技能：仅计数
+    assert a.trait.kwargs.get("used_skills") == ["碎冰冰"]
+    b.current_hp = b.max_hp
+    execute_turn(s, Decision(skill_action(1)), Decision(recharge_action()))
+    assert freeze_layers(b) == 8                        # 霜降 4 层 + 大雪球 +4 层
+    assert a.trait.kwargs.get("used_skills") == []      # 特性重置
+
+
+# ── 月牙雪糕：攻击技能 + 敌方每层冻结 → 施 1 层星陨印记 ──
+def test_mooncake_attack_marks_star_meteor() -> None:
+    a = _unit("甲", _sk(("抓挠", "普通", "物攻", 1, 30)), trait=_trait("月牙雪糕"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    _set_freeze_layers(b, 3)
+    execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    marks = [m for m in s.side_b.negative_marks if m.name == "星陨印记"]
+    assert marks and marks[0].layers == 3               # 每层冻结 → 1 层星陨
+
+
+# ── 吉利丁片：离场 → 入场精灵双防+20% 且免疫冻结 ──
+def test_gelatin_enter_buff_and_freeze_immunity() -> None:
+    from environment.actions import switch_action
+    from environment.engine import resolve_turn
+
+    a1 = _unit("甲", _sk(("抓挠", "普通", "物攻", 1, 30)), trait=_trait("吉利丁片"))
+    a2 = _unit("丙", _sk(("抓挠", "普通", "物攻", 1, 30)), trait=_trait("default"))
+    b = _unit("乙", _sk(("霜降", "冰", "状态", 1, 0)))
+    a1.id, a2.id, b.id = "a-0-甲", "a-1-丙", "b-0-乙"
+    s = BattleState(side_a=SideState(units=[a1, a2], lives=2),
+                    side_b=SideState(units=[b], lives=2),
+                    rng=BattleRng(7), rules=DEFAULT_RULES, turn=2)
+    resolve_turn(s, Decision(switch_action(1)), Decision(recharge_action()))
+    gains = a2.trait.gains
+    assert any(g.stat == "def" and g.layers == 2 for g in gains)      # 双防 +20%
+    assert any(g.stat == "免疫冻结" for g in gains)
+    # 免疫冻结：霜降施冻结 → 拦截
+    execute_turn(s, Decision(recharge_action()), Decision(skill_action(0)))
+    assert freeze_layers(a2) == 0
+
+
+# ── 冰雪魂魄：暴风雪天气 + 敌方队伍冻结层 → 冰系威力加成 ──
+def test_ice_soul_blizzard_power_bonus() -> None:
+    from environment.weather import set_weather
+
+    a = _unit("甲", _sk(("碎冰冰", "冰", "魔攻", 1, 100)), types=("冰",),
+              trait=_trait("冰雪魂魄"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    set_weather(s, "暴风雪", 8, "冬至")
+    _set_freeze_layers(b, 2)
+    events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
+    # 碎冰冰威力 +20×2 层 → 140；冰雪魂魄 +10%×2 层 → ×1.2；冰系 STAB ×1.25
+    assert dmg == 189
+
+
+# ── 结晶水：初始能量 0 + 入场回 3×己方冰系技能次数 ──
+def test_crystal_water_energy_zero_and_refund() -> None:
+    from environment.actions import switch_action
+    from environment.engine import resolve_turn
+    from environment.models import build_unit
+
+    spec = {"id": "a-0-水蓝蓝", "name": "水蓝蓝", "types": ["水"],
+            "base_stats": {"hp": 100, "atk": 80, "sp_atk": 80, "def": 80, "sp_def": 80,
+                           "speed": 80},
+            "stats": {"hp": 300, "atk": 100, "sp_atk": 100, "def": 100, "sp_def": 100,
+                      "speed": 100},
+            "skills": ["抓挠"], "nature": "坦率", "bloodline": "", "iv": {},
+            "trait": "结晶水"}
+    a1 = _unit("甲", _sk(("碎冰冰", "冰", "魔攻", 1, 50)))
+    a2 = build_unit(spec)
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    a1.id = "a-0-甲"
+    b.id = "b-0-乙"
+    s = BattleState(side_a=SideState(units=[a1, a2], lives=2),
+                    side_b=SideState(units=[b], lives=2),
+                    rng=BattleRng(7), rules=DEFAULT_RULES, turn=2)
+    assert a2.energy == 0                               # 初始能量 0
+    # 甲用 2 次冰系技能 → 计数 2
+    for _ in range(2):
+        execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    assert s.ice_skills_used.get("a") == 2
+    # 结晶水换上场 → 回 3×2 = 6 能量
+    a2.energy = 0
+    resolve_turn(s, Decision(switch_action(1)), Decision(recharge_action()))
+    assert a2.energy == 6
+
+
+def _set_freeze_layers(u: Unit, layers: int) -> None:
+    from environment.models import StatModifier
+
+    for m in u.stat_mods:
+        if m.stat == "冻结":
+            m.layers = layers
+            return
+    u.stat_mods.append(StatModifier(stat="冻结", mode="special", layers=layers,
+                                    permanent=True, source="测试", kwargs={"pct": 5}))
