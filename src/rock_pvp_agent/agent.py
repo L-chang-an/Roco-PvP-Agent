@@ -86,12 +86,18 @@ class ChatAgent:
         llm=None,
         system_prompt: str = CHAT_SYSTEM_PROMPT,
         max_llm_rounds: int = 3,
+        tools=None,
+        terminal_tool: str = FINAL_ANSWER_TOOL,
+        emit_thinking: bool = True,
     ):
         self._settings = settings
-        self._tools = build_agent_tools()
+        # 工具集注入缝：顾问用 advisor 工具集，默认仍是通用 [calculator, final_answer]。
+        self._tools = tools if tools is not None else build_agent_tools()
         self._llm = llm  # 测试注入缝
         self._system_prompt = system_prompt
         self._max_llm_rounds = max_llm_rounds
+        self._terminal_tool = terminal_tool      # 终结工具名（顾问 = submit_team_advice）
+        self._emit_thinking = emit_thinking      # 思维链外显开关（顾问关闭）
 
     @property
     def has_llm(self) -> bool:
@@ -163,18 +169,19 @@ class ChatAgent:
             calls = getattr(response, "tool_calls", None) or []
             reasoning = _reasoning_text(response)
 
-            # 思维链文本：reasoning_content 无条件捕获为思考；content 仅在有工具调用时算思考
-            if reasoning:
+            # 思维链文本：reasoning_content 无条件捕获为思考；content 仅在有工具调用时算思考。
+            # emit_thinking=False（顾问）时既不收集也不发射——不存原始思维链。
+            if reasoning and self._emit_thinking:
                 thinking.append(reasoning)
                 self._emit(event_sink, {"event": EVENT_THINKING, "text": reasoning})
 
-            # 兜底：模型未守协议，返回无工具调用 → 以 content 为终稿（空则 EMPTY_REPLY）
+            # 兜底：模型未守协议，返回无工具调用 → 交给 _handle_no_tool_call（默认以 content 为终稿）
             if not calls:
-                reply_text = content or EMPTY_REPLY
+                reply_text = self._handle_no_tool_call(content)
                 break
 
             # 思考文本：伴随工具调用的中间输出，记为思考
-            if content:
+            if content and self._emit_thinking:
                 thinking.append(content)
                 self._emit(event_sink, {"event": EVENT_THINKING, "text": content})
 
@@ -187,10 +194,11 @@ class ChatAgent:
                 args = call.get("args", {})
                 call_id = call.get("id", "")
 
-                if name == FINAL_ANSWER_TOOL:
-                    reply_text = str(args.get("text", "")) or EMPTY_REPLY
-                    working.append(ToolMessage(content=reply_text, tool_call_id=call_id))
-                    terminal = True
+                if name == self._terminal_tool:
+                    result_content, terminal = self._handle_terminal(name, args, call_id)
+                    if terminal:
+                        reply_text = result_content
+                    working.append(ToolMessage(content=result_content, tool_call_id=call_id))
                     continue
 
                 result = self._invoke_tool(tools_map, call)
@@ -219,6 +227,21 @@ class ChatAgent:
         )
         self._emit_reply_events(event_sink, reply_obj)
         return reply_obj
+
+    def _handle_terminal(self, name: str, args: dict, call_id: str) -> tuple[str, bool]:
+        """终结工具处理钩子。返回 (tool_result_content, terminal)。
+
+        默认 = final_answer 语义：取 text 为终稿并终结。顾问覆写为解析结构化建议 +
+        EvidenceGate 校验（失败时 terminal=False 让模型修复一次）。
+        """
+        return str(args.get("text", "")) or EMPTY_REPLY, True
+
+    def _handle_no_tool_call(self, content: str) -> str:
+        """无工具调用的兜底钩子。默认 = 以 content 为终稿（空则 EMPTY_REPLY）。
+
+        顾问覆写为「必须走 submit_team_advice」的提示（拒绝自由文本终稿）。
+        """
+        return content or EMPTY_REPLY
 
     @staticmethod
     def _accumulate_usage(usage: dict, response) -> None:

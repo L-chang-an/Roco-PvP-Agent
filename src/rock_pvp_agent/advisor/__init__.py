@@ -14,6 +14,10 @@ from .catalog import (
 )
 from .trajectory import TrajectoryEvidence, aggregate, discover, normalize, query_trajectory_evidence
 from .validate import TeamValidation, validate_team
+from .advice import TeamAdviceSchema, submit_team_advice
+from .analysis import analyze_team
+from .simulate import simulate_matchups
+from .agent import TeamAdvisorAgent
 
 __all__ = [
     "QueryNotAllowed",
@@ -30,4 +34,9 @@ __all__ = [
     "query_trajectory_evidence",
     "TeamValidation",
     "validate_team",
+    "TeamAdviceSchema",
+    "submit_team_advice",
+    "analyze_team",
+    "simulate_matchups",
+    "TeamAdvisorAgent",
 ]
