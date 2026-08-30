@@ -60,6 +60,13 @@ def main() -> int:
     epc.add_argument("--repeat", action="store_true", help="跑两遍验证反事实确定性")
     epc.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
     epc.set_defaults(func=_run_evolve_credit_cli)
+    eps = epsub.add_parser("step", help="单步进化：rollout → credit → reflect → edit")
+    eps.add_argument("--seed", type=int, default=7, help="对局 seed（默认 7）")
+    eps.add_argument("--out", type=str, default="artifacts", help="产物目录（默认 artifacts/）")
+    eps.add_argument("--a", choices=("fake_llm", "random", "llm"), default="fake_llm", help="a 方玩家")
+    eps.add_argument("--b", choices=("fake_llm", "random", "llm"), default="random", help="b 方玩家")
+    eps.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
+    eps.set_defaults(func=_run_evolve_step_cli)
 
     args = parser.parse_args()
 
@@ -205,6 +212,23 @@ def _run_evolve_credit_cli(args) -> int:
         console.print(f"确定性复现：{'✅ 逐位一致' if same else '❌ 不一致'}")
         return 0 if (analysis.replay_ok and same) else 1
     return 0 if analysis.replay_ok else 1
+
+
+def _run_evolve_step_cli(args) -> int:
+    """evolve step：单步进化（rollout → credit → reflect → edit），产 edit_apply_report。"""
+    from .battle.evolution.run import run_step
+
+    out = run_step(seed=args.seed, out_dir=args.out, a_kind=args.a, b_kind=args.b, M=args.m)
+    console.print(f"[bold]evolve step[/bold] seed={args.seed} battle={out['battle_id']} "
+                  f"turns={out['turn_count']} cards={out['cards']}")
+    console.print(f"candidates={len(out['candidates'])}  applied={out['edits_applied']}  "
+                  f"rejected={out['edits_rejected']}")
+    console.print(f"playbook {out['playbook_before']} → {out['playbook_after']}")
+    console.print(f"reflection: {out['reflection_diagnostics']}")
+    for r in out["reports"]:
+        console.print(f"  [{r['status']}] {r.get('module_key')} {r.get('op')}  {r.get('reason')}")
+    console.print(f"report → {out['report_path']}")
+    return 0
 
 
 def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
