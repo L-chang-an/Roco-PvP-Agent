@@ -128,6 +128,11 @@ class SkillEffect:
     counter_mark_effects: tuple[SkillMarkEffect, ...] = ()  # 防御系应对命中时施加
     set_weather: str = ""       # 天气名（雨天/沙暴/暴风雪/雷鸣；"" = 无）
     weather_turns: int = 0      # 天气持续回合
+    # 冻结批（2026-08-30）
+    freeze_power_per_layer: int = 0         # 碎冰冰：敌方每层冻结 → 本次威力 +N
+    freeze_energy_gain_per_layer: int = 0   # 冷凝：敌方每层冻结 → 自己回 N 能量
+    freeze_cost_per_foe_layer: int = 0      # 霜天：敌方每层冻结 → 敌方全技能能耗 +N（读钩子）
+    counter_status_effects: tuple[SkillStatEffect, ...] = ()   # 应对命中施状态（冰墙/冰点）
 
 
 def category_of(skill) -> SkillCategory:
@@ -424,6 +429,35 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     if m is not None:
         return _attack(skill, stat_effects=tuple(_status_effect("foe", m.group(2), int(m.group(1)))))
 
+    # ── 冻结批模式（2026-08-30：读钩子 / 应对施状态；寒潮含巧变不匹配）──
+    # 造成(物|魔)伤，敌方每有1层冻结，本次技能威力+N（碎冰冰）
+    m = re.fullmatch(rf"造成{_DMG}，敌方每有1层冻结，本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, freeze_power_per_layer=int(m.group(1)))
+    # 造成(物|魔)伤，敌方每有1层冻结，自己回复N能量（冷凝）
+    m = re.fullmatch(rf"造成{_DMG}，敌方每有1层冻结，自己回复(\d+)能量", desc)
+    if m is not None:
+        return _attack(skill, freeze_energy_gain_per_layer=int(m.group(1)))
+    # 敌方获得N层冻结，且每有1层冻结获得全技能能耗+M（霜天）
+    m = re.fullmatch(r"敌方获得(\d+)层冻结，且每有1层冻结获得全技能能耗\+(\d+)", desc)
+    if m is not None:
+        return _status(skill, stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       freeze_cost_per_foe_layer=int(m.group(2)))
+    # 敌方获得N层冻结，应对防御：额外获得M层（冰点）
+    m = re.fullmatch(r"敌方获得(\d+)层冻结，应对防御：额外获得(\d+)层", desc)
+    if m is not None:
+        return _status(skill, counter_vs=SkillCategory.DEFENSE,
+                       stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2)))))
+    # 减伤N%，应对攻击：敌方获得M层冻结（冰墙）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：敌方获得(\d+)层冻结", desc)
+    if m is not None:
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2))))),
+            skill)
+
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
 
@@ -493,11 +527,16 @@ for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
         MW_EFFECTS[_name] = _effect
 
 
-# DOT 状态白名单（2026-08-30）：扫描 FULL 表，编译命中且含状态类 stat_effects 的技能。
-# A 类施加（获得N层X / 伤害+获得N层X / 连击逐击）；应对/条件/驱散/转化类不匹配 → 下批。
+# DOT 状态白名单（2026-08-30）：扫描 FULL 表，编译命中且含状态类效果的技能。
+# A 类施加（获得N层X / 伤害+获得N层X / 连击逐击）+ 冻结批（读冻结层 / 应对施状态）；
+# 应对/条件/驱散/转化/巧变类不匹配 → 下批。
 def _has_status_effects(effect: SkillEffect) -> bool:
     return any(se.stat in STATUS_TABLE for se in effect.stat_effects) \
-        or any(se.stat in STATUS_TABLE for se in effect.buff_effects)
+        or any(se.stat in STATUS_TABLE for se in effect.buff_effects) \
+        or any(se.stat in STATUS_TABLE for se in effect.counter_status_effects) \
+        or effect.freeze_power_per_layer > 0 \
+        or effect.freeze_energy_gain_per_layer > 0 \
+        or effect.freeze_cost_per_foe_layer > 0
 
 
 ST_EFFECTS: dict[str, SkillEffect] = {}

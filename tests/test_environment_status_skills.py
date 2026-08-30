@@ -64,10 +64,12 @@ def test_compile_combo_status() -> None:
 
 
 def test_st_whitelist_pinned() -> None:
-    assert len(ST_EFFECTS) == 14
+    assert len(ST_EFFECTS) == 19
     assert set(ST_EFFECTS) == {
         "退化", "孢子", "引燃", "霜降", "毒孢子", "毒针", "腐蚀酸液", "烈焰风暴",
         "花火", "暴风雪", "通电", "易燃物质", "连续毒针", "打喷嚏",
+        # 冻结批 L1（2026-08-30）
+        "碎冰冰", "冷凝", "霜天", "冰点", "冰墙",
     }
 
 

@@ -65,6 +65,12 @@ def morph_layers(unit: "Unit") -> int:
     return m.layers if m is not None else 0
 
 
+def freeze_layers(unit: "Unit") -> int:
+    """冻结层数（0 = 无冻结）。冻结固有副作用（每层全技能能耗+1）与冻结批技能读它。"""
+    m = _find(unit, "冻结", "special")
+    return m.layers if m is not None else 0
+
+
 def _find(unit: "Unit", stat: str, mode: str):
     for m in unit.stat_mods:
         if m.stat == stat and m.mode == mode:

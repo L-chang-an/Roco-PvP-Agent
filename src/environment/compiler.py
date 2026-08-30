@@ -55,10 +55,14 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
         stab = stab_of(skill.type, unit.types)
         hits = _effective_hits(state, unit, skill, side)
         counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
+        # 冻结批（2026-08-30）：敌方冻结层 → 本次威力加成（碎冰冰）
+        from .statuses import freeze_layers
+
+        power = skill.power + effect.freeze_power_per_layer * freeze_layers(target)
         for i in range(1, hits + 1):
             atoms.append(DealDamage(
                 side=side, source=unit, target=target, skill=skill.name,
-                power=skill.power, skill_type=skill.type, damage_kind=skill.kind,
+                power=power, skill_type=skill.type, damage_kind=skill.kind,
                 hit=i, total_hits=hits, counter_mult=mult, reduction=reduced,
                 effectiveness=eff, stab=stab, counter_cat=counter_cat,
                 acted_first=acted_first,
@@ -71,6 +75,13 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                                          source=skill.name, target=se.target,
                                          counter_cat=counter_cat,
                                          kwargs=dict(se.kwargs)))
+        if effect.freeze_energy_gain_per_layer:
+            # 冻结批：敌方每层冻结 → 自己回 N 能量（冷凝）
+            n = freeze_layers(target)
+            if n > 0:
+                atoms.append(GainEnergy(side=side, unit=unit,
+                                        amount=n * effect.freeze_energy_gain_per_layer,
+                                        source=skill.name, target="self"))
         if effect.self_energy_gain:
             atoms.append(GainEnergy(side=side, unit=unit, amount=effect.self_energy_gain,
                                     source=skill.name, target="self"))
@@ -134,10 +145,24 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
             hits = _effective_hits(state, unit, skill, side)
             for _ in range(hits):
                 atoms.extend(_mark_atoms(side, unit, skill, effect.mark_effects))
-    # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记（印记/天气批）；
-    # 使用防御技能 → 该精灵所有防御技冷却一回合（2026-08-30 拍板，规则声明化）
+        if effect.counter_status_effects and ctx.counters(side):
+            # 冻结批（2026-08-30）：应对命中时施加状态（冰点：应对防御额外施冻结）
+            for se in effect.counter_status_effects:
+                tgt = unit if se.target == "self" else target
+                atoms.append(AddModifier(side=side, unit=tgt, stat=se.stat, mode=se.mode,
+                                         layers=se.layers, source=skill.name, target=se.target,
+                                         counter_cat=counter_cat, kwargs=dict(se.kwargs)))
+    # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记/状态（印记/天气批、
+    # 冻结批）；使用防御技能 → 该精灵所有防御技冷却一回合（2026-08-30 拍板，规则声明化）
     if effect.counter_mark_effects and ctx.counters(side):
         atoms.extend(_mark_atoms(side, unit, skill, effect.counter_mark_effects))
+    if effect.counter_status_effects and ctx.counters(side) \
+            and effect.category == SkillCategory.DEFENSE:
+        # 冻结批（2026-08-30）：防御应对命中施状态（冰墙：敌方获得 2 层冻结）
+        for se in effect.counter_status_effects:
+            atoms.append(AddModifier(side=side, unit=target, stat=se.stat, mode=se.mode,
+                                     layers=se.layers, source=skill.name, target=se.target,
+                                     counter_cat="攻击", kwargs=dict(se.kwargs)))
     if effect.category == SkillCategory.DEFENSE:
         atoms.append(SetCooldown(side=side, unit=unit, turns=1, source=skill.name))
     # 天气设置（落雨/沙涌/冬至/惊雷）
