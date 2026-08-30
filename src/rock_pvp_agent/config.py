@@ -18,6 +18,18 @@ class Settings(BaseModel):
     timeout: float = 60.0
     debug: bool = False
 
+    # R1 记忆库配置（默认全关：memory_enabled=False 时检索/更新全链路 no-op）。
+    memory_enabled: bool = False
+    memory_dir: str = "artifacts/memory"
+    memory_embedder: str = "keyword"
+    memory_delta: float = 0.5
+    memory_k1: int = 10
+    memory_lam: float = 0.5
+    memory_k2: int = 3
+    memory_alpha: float = 0.3
+    memory_w_used: float = 0.3
+    memory_counterfactual_m: int = 24
+
     @property
     def has_api_key(self) -> bool:
         return bool(self.api_key.strip())

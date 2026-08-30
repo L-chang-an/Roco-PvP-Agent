@@ -46,9 +46,13 @@ def main() -> int:
     epe.add_argument("--games", type=int, default=8, help="每实例 seed 数（默认 8）")
     epe.add_argument("--seed", type=int, default=7, help="seed 平移（默认 7）")
     epe.set_defaults(func=_run_evolve_eval_cli)
-    epr = epsub.add_parser("reflect", help="轨迹重放分析：situation_key / v_heuristic / 逐回合快照")
+    epr = epsub.add_parser("reflect", help="轨迹重放分析 + 可选提取记忆条目")
     epr.add_argument("--traj", required=True, help="轨迹 JSON 路径")
+    epr.add_argument("--out", default=None, help="提取记忆条目写入该目录（MemoryStore）")
     epr.set_defaults(func=_run_evolve_reflect_cli)
+    eph = epsub.add_parser("health", help="记忆健康度：Q 分布 / 命中率 / Forgetting Rate")
+    eph.add_argument("--memory", required=True, help="MemoryStore 目录")
+    eph.set_defaults(func=_run_evolve_health_cli)
 
     args = parser.parse_args()
 
@@ -129,10 +133,16 @@ def _run_evolve_eval_cli(args) -> int:
 
 
 def _run_evolve_reflect_cli(args) -> int:
-    """evolve reflect：轨迹重放分析（replay_ok + 逐回合 situation_key / v_heuristic）。"""
-    from .battle.evolution.analysis import analyze_record_file
+    """evolve reflect：轨迹重放分析（replay_ok + 逐回合 situation_key / v_heuristic）；
+    给 --out 则额外提取记忆条目写入 MemoryStore（复用同一 analysis，不二次重放）。"""
+    import json
 
-    analysis = analyze_record_file(args.traj)
+    from .battle.evolution.analysis import analyze_record
+    from .battle.evolution.reflect import store_experiences
+
+    with open(args.traj, encoding="utf-8") as f:
+        record = json.load(f)
+    analysis = analyze_record(record)
     console.print(f"[bold]evolve reflect[/bold] traj={args.traj}")
     console.print(f"winner={analysis.winner or '平局'}  turns={analysis.turn_count}  "
                   f"replay_ok={'✅' if analysis.replay_ok else '❌'}")
@@ -140,7 +150,24 @@ def _run_evolve_reflect_cli(args) -> int:
         console.print(
             f"  T{t.turn:>3}  a:{t.situation_keys['a']}  v_a={t.v_before['a']:+.3f}->{t.v_after['a']:+.3f}"
         )
+    if args.out:
+        ids = store_experiences(record, args.out, analysis=analysis)
+        console.print(f"记忆条目写入 {len(ids)} 条 → {args.out}")
     return 0 if analysis.replay_ok else 1
+
+
+def _run_evolve_health_cli(args) -> int:
+    """evolve health：读一个 MemoryStore 目录 → 记忆健康度报告。"""
+    from .battle.evolution.health import memory_health
+
+    h = memory_health(args.memory)
+    q = h["q_distribution"]
+    console.print(f"[bold]evolve health[/bold] dir={h['store_dir']}")
+    console.print(f"count={h['count']}  Q[min={q['min']}, max={q['max']}, mean={q['mean']}]")
+    console.print(f"n_used_total={h['n_used_total']}  n_adopted_total={h['n_adopted_total']}  "
+                  f"source_type_counts={h['source_type_counts']}")
+    console.print(f"forgetting_rate={h['forgetting_rate']}  retrieval_hits={h['retrieval_hits']}")
+    return 0
 
 
 def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
