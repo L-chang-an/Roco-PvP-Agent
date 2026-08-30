@@ -389,6 +389,14 @@ def resolve_entry(state, ctx: TurnContext, entry: QueuedEntry,
 
 
 # ── 收尾函数：阵亡（交互式补位）/ 判负 / 回合末 ──
+def _clear_on_faint(unit: Unit) -> None:
+    """阵亡清理（2026-08-30 拍板）：清除非永久 buff 与**冻结层**；永久层（萌化等）
+    保留——复活特性存在时，复活后仍带永久 buff（除冻结）。"""
+    unit.stat_mods = [m for m in unit.stat_mods if m.permanent and m.stat != "冻结"]
+    if unit.trait:
+        unit.trait.gains = [g for g in unit.trait.gains if g.permanent]
+
+
 def settle_faints(state) -> tuple[list[dict], str | None]:
     """处理当前在场的阵亡：faint → life_loss（**不自动补位**）。
 
@@ -402,6 +410,7 @@ def settle_faints(state) -> tuple[list[dict], str | None]:
         side_state = state.side(s)
         unit = side_state.active_unit
         if unit.fainted:
+            _clear_on_faint(unit)
             events.append(ev("faint", s, unit=unit.name))
             side_state.lives -= 1
             events.append(ev("life_loss", s, unit=unit.name, lives_left=side_state.lives))

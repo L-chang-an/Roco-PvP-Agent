@@ -183,16 +183,19 @@ def _recalc_morph(state, unit, frame: Frame) -> None:
 def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
     u = atom.unit
     if is_immune(u, atom.stat):
-        return []   # 属性免疫（2026-08-30 拍板）：火免疫灼烧/草免疫寄生/毒免疫中毒——
-    # 不落层、不发事件；中毒印记走 marks 路径不受影响
+        return []   # 属性免疫（2026-08-30 拍板）：火免疫灼烧/草免疫寄生/毒免疫中毒/
+    # 冰免疫冻结——不落层、不发事件；中毒印记走 marks 路径不受影响
     if atom.stat == "萌化" and atom.layers > 0 and _morph_layers(u) >= _morph_max_layers(u):
         return []   # 萌化（2026-08-30 拍板）：实际资质已最低阶 → 不再获得层数
+    # DOT 持久性（2026-08-30 拍板）：中毒/灼烧/寄生/引电 = 离场清空的非永久 debuff；
+    # 萌化/冻结 = 永久 debuff（离场保留，只靠技能/特性效果清除；冻结阵亡时清除）
+    permanent = atom.stat in ("萌化", "冻结")
     if atom.stat == "energy_cost":
         total = apply_energy_cost_mod(u, layers=atom.layers, permanent=False,
                                       trait=False, source=atom.source)
     else:
         total = _add_stat_layers(u, atom.stat, atom.mode, atom.layers, atom.source,
-                                 kwargs=atom.kwargs)
+                                 permanent=permanent, kwargs=atom.kwargs)
     if atom.stat == "萌化":
         _recalc_morph(state, u, frame)
         total = _morph_layers(u)   # 事件展示夹后层数
@@ -337,11 +340,12 @@ def _reduce_heal_flat(state, atom: HealFlat, frame: Frame) -> list[dict]:
 
 
 def _reduce_set_mod_layers(state, atom: SetModLayers, frame: Frame) -> list[dict]:
-    """把 (stat, mode, 非永久) 记录设为指定层数，≤0 移除；发 StatModChanged
-    领域事件（引电链式触发读 total_layers）、不发展示事件。萌化设层后重算资质。"""
+    """把 (stat, mode) 记录设为指定层数，≤0 移除；发 StatModChanged
+    领域事件（引电链式触发读 total_layers）、不发展示事件。萌化设层后重算资质
+    （萌化是 permanent 层，故匹配不再限定非永久——2026-08-30）。"""
     u = atom.unit
     for i, m in enumerate(u.stat_mods):
-        if m.stat == atom.stat and m.mode == atom.mode and not m.permanent:
+        if m.stat == atom.stat and m.mode == atom.mode:
             if atom.layers <= 0:
                 del u.stat_mods[i]
                 frame.domain_events.append(StatModChanged(
