@@ -122,3 +122,36 @@ def test_ice_immune_blocks_freeze_skills() -> None:
                b_types=("冰",))
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     assert freeze_layers(s.active("b")) == 0    # 冰系免疫冻结
+
+
+# ── 滚雪球：基础施冻 + 应对状态额外施冻与威力翻倍 ──
+def test_snowball_base_and_counter() -> None:
+    s = _state([("滚雪球", "冰", "物攻", 1, 30)], [("抓挠", "普通", "物攻", 1, 30)])
+    execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    assert freeze_layers(s.active("b")) == 2    # 基础 2 层（未应对状态）
+
+    s2 = _state([("滚雪球", "冰", "物攻", 1, 30)], [("力量增效", "普通", "状态", 1, 0)])
+    events = execute_turn(s2, Decision(skill_action(0)), Decision(skill_action(0)))
+    assert freeze_layers(s2.active("b")) == 4   # 2 + 应对状态额外 2
+    dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]
+    assert dmg["mult"] == 2.0                   # 应对状态 → 威力翻倍
+
+
+# ── 极寒领域：有冻结威力+60 + 应对状态冻结翻倍 ──
+def test_polar_realm_power_if_frozen() -> None:
+    s = _state([("极寒领域", "冰", "魔攻", 1, 100)], [("抓挠", "普通", "物攻", 1, 30)])
+    base = [e for e in execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+            if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
+    assert base == 90                           # 无冻结 → power 100
+    _set_freeze(s.active("b"), 1)
+    s.active("b").current_hp = s.active("b").max_hp
+    events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    boosted = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
+    assert boosted == 144                       # 有冻结 → power 160
+
+
+def test_polar_realm_counter_doubles_freeze() -> None:
+    s = _state([("极寒领域", "冰", "魔攻", 1, 100)], [("力量增效", "普通", "状态", 1, 0)])
+    _set_freeze(s.active("b"), 3)
+    execute_turn(s, Decision(skill_action(0)), Decision(skill_action(0)))
+    assert freeze_layers(s.active("b")) == 6    # 应对状态 → 冻结翻倍 3→6

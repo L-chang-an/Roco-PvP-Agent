@@ -133,6 +133,8 @@ class SkillEffect:
     freeze_energy_gain_per_layer: int = 0   # 冷凝：敌方每层冻结 → 自己回 N 能量
     freeze_cost_per_foe_layer: int = 0      # 霜天：敌方每层冻结 → 敌方全技能能耗 +N（读钩子）
     counter_status_effects: tuple[SkillStatEffect, ...] = ()   # 应对命中施状态（冰墙/冰点）
+    freeze_power_if_frozen: int = 0         # 极寒领域：敌方有冻结 → 本次威力 +N
+    freeze_double_on_counter: bool = False  # 极寒领域：应对状态 → 敌方冻结层翻倍
 
 
 def category_of(skill) -> SkillCategory:
@@ -457,6 +459,18 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
             reduction_pct=int(m.group(1)) / 100,
             counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2))))),
             skill)
+    # 造成(物|魔)伤，敌方获得N层冻结，应对状态：额外获得M层，本次技能威力翻倍（滚雪球）
+    m = re.fullmatch(rf"造成{_DMG}，敌方获得(\d+)层冻结，应对状态：额外获得(\d+)层，本次技能威力翻倍", desc)
+    if m is not None:
+        return _attack(skill, counter_vs=SkillCategory.STATUS, counter_damage_mult=2.0,
+                       stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2)))))
+    # 造成(物|魔)伤，若敌方有冻结，本次技能威力+N，应对状态：使冻结翻倍（极寒领域）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方有冻结，本次技能威力\+(\d+)，应对状态：使冻结翻倍", desc)
+    if m is not None:
+        return _attack(skill, counter_vs=SkillCategory.STATUS,
+                       freeze_power_if_frozen=int(m.group(1)),
+                       freeze_double_on_counter=True)
 
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
@@ -536,7 +550,9 @@ def _has_status_effects(effect: SkillEffect) -> bool:
         or any(se.stat in STATUS_TABLE for se in effect.counter_status_effects) \
         or effect.freeze_power_per_layer > 0 \
         or effect.freeze_energy_gain_per_layer > 0 \
-        or effect.freeze_cost_per_foe_layer > 0
+        or effect.freeze_cost_per_foe_layer > 0 \
+        or effect.freeze_power_if_frozen > 0 \
+        or effect.freeze_double_on_counter
 
 
 ST_EFFECTS: dict[str, SkillEffect] = {}

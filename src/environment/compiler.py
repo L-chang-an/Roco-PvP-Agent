@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 from .atom import (
     AddModifier, ApplyMark, BenchEnergy, DealDamage, FoeCostGain, GainEnergy,
-    HealPct, Lifesteal, RevealSkill, SetCooldown, SetWeather, SpendEnergy,
-    StealEnergy,
+    HealPct, Lifesteal, RevealSkill, SetCooldown, SetModLayers, SetWeather,
+    SpendEnergy, StealEnergy,
 )
 from .modifiers import effectiveness as eff_of
 from .modifiers import stab as stab_of
@@ -55,10 +55,12 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
         stab = stab_of(skill.type, unit.types)
         hits = _effective_hits(state, unit, skill, side)
         counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
-        # 冻结批（2026-08-30）：敌方冻结层 → 本次威力加成（碎冰冰）
+        # 冻结批（2026-08-30）：敌方冻结层 → 本次威力加成（碎冰冰每层 / 极寒领域有冻结即加）
         from .statuses import freeze_layers
 
         power = skill.power + effect.freeze_power_per_layer * freeze_layers(target)
+        if effect.freeze_power_if_frozen and freeze_layers(target) > 0:
+            power += effect.freeze_power_if_frozen
         for i in range(1, hits + 1):
             atoms.append(DealDamage(
                 side=side, source=unit, target=target, skill=skill.name,
@@ -75,6 +77,19 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                                          source=skill.name, target=se.target,
                                          counter_cat=counter_cat,
                                          kwargs=dict(se.kwargs)))
+        if effect.counter_status_effects and ctx.counters(side):
+            # 冻结批（2026-08-30）：应对状态额外施冻结（滚雪球）
+            for se in effect.counter_status_effects:
+                tgt = unit if se.target == "self" else target
+                atoms.append(AddModifier(side=side, unit=tgt, stat=se.stat, mode=se.mode,
+                                         layers=se.layers, source=skill.name, target=se.target,
+                                         counter_cat=counter_cat, kwargs=dict(se.kwargs)))
+        if effect.freeze_double_on_counter and ctx.counters(side):
+            # 极寒领域：应对状态 → 敌方冻结层翻倍
+            n = freeze_layers(target)
+            if n > 0:
+                atoms.append(SetModLayers(unit=target, stat="冻结", mode="special",
+                                          layers=n * 2, source=skill.name))
         if effect.freeze_energy_gain_per_layer:
             # 冻结批：敌方每层冻结 → 自己回 N 能量（冷凝）
             n = freeze_layers(target)
