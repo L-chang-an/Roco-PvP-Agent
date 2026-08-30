@@ -151,7 +151,7 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | 中毒 | dot | 造成 3% 生命毒系伤害（×层） | `{pct:3}` |
 | 灼烧 | dot | 造成 2% 生命火系伤害（×层），且层数减半 | `{pct:2, halve:true}` |
 | 寄生 | dot | 从寄生来源吸收 2% 生命（×层） | `{pct:2}` |
-| 冻结 | special | 冻结 5% 生命，低于冻结比例则力竭 | `{pct:5}` |
+| 冻结 | special | 冻结 5% 生命，低于冻结比例则力竭（力竭判定已实现 2026-08-30） | `{pct:5}` |
 | 引电 | special | 达 2 层 → 立即 25% 生命电系伤害并失去 2 层 | `{pct:25, at:2}` |
 | 萌化 | special | 种族资质退化到上一阶，特性不变 | `{}` |
 
@@ -279,5 +279,6 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | **印记/天气技能入口（2026-08-30）**：MW_EFFECTS 白名单 24 条（P1∪P2∪MW = 203）；valid_skills.json 重新生成（`scripts/build_valid_skills.py`，check 口径改动态） | skillbook.py / scripts/ |
 | **DOT 结算（2026-08-30 拍板）**：六状态层施加与结算（statuses.py 单一事实源）；属性免疫（火免疫灼烧/草免疫寄生/毒免疫中毒，施加层拦截，**中毒印记不受影响**）；灼烧（火）/中毒（毒）/引电（电）伤害吃属性克制、寄生真实伤害吸血；灼烧减半向下取整归零移除；引电达 2 层即时 25% 扣 2 留余 | statuses.py / reducer.py |
 | **DOT 技能入口（2026-08-30）**：ST_EFFECTS 白名单 14 条（P1∪P2∪MW∪ST = 217）；valid_skills.json 重新生成 | skillbook.py / scripts/ |
+| **冻结力竭判定（2026-08-30 拍板）**：血量低于冻结层数×5% → 力竭阵亡（非伤害）；`Faint` 原子 + `damage.apply_faint`（current_hp 唯一写点纪律）；statuses.collect 监听 DamageApplied / HpChanged / StatModChanged(冻结)；严格小于才力竭 | statuses.py / atom.py / reducer.py / damage.py |
 
-**待负责人确认**：① 六维公式口径（`_STAT_GROWTH_BASE` 10 vs 50）；② roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
+**待负责人确认**：① roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
