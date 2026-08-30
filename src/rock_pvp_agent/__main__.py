@@ -36,10 +36,30 @@ def main() -> int:
     sp.add_argument("--max-turns", type=int, default=None, help="覆盖 rules.max_turns")
     sp.add_argument("--verbose", action="store_true", help="逐回合打印双方提交类型")
     sp.set_defaults(func=_run_selfplay_cli)
+
+    ep = sub.add_parser("evolve", help="自博弈进化（R 线）：eval 评测 / reflect 轨迹分析")
+    epsub = ep.add_subparsers(dest="evolve_cmd", help="evolve 子命令")
+    epe = epsub.add_parser("eval", help="配对评测：subject vs opponent 强弱（双向先后手 + 95%CI）")
+    epe.add_argument("--bench", choices=("d_sel", "d_test"), default="d_sel", help="实例集（默认 d_sel）")
+    epe.add_argument("--a", choices=("fake_llm", "random", "llm"), default="fake_llm", help="subject 方玩家")
+    epe.add_argument("--b", choices=("fake_llm", "random", "llm"), default="random", help="opponent 方玩家")
+    epe.add_argument("--games", type=int, default=8, help="每实例 seed 数（默认 8）")
+    epe.add_argument("--seed", type=int, default=7, help="seed 平移（默认 7）")
+    epe.set_defaults(func=_run_evolve_eval_cli)
+    epr = epsub.add_parser("reflect", help="轨迹重放分析：situation_key / v_heuristic / 逐回合快照")
+    epr.add_argument("--traj", required=True, help="轨迹 JSON 路径")
+    epr.set_defaults(func=_run_evolve_reflect_cli)
+
     args = parser.parse_args()
 
     if args.command == "selfplay":
         return args.func(args)
+    if args.command == "evolve":
+        func = getattr(args, "func", None)
+        if func is None:
+            ep.print_help()
+            return 1
+        return func(args)
     if args.serve:
         try:
             from ui.__main__ import run_ui
@@ -78,6 +98,49 @@ def _run_selfplay_cli(args) -> int:
         if not out["replay_ok"]:
             return 1
     return 0
+
+
+def _run_evolve_eval_cli(args) -> int:
+    """evolve eval：配对评测（LLM/fake/random vs 对手）。无 key 时 llm 自动降级假LLM。"""
+    from .battle.selfplay import build_player
+    from .battle.evolution.bench import build_instances, paired_eval
+
+    settings = get_settings()
+    instances = build_instances(args.bench)
+    result = paired_eval(
+        lambda side, seed: build_player(side, args.a, seed=seed, settings=settings),
+        lambda side, seed: build_player(side, args.b, seed=seed, settings=settings),
+        instances,
+        seeds=args.games,
+        seed_offset=args.seed,
+    )
+    console.print(f"[bold]evolve eval[/bold] bench={args.bench}  "
+                  f"subject={result['players']['subject']} vs opponent={result['players']['opponent']}")
+    console.print(f"winrate={result['winrate']:.3f}  "
+                  f"95%CI=[{result['ci95_low']:.3f}, {result['ci95_high']:.3f}]  "
+                  f"n_games={result['n_games']}  n_instances={result['n_instances']}")
+    for row in result["instances"][:10]:
+        lo, hi = row["ci95"]
+        console.print(f"  {row['name']:<22} {row['scenario']:<15} "
+                      f"winrate={row['winrate']:.3f} [{lo:.3f},{hi:.3f}] n={row['n_games']}")
+    if len(result["instances"]) > 10:
+        console.print(f"  … 其余 {len(result['instances']) - 10} 个实例省略")
+    return 0
+
+
+def _run_evolve_reflect_cli(args) -> int:
+    """evolve reflect：轨迹重放分析（replay_ok + 逐回合 situation_key / v_heuristic）。"""
+    from .battle.evolution.analysis import analyze_record_file
+
+    analysis = analyze_record_file(args.traj)
+    console.print(f"[bold]evolve reflect[/bold] traj={args.traj}")
+    console.print(f"winner={analysis.winner or '平局'}  turns={analysis.turn_count}  "
+                  f"replay_ok={'✅' if analysis.replay_ok else '❌'}")
+    for t in analysis.turns:
+        console.print(
+            f"  T{t.turn:>3}  a:{t.situation_keys['a']}  v_a={t.v_before['a']:+.3f}->{t.v_after['a']:+.3f}"
+        )
+    return 0 if analysis.replay_ok else 1
 
 
 def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
