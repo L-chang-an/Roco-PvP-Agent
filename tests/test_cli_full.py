@@ -46,7 +46,7 @@ def test_probe_errors_full_cli(monkeypatch, capsys) -> None:
     assert "首领形态不可入队" in out
     assert "同一家族只能入队一只" in out
     assert "需要先选择血脉系别" in out
-    assert "共 8 条错误" in out
+    assert "共 9 条错误" in out
 
 
 def test_default_cli_is_full(monkeypatch, capsys) -> None:

@@ -389,6 +389,22 @@ def resolve_entry(state, ctx: TurnContext, entry: QueuedEntry,
     return [ev("skipped", entry.side, kind=entry.kind, unit=entry.actor.name, reason="未知动作类型")]
 
 
+# ── 第 0 回合：首发选择（2026-08-30）──
+def choose_starter(state, side: str, bench_idx: int) -> list[dict]:
+    """第 0 回合：选择首发精灵——设置该方 active（入场效果由 `start_battle_entry`
+    统一触发）。合法性由调用方（`session.validate_starter`）保证，这里只改状态。"""
+    state.side(side).active = bench_idx
+    return []
+
+
+def start_battle_entry(state) -> list[dict]:
+    """第 0 回合收尾：双方首发触发入场效果（UnitEntered——入场类印记/特性的统一落点，
+    如抓到你了/结晶水/守护者），之后进入第 1 回合的正常操作。"""
+    entered = [UnitEntered(unit_id=state.active(s).id, from_faint=False) for s in SIDES]
+    events, _ = run(state, [], Frame(), unit=None, after=lambda f, es=entered: es)
+    return events
+
+
 # ── 收尾函数：阵亡（交互式补位）/ 判负 / 回合末 ──
 def _clear_on_faint(unit: Unit) -> None:
     """阵亡清理（2026-08-30 拍板）：清除非永久 buff 与**冻结层**；永久层（萌化等）
@@ -569,13 +585,8 @@ def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], s
             return events, None
         return events, need_side
 
-    # 0.6) 首回合入场：双方在场 UnitEntered（入场类印记/特性的统一落点；本批无印记
-    # 可在开局存在，为蓄电池等入场特性铺路）。
-    if state.turn == 1:
-        entered = [UnitEntered(unit_id=state.active(s).id, from_faint=False) for s in SIDES]
-        enter_events, _ = run(state, [], Frame(), unit=None,
-                              after=lambda f, es=entered: es)
-        events += enter_events
+    # 0.6) 首回合入场已移到第 0 回合（2026-08-30）：入场效果在 start_battle_entry 触发
+    #（首发选择之后、第 1 回合之前），此处不再重复触发。
 
     # 1) DECLARE：双方声明已知 → 定应对关系 + 武装减伤（必须在任何结算之前）
     ctx, arm_events = build_turn_context(state, dec_a, dec_b)

@@ -629,7 +629,7 @@ def new_battle(roster_a: list[dict], roster_b: list[dict], *,
                seed: int, items_a: list[str] | None = None,
                items_b: list[str] | None = None, rules: BattleRules = DEFAULT_RULES,
                battle_id: str = "") -> BattleState:
-    """用两份 roster spec 开一局。items 为 None → 每方带满全部道具各 1 次。
+    """用两份 roster spec 开一局。items 为 None → 每方带 DEFAULT_ITEMS（草魔法）。
 
     unit_id = `"{side}-{槽位}-{精灵名}"` 在此生成（开战即定、永不漂移）。
     """

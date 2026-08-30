@@ -26,7 +26,7 @@ def _boss_unit(name: str, hp_ratio: float = 1.0) -> Unit:
     base = base_stats_of(name)
     stats = calc_combat_stats(base, {}, "坦率")
     u = Unit(name=name, types=["草"], base_stats=dict(base), stats=dict(stats),
-             nature="坦率", iv={}, max_hp=stats["hp"],
+             nature="坦率", bloodline="首领", iv={}, max_hp=stats["hp"],
              current_hp=max(1, int(stats["hp"] * hp_ratio)), energy=10)
     u.current_skills = [SkillInstance(name="抓挠", desc="", type="普通", kind="物攻",
                                       energy_cost=0, power=35)]
@@ -92,6 +92,16 @@ def test_boss_rejected_for_non_prev_stage() -> None:
     s = _state(_boss_unit("喵喵"))                    # 喵喵不是 boss 上一阶
     reason = validate_decision(s, "a", Decision(skill_action(0), item="首领进化"))
     assert "无首领血脉" in reason
+    assert boss_evolution_options(s, "a") == []
+
+
+def test_boss_rejected_for_non_boss_bloodline() -> None:
+    """血脉不是「首领」（如「草」系别血脉）→ 不能首领化（2026-08-30）。"""
+    s = _state(_boss_unit("魔力猫"))
+    s.active("a").bloodline = "草"                     # 系别血脉，非首领血脉
+    reason = validate_decision(s, "a", Decision(skill_action(0), item="首领进化",
+                                                item_arg="武斗酷猫"))
+    assert "血脉不是「首领」" in reason
     assert boss_evolution_options(s, "a") == []
 
 

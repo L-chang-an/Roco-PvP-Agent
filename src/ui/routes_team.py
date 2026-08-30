@@ -38,9 +38,10 @@ from environment.battle_config import (
     validate_team_size,
 )
 from environment.dataset import DataSource, load_skills, load_spirits, load_types
-from environment.rules import DEFAULT_RULES, BattleRules
+from environment.rules import DEFAULT_ITEMS, DEFAULT_RULES, ITEM_DESCRIPTIONS, ITEMS, BattleRules
 from environment.statline import NATURE_BONUS, NEUTRAL_NATURE
 from environment.teambuilder import (
+    BOSS_BLOODLINE,
     TeamPick,
     build_roster,
     learnable_skills,
@@ -74,10 +75,15 @@ class PickBody(BaseModel):
 
 
 class TeamBody(BaseModel):
-    """整队校验请求：picks + 队伍规模（仅 3 或 6）。"""
+    """整队校验请求：picks + 队伍规模（仅 3 或 6）+ 道具栏（对战道具，队伍级）。
+
+    `items`：本队携带的对战道具名列表（`ITEMS` 的子集、不重复），缺省 `["草魔法"]`
+    （与 `DEFAULT_ITEMS` 对齐）。空列表 = 不携带道具。
+    """
 
     team: list[PickBody]
     team_size: int = DEFAULT_TEAM_SIZE
+    items: list[str] = []
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,6 +264,11 @@ def team_config() -> dict[str, Any]:
         "natures": natures,
         "types": sorted(load_types(VALID)),
         "source": VALID.value,                  # 技能池口径：已实装效果的技能子集
+        # 对战道具目录（队伍级道具栏选择器；默认携带草魔法）
+        "items": [{"name": n, "desc": ITEM_DESCRIPTIONS.get(n, "")} for n in ITEMS],
+        "default_items": list(DEFAULT_ITEMS),
+        # 首领血脉（2026-08-30）：血脉选择里的特殊值，表明精灵具有首领血脉
+        "boss_bloodline": BOSS_BLOODLINE,
     }
 
 
@@ -327,7 +338,7 @@ def validate_team_route(body: TeamBody) -> dict[str, Any]:
     _ensure_team_size(body.team_size)
     picks = [_pick_from(p) for p in body.team]
     rules = _rules_for(body.team_size)
-    errors = validate_team(picks, [], rules, VALID)
+    errors = validate_team(picks, body.items, rules, VALID)
     if errors:
         return {"ok": False, "errors": errors}
     roster = build_roster(picks, VALID, rules)
@@ -342,7 +353,7 @@ def save_team(body: SaveTeamBody) -> dict[str, Any]:
     """
     _ensure_team_size(body.team_size)
     picks = [_pick_from(p) for p in body.team]
-    errors = validate_team(picks, [], _rules_for(body.team_size), VALID)
+    errors = validate_team(picks, body.items, _rules_for(body.team_size), VALID)
     if errors:
         raise HTTPException(status_code=422, detail={"message": "队伍不合法，未保存。", "errors": errors})
     target = _resolve_path(body.path, must_exist=False)
@@ -351,6 +362,7 @@ def save_team(body: SaveTeamBody) -> dict[str, Any]:
         "version": 2,
         "saved_at": saved_at,
         "team_size": body.team_size,
+        "items": list(body.items),
         "team": [_enrich_pick(p) for p in body.team],
     }
     _atomic_write(target, payload)
@@ -436,5 +448,6 @@ def load_team(path: str) -> dict[str, Any]:
         "version": data.get("version", 1),
         "saved_at": data.get("saved_at", ""),
         "team_size": data.get("team_size", len(data["team"])),
+        "items": data.get("items", list(DEFAULT_ITEMS)),
         "team": data["team"],
     }

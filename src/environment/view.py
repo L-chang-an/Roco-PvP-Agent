@@ -36,9 +36,13 @@ def _hp_pct(unit) -> int:
     return unit.current_hp * 100 // unit.max_hp
 
 
-def _skill_dict(s) -> dict:
-    """SkillInstance / Skill → 前端完整技能卡片（详情含 desc——「技能详情描述」是揭示的内容）。"""
-    return {
+def _skill_dict(s, current_cost: int | None = None) -> dict:
+    """SkillInstance / Skill → 前端完整技能卡片（详情含 desc——「技能详情描述」是揭示的内容）。
+
+    `current_cost`（2026-08-30）：当前回合该技能的实际能耗（含能耗层/冻结固有副作用/
+    冰封/印记/天气修正）——前端据此展示「本回合实付能耗」，区别于 `energy_cost` 基础值。
+    """
+    d = {
         "name": s.name,
         "type": s.type,
         "kind": s.kind,
@@ -47,6 +51,16 @@ def _skill_dict(s) -> dict:
         "desc": s.desc,
         "cooldown": getattr(s, "cooldown", 0),
     }
+    if current_cost is not None:
+        d["current_cost"] = current_cost
+    return d
+
+
+def _skill_costs(state, side: str, unit) -> list[int]:
+    """该单位每个技能（按 `unit.skills` 序）当前回合的实际能耗（派生量，不入状态）。"""
+    from .primitives import skill_energy_cost
+
+    return [skill_energy_cost(state, side, unit, s.energy_cost, s) for s in unit.skills]
 
 
 def _mod_dict(m) -> dict:
@@ -63,15 +77,19 @@ def _trait_full(t) -> dict | None:
             "gains": [_mod_dict(m) for m in t.gains]}
 
 
-def _unit_full(u) -> dict:
-    """己方单位：全量（六维/技能详情/增益层/性格/血脉/IV/绝对血量/种族值/冷却）。"""
+def _unit_full(u, state=None, side: str = "") -> dict:
+    """己方单位：全量（六维/技能详情/增益层/性格/血脉/IV/绝对血量/种族值/冷却）。
+
+    `state`/`side` 缺省（旧调用）→ skills 不带 current_cost（保持向后兼容）。"""
+    costs = _skill_costs(state, side, u) if state is not None else []
     return {
         "id": u.id,
         "name": u.name,
         "types": list(u.types),
         "base_stats": dict(u.base_stats),
         "stats": dict(u.stats),
-        "skills": [_skill_dict(s) for s in u.skills],
+        "skills": [_skill_dict(s, current_cost=costs[i] if i < len(costs) else None)
+                   for i, s in enumerate(u.skills)],
         "current_skills": [_skill_dict(s) for s in u.current_skills],
         "nature": u.nature,
         "bloodline": u.bloodline,
@@ -98,13 +116,24 @@ def _trait_info(u) -> dict:
     return {"name": u.trait.name if u.trait else "", "desc": ""}
 
 
-def _unit_masked(u, revealed: set[tuple[int, str]], index: int) -> dict:
+def _trait_masked(u) -> dict:
+    """敌方特性：图鉴公开名+描述 + **运行时增益层**（`trait.gains`，特性层数可见——
+    E4 增减益口径：常规增减益 / 特性层数 / 能耗减益 对敌方也输出）。"""
+    info = _trait_info(u)
+    info["gains"] = [_mod_dict(m) for m in (u.trait.gains if u.trait else [])]
+    return info
+
+
+def _unit_masked(u, revealed: set[tuple[int, str]], index: int,
+                 state=None, side: str = "") -> dict:
     """敌方单位：白名单字段。技能 = 已揭示的（详情）；未揭示的不出现（UI 显示 ？？？）。
 
     E4 修正（负责人 2026-08-25）：**增减益可见**——双方阵营都显示状态栏（常规增减益层数 /
     特性层数 / 能耗减益；印记将来加），故 stat_mods 对敌方也输出。
     其余（六维 / 性格 / 血脉 / IV / 绝对血量 / 道具次数）仍隐藏。
+    已揭示技能的 `current_cost`（2026-08-30）同样只由**可见状态**派生，不泄漏隐藏信息。
     """
+    costs = _skill_costs(state, side, u) if state is not None else []
     return {
         "id": u.id,
         "name": u.name,
@@ -112,18 +141,20 @@ def _unit_masked(u, revealed: set[tuple[int, str]], index: int) -> dict:
         "hp_pct": _hp_pct(u),
         "energy": u.energy,
         "fainted": u.fainted,
-        "trait": _trait_info(u),
-        "skills": [_skill_dict(s) for s in u.skills if (index, s.name) in revealed],
+        "trait": _trait_masked(u),
+        "skills": [_skill_dict(s, current_cost=costs[i] if i < len(costs) else None)
+                   for i, s in enumerate(u.skills) if (index, s.name) in revealed],
         "stat_mods": [_mod_dict(m) for m in u.stat_mods],
     }
 
 
-def _side_view(side_state, *, masked: bool) -> dict:
+def _side_view(state, side: str, *, masked: bool) -> dict:
     """一方视图：masked=False → 全量（己方）；masked=True → 白名单（敌方）。
 
     印记（印记/天气批 2026-08-30）：双方可见——印记栏是战斗状态栏的一部分
     （E4 观战白名单预留「印记将来加」，本批落地）。
     """
+    side_state = state.side(side)
     marks = {
         "positive_marks": [{"name": m.name, "layers": m.layers, "source": m.source}
                            for m in side_state.positive_marks],
@@ -139,14 +170,14 @@ def _side_view(side_state, *, masked: bool) -> dict:
             "lives": side_state.lives,
             "active": side_state.active,
             **marks,
-            "units": [_unit_masked(u, revealed, i) for i, u in enumerate(units)],
+            "units": [_unit_masked(u, revealed, i, state, side) for i, u in enumerate(units)],
         }
     return {
         "lives": side_state.lives,
         "active": side_state.active,
         "item_uses": dict(side_state.item_uses),
         **marks,
-        "units": [_unit_full(u) for u in units],
+        "units": [_unit_full(u, state, side) for u in units],
     }
 
 
@@ -163,7 +194,7 @@ def observe(state: BattleState, viewer: str, mode: str = "partial") -> dict:
         raise ValueError(f"viewer 必须是 a 或 b，实际 {viewer!r}。")
     foe = "b" if viewer == "a" else "a"
     r = state.rules
-    me_view = _side_view(state.side(viewer), masked=False)
+    me_view = _side_view(state, viewer, masked=False)
     # 预估提示（公式规范 2026-08-30）：me 侧新增 predictions——确定性派生量，
     # 不入状态（state_hash 不变）；玩家在「下一回合开始前」的快照上看到它。
     from .prediction import predictions_for
@@ -186,7 +217,7 @@ def observe(state: BattleState, viewer: str, mode: str = "partial") -> dict:
             "iv_max": r.iv_max,
         },
         "me": me_view,
-        "opponent": _side_view(state.side(foe), masked=True),
+        "opponent": _side_view(state, foe, masked=True),
         # 天气（印记/天气批 2026-08-30）：全局、双方共享 → 直接给全量
         "weather": ({"kind": state.weather.kind, "turns_left": state.weather.turns_left,
                      "source": state.weather.source} if state.weather else None),

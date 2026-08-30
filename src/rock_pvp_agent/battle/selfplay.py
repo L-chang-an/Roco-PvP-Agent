@@ -101,6 +101,7 @@ def run_selfplay(*, seed: int, team_size: int = 3, lives: int = 2, max_turns: in
         "rules": _rules_dict(rules),
         "team_a": roster_a,
         "team_b": roster_b,
+        "starters": result.starters,   # 第 0 回合首发（重放据此重建入场）
         "winner": result.winner,
         "done": result.done,
         "turns": [
@@ -151,6 +152,9 @@ def _global_view(session) -> dict:
         "rules": _rules_dict(state.rules),
         "a": observe(state, "a", "partial")["me"],
         "b": observe(state, "b", "partial")["me"],
+        # 天气（全局，双方共享，观战者可见）
+        "weather": ({"kind": state.weather.kind, "turns_left": state.weather.turns_left,
+                     "source": state.weather.source} if state.weather else None),
     }
 
 
@@ -185,6 +189,17 @@ def run_spectate(*, seed: int, a_kind: str = "llm", b_kind: str = "llm",
     for s in SIDES:
         players[s].on_match_start(session.view(s))
 
+    # 第 0 回合（2026-08-30）：双方选首发 → 首发触发入场效果 → 进入第 1 回合。
+    starters: dict[str, int] = {}
+    for s in SIDES:
+        options = session.starter_options(s)
+        chooser = getattr(players[s], "choose_starter", None)
+        idx = chooser(session.view(s), options) if chooser else options[0]
+        if not session.choose_starter(s, idx)["ok"]:
+            session.choose_starter(s, options[0])
+        starters[s] = idx
+    session.start_entry()
+
     yield {
         "event": "meta",
         "battle_id": bid,
@@ -193,6 +208,7 @@ def run_spectate(*, seed: int, a_kind: str = "llm", b_kind: str = "llm",
         "players": {"a": players["a"].kind, "b": players["b"].kind},
         "team_a": [u["name"] for u in roster_a],
         "team_b": [u["name"] for u in roster_b],
+        "starters": starters,
     }
     yield {"event": "state", "turn": 0, "state": _global_view(session)}
 

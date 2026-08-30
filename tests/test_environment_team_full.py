@@ -89,6 +89,24 @@ def test_rule2_invalid_bloodline_type_rejected() -> None:
     assert any("血脉「火火」不是合法系别" in e for e in errs)
 
 
+def test_boss_bloodline_valid() -> None:
+    """首领血脉「首领」：合法选择（非系别），不报「不是合法系别」。"""
+    picks = [_t("迪莫", ["闪光"], bloodline="首领"), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]
+    assert validate_team(picks, [], source=F) == []
+
+
+def test_boss_bloodline_forbids_bloodline_skill() -> None:
+    """首领血脉精灵无法选用系别血脉技能（2026-08-30）。"""
+    picks = [_t("迪莫", ["折线冲击"], bloodline="首领"), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]
+    errs = validate_team(picks, [], source=F)
+    assert any("首领血脉精灵无法选用系别血脉技能「折线冲击」" in e for e in errs)
+
+
+def test_boss_bloodline_learnable_excludes_bloodline_skills() -> None:
+    """learnable_skills 首领血脉 → 不含系别血脉技能（首领非系别）。"""
+    assert "折线冲击" not in learnable_skills("迪莫", "首领", source=F)
+
+
 # ── 规则 3：首领形态不可入队 ──
 def test_rule3_boss_rejected() -> None:
     picks = [_t("圣光迪莫", ["闪光"]), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]

@@ -13,6 +13,7 @@ from .models import ActionType
 from .primitives import skill_energy_cost
 from .rules import BOSS_EVOLUTION_ITEM, ITEMS
 from .statuses import morph_layers
+from .teambuilder import BOSS_BLOODLINE
 
 _ACTION_TYPES: frozenset[str] = frozenset(a.value for a in ActionType)
 
@@ -48,11 +49,15 @@ class Decision:
 def boss_evolution_options(state, side: str) -> list[str]:
     """首领化分支列表（玩家 `item_arg` 从这里选）；空 = 当前不可首领化。
 
-    已拍板（2026-08-30）：首领化 = 一阶进化，只有 boss 的上一阶可触发（57 个）；
-    萌化层数 > 0 → 不可首领化（资质已退化）；多分支只有迪莫（4）/魔力猫（2）。
+    已拍板（2026-08-30）：首领化 = 一阶进化，只有 boss 的上一阶可触发；萌化层数 > 0
+    → 不可首领化（资质已退化）；多分支只有迪莫（4）/魔力猫（2）。
+    **血脉门控（2026-08-30）**：血脉必须是「首领」（非系别血脉）才能首领化——
+    组队时选「首领」血脉标记，选「光」等系别血脉则不能首领化。
     """
     unit = state.side(side).active_unit
     if unit.fainted or morph_layers(unit) > 0:
+        return []
+    if unit.bloodline != BOSS_BLOODLINE:
         return []
     return list(boss_targets_of(unit.name))
 
@@ -122,6 +127,22 @@ def validate_replacement(state, side: str, bench_idx) -> str | None:
     return None
 
 
+def validate_starter(state, side: str, bench_idx) -> str | None:
+    """首发合法性（第 0 回合，2026-08-30）：合法 → None，否则中文原因。
+
+    与补位类似，但首发无「当前在场」概念——任意存活单位都可选作首发。"""
+    if state.done:
+        return "对局已结束。"
+    side_state = state.side(side)
+    if isinstance(bench_idx, bool) or not isinstance(bench_idx, int):
+        return f"首发槽位必须是整数，实际 {bench_idx!r}。"
+    if not 0 <= bench_idx < len(side_state.units):
+        return f"首发槽位 {bench_idx} 越界。"
+    if side_state.units[bench_idx].fainted:
+        return "目标精灵已倒下，不能首发。"
+    return None
+
+
 def validate_decision(state, side: str, dec: Decision) -> str | None:
     """合法 → None；非法 → 原因字符串（调用方据此拒绝且**不消耗回合**）。
 
@@ -174,6 +195,8 @@ def _boss_item_reason(state, side: str, dec: Decision) -> str | None:
     targets = boss_targets_of(unit.name)
     if not targets:
         return f"「{unit.name}」无首领血脉，无法使用首领进化。"
+    if unit.bloodline != BOSS_BLOODLINE:
+        return f"「{unit.name}」血脉不是「首领」，无法首领化。"
     if morph_layers(unit) > 0:
         return f"「{unit.name}」处于萌化状态，无法首领化。"
     if len(targets) > 1 and dec.item_arg not in targets:

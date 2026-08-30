@@ -43,6 +43,10 @@ class Player(Protocol):
         """阵亡补位决策。输入：观测 / 存活后备槽位列表；输出：选中的槽位下标。"""
         ...
 
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """第 0 回合首发选择。输入：观测 / 存活单位下标列表；输出：选中的首发下标。"""
+        ...
+
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束回调。输入：回合末观测 / 本回合事件流；输出：无。"""
         ...
@@ -68,6 +72,10 @@ class ScriptedPlayer:
     def choose_replacement(self, observation: dict, bench: list[int]) -> int:
         """脚本无补位脚本：固定取第一个存活后备。"""
         return bench[0]
+
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """脚本无首发脚本：固定取第一个存活单位。"""
+        return options[0]
 
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束回调：脚本无动作。输入：观测 + 事件流；输出：无。"""
@@ -108,6 +116,11 @@ class RandomPlayer:
     def choose_replacement(self, observation: dict, bench: list[int]) -> int:
         """随机选一个存活后备——走自己的独立 RNG 流，不碰引擎的流。"""
         return self._rng.choice(bench)
+
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """首发选择：固定取第一个存活单位（确定性——不消耗决策 RNG 流，保持既有
+        对局快照/哨兵零漂移）。随机首发留给 UI 对手层（FakeLLMPlayer）后续扩展。"""
+        return options[0]
 
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束回调：随机玩家无动作。输入：观测 + 事件流；输出：无。"""

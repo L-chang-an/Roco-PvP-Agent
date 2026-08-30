@@ -69,6 +69,10 @@ class FakeLLMPlayer:
         """随机选一个存活后备——走自己的独立 RNG 流。"""
         return self._random.choose_replacement(observation, bench)
 
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """随机选一个首发——走自己的独立 RNG 流。"""
+        return self._random.choose_starter(observation, options)
+
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束回调：假模型无动作。输入：观测 + 事件流；输出：无。"""
 
@@ -194,6 +198,10 @@ class LLMPlayer:
             if ok:
                 return idx
         return self._random.choose_replacement(observation, bench)       # 重试耗尽兜底
+
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """首发选择：简化实现，随机选一个首发（走独立 RNG 流兜底）。"""
+        return self._random.choose_starter(observation, options)
 
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束：把**过滤后**的事件摘要追加进私有 history（LLM 学到结果）。"""

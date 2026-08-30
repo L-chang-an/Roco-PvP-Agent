@@ -45,6 +45,12 @@ BOSS_EVOLUTION_ITEM = "首领进化"
 # 道具 → 每方每局可用次数。
 ITEMS: dict[str, int] = {"草魔法": 1, BOSS_EVOLUTION_ITEM: 1}
 
+# 道具描述（图鉴展示，组队页道具选择器 / 战斗页提示用）。
+ITEM_DESCRIPTIONS: dict[str, str] = {
+    "草魔法": "回复当前在场精灵 50% 最大生命。",
+    BOSS_EVOLUTION_ITEM: "首领血脉精灵一阶进化成首领形态（多分支需选其一）。",
+}
+
 # 默认道具栏：new_battle items 为 None 时每方携带（**首领进化不默认携带**——需对局
 # 配置显式指定，保持既有对局快照/哨兵零变化，2026-08-30）。
 DEFAULT_ITEMS: tuple[str, ...] = ("草魔法",)

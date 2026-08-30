@@ -74,6 +74,14 @@ def test_config_metadata(client):
     assert len(body["types"]) >= 18
 
 
+def test_config_exposes_items(client):
+    """组队元数据含对战道具目录（草魔法 + 首领进化）+ 默认道具栏。"""
+    body = client.get("/api/team/config").json()
+    names = {i["name"] for i in body["items"]}
+    assert names == {"草魔法", "首领进化"}
+    assert body["default_items"] == ["草魔法"]
+
+
 # ---------- spirits ----------
 
 
@@ -199,6 +207,35 @@ def test_validate_extra_field_422(client):
     assert res.status_code == 422
 
 
+def test_validate_rejects_unknown_item(client):
+    body = client.post("/api/team/validate",
+                       json={"team": _valid_team(), "team_size": 3, "items": ["不存在"]}).json()
+    assert body["ok"] is False
+    assert any("道具" in e for e in body["errors"])
+
+
+def test_validate_rejects_duplicate_item(client):
+    body = client.post("/api/team/validate",
+                       json={"team": _valid_team(), "team_size": 3, "items": ["草魔法", "草魔法"]}).json()
+    assert body["ok"] is False
+    assert any("重复" in e for e in body["errors"])
+
+
+def test_validate_ok_with_items(client):
+    body = client.post("/api/team/validate",
+                       json={"team": _valid_team(), "team_size": 3, "items": ["首领进化"]}).json()
+    assert body["ok"] is True and body["errors"] == []
+
+
+def test_validate_rejects_multiple_items(client):
+    """道具只能带一种（2026-08-30）。"""
+    body = client.post("/api/team/validate",
+                       json={"team": _valid_team(), "team_size": 3,
+                             "items": ["草魔法", "首领进化"]}).json()
+    assert body["ok"] is False
+    assert any("只能携带一种" in e for e in body["errors"])
+
+
 # ---------- 保存 / 加载 / 列表 / 删除 ----------
 
 
@@ -225,6 +262,30 @@ def test_save_load_roundtrip_absolute(client, tmp_path):
     assert isinstance(sk, list) and sk and set(sk[0]) == {"name", "type", "desc"}
     assert sk[0]["name"] == team[0]["skills"][0]
     assert d["team"][0]["trait"] == {"name": "最好的伙伴", "desc": "造成克制伤害后，获得攻防速+20%，并回复2能量。"}
+
+
+def test_save_load_roundtrip_items(client, tmp_path):
+    """对战道具作为队伍字段落盘并往返（单一种：首领进化）。"""
+    target = tmp_path / "带道具队.json"
+    res = client.post("/api/team/save", json={"team": _valid_team(), "team_size": 3,
+                                               "items": ["首领进化"], "path": str(target)})
+    assert res.status_code == 200
+    d = client.get("/api/team/load", params={"path": str(target)}).json()
+    assert d["items"] == ["首领进化"]
+
+
+def test_load_old_file_defaults_items(client, tmp_path):
+    """旧队伍文件无 items 键 → 加载默认道具栏（草魔法），向后兼容。"""
+    import json as _json
+    target = tmp_path / "旧队.json"
+    payload = {
+        "version": 2, "saved_at": "t", "team_size": 3,
+        "team": [{"spirit": p["spirit"], "skills": p["skills"], "bloodline": p["bloodline"],
+                  "nature": p["nature"], "iv": p["iv"]} for p in _valid_team()],
+    }
+    target.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    d = client.get("/api/team/load", params={"path": str(target)}).json()
+    assert d["items"] == ["草魔法"]
 
 
 def test_save_rejects_enriched_fields_in_request(client):

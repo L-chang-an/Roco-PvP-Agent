@@ -47,6 +47,7 @@
     pool: [],          // 当前选中精灵的技能池
     poolTotal: 0,      // 全部可学
     poolImpl: 0,       // 已实装（可配置）
+    items: [],         // 对战道具栏（队伍级）
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -71,14 +72,14 @@
 
   /* 复刻 environment/statline.calc_combat_stats（真实公式，逐字节一致）：
    *   hp:    floor(1.7 × (种族 + iv×3) + 70) × 性格修正 → floor(+100)
-   *   其余： floor(1.1 × (种族 + iv×3) + 50) × 性格修正 → floor(+50)
+   *   其余： floor(1.1 × (种族 + iv×3) + 10) × 性格修正 → floor(+50)
    * 性格修正：提升项 ×1.2 / 降低项 ×0.9 / 其余 ×1.0。 */
   function statPreview(base, iv, natureName) {
     const mod = (S.config.natures || []).find((n) => n.name === natureName) || { plus: '', minus: '' };
     const out = {};
     for (const k of STAT_FIELDS) {
       const growth = (base[k] || 0) + (iv[k] || 0) * 3;
-      let raw = k === 'hp' ? Math.floor(1.7 * growth + 70) : Math.floor(1.1 * growth + 50);
+      let raw = k === 'hp' ? Math.floor(1.7 * growth + 70) : Math.floor(1.1 * growth + 10);
       if (mod.plus === k) raw = Math.floor(raw * 1.2);
       else if (mod.minus === k) raw = Math.floor(raw * 0.9);
       out[k] = Math.floor(raw + (k === 'hp' ? 100 : 50));
@@ -254,7 +255,7 @@
         <span class="ev-max">/${S.config.iv_max}</span></div>`;
     }).join('');
 
-    const bloodOpts = ['', ...(S.config.types || [])].map((t) =>
+    const bloodOpts = ['', ...(S.config.types || []), (S.config.boss_bloodline || '首领')].map((t) =>
       `<option value="${escapeHtml(t)}" ${t === slot.bloodline ? 'selected' : ''}>${t ? escapeHtml(t) : '（无）'}</option>`
     ).join('');
 
@@ -271,7 +272,7 @@
       </div>
       <div class="editor-section two-col">
         <div>
-          <div class="editor-title">血脉系别（决定可携带的血脉技能）</div>
+          <div class="editor-title">血脉（决定可携带的血脉技能；「首领」= 首领血脉，不可选系别血脉技能）</div>
           <select id="blood-select">${bloodOpts}</select>
         </div>
         <div>
@@ -416,6 +417,25 @@
     renderAll();
   }
 
+  /* ---------- 对战道具（队伍级） ---------- */
+
+  function renderItems() {
+    const box = $('#item-list');
+    if (!box || !S.config || !S.config.items) return;
+    const selected = S.items.length ? S.items[0] : '';
+    const opts = (S.config.items || []).map((it) => {
+      const checked = selected === it.name;
+      return `<label class="item-cb-label"><input type="radio" name="item-pick" value="${escapeHtml(it.name)}"${checked ? ' checked' : ''}> ` +
+        `<b>${escapeHtml(it.name)}</b> <span class="dim">${escapeHtml(it.desc)}</span></label>`;
+    }).join('');
+    box.innerHTML = `<label class="item-cb-label"><input type="radio" name="item-pick" value=""${selected ? '' : ' checked'}>（无道具）</label>` + opts;
+    box.querySelectorAll('input[type="radio"]').forEach((rb) => {
+      rb.addEventListener('change', () => {
+        S.items = (rb.checked && rb.value) ? [rb.value] : [];   // 至多一种
+      });
+    });
+  }
+
   /* ---------- 校验 / 保存 / 加载 ---------- */
 
   function picksPayload() {
@@ -429,7 +449,7 @@
   }
 
   async function validate() {
-    const body = { team: picksPayload(), team_size: S.teamSize };
+    const body = { team: picksPayload(), team_size: S.teamSize, items: S.items.slice() };
     const r = await api('/api/team/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -448,7 +468,7 @@
 
   async function save() {
     const path = ($('#save-path').value || '').trim();
-    const body = { team: picksPayload(), team_size: S.teamSize, path };
+    const body = { team: picksPayload(), team_size: S.teamSize, items: S.items.slice(), path };
     const r = await api('/api/team/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -507,6 +527,10 @@
       size = nearest;
     }
     S.selSlot = 0;
+    // 道具栏恢复：旧文件无 items → 默认草魔法；显式空数组 → 尊重（不携带道具）
+    const defaultItems = (S.config && S.config.default_items) || ['草魔法'];
+    const known = new Set(((S.config && S.config.items) || []).map((x) => x.name));
+    S.items = Array.isArray(data.items) ? data.items.filter((n) => known.has(n)).slice(0, 1) : defaultItems.slice();
     const slots = [];
     for (let i = 0; i < size; i++) {
       const p = team[i];
@@ -551,6 +575,7 @@
     renderTeamSlots();
     renderSlotEditor();
     renderSkillList();
+    renderItems();
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -581,6 +606,7 @@
     const cfgR = await api('/api/team/config');
     if (!cfgR.ok) { flash('组队配置加载失败。', 'warn'); return; }
     S.config = cfgR.j;
+    S.items = (S.config.default_items || ['草魔法']).slice();   // 默认道具栏
     const spR = await api('/api/team/spirits');
     if (spR.ok) {
       S.spirits = spR.j.spirits || [];

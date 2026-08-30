@@ -9,8 +9,9 @@ try/except Exception 的全吞降级**。非线程安全：并发由未来的 we
 from __future__ import annotations
 
 from .actions import (Decision, legal_actions, legal_items, replacement_options,
-                      validate_decision, validate_replacement)
-from .engine import apply_replacement, end_turn, resolve_turn
+                      validate_decision, validate_replacement, validate_starter)
+from .engine import (apply_replacement, choose_starter, end_turn, resolve_turn,
+                     start_battle_entry)
 from .models import SIDES, BattleState, new_battle
 from .rules import DEFAULT_RULES
 
@@ -26,6 +27,7 @@ class BattleSession:
         self._state = state
         self._pending: dict[str, Decision] = {}
         self._need_replace: str | None = None   # 正在等待哪一方选择补位（None = 无）
+        self._starters: dict[str, int] = {}     # 第 0 回合已选首发（side → 槽位下标）
 
     @classmethod
     def start(cls, roster_a, roster_b, *, seed: int, items_a=None, items_b=None,
@@ -40,6 +42,11 @@ class BattleSession:
     def state(self) -> BattleState:
         """输出：底层 BattleState（只读使用；测试与回放直接读它）。"""
         return self._state
+
+    @property
+    def starters(self) -> dict[str, int]:
+        """第 0 回合已选首发（side → 槽位下标）；未选完 → 缺对应键。"""
+        return dict(self._starters)
 
     def pending_sides(self) -> list[str]:
         """稳定序，取自 SIDES。"""
@@ -56,6 +63,31 @@ class BattleSession:
     def replacement_options(self, side: str) -> list[int]:
         """阵亡方可选的补位后备槽位（存活、非当前在场）。"""
         return replacement_options(self._state, side)
+
+    def starter_options(self, side: str) -> list[int]:
+        """第 0 回合可选的存活单位下标（全部存活单位，任意一个都可作首发）。"""
+        return [i for i, u in enumerate(self._state.side(side).units) if not u.fainted]
+
+    def choose_starter(self, side: str, bench_idx: int) -> dict:
+        """第 0 回合：选择首发（设置该方 active）。非法 → {"ok": False, ...}，零状态变更。"""
+        if self._need_replace is not None:
+            return {"ok": False, "error": f"正在等待 {self._need_replace} 方选择补位。"}
+        if side not in SIDES:
+            return {"ok": False, "error": f"未知阵营「{side}」。"}
+        reason = validate_starter(self._state, side, bench_idx)
+        if reason is not None:
+            return {"ok": False, "error": reason}
+        events = choose_starter(self._state, side, bench_idx)
+        self._starters[side] = bench_idx
+        return {"ok": True, "events": events, "state_hash": self._state.state_hash()}
+
+    def start_entry(self) -> dict:
+        """第 0 回合收尾：双方首发触发入场效果。双方未齐备 → 拒绝。"""
+        missing = [s for s in SIDES if s not in self._starters]
+        if missing:
+            return {"ok": False, "error": f"双方首发未齐备，缺：{missing}。"}
+        events = start_battle_entry(self._state)
+        return {"ok": True, "events": events, "state_hash": self._state.state_hash()}
 
     def submit(self, side: str, dec: Decision) -> dict:
         """校验并缓冲一方提交（同时出招语义：只入缓冲、不推进状态）。

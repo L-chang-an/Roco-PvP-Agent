@@ -31,9 +31,14 @@ class TeamPick:
 
     spirit: str                       # 精灵名，必须在数据表里（FULL 真实）
     skills: list[str]                 # 1–rules.skill_slots 个（至少 1、至多 4），都在该精灵可学池内
-    bloodline: str = ""               # 血脉（系别）；FULL/VALID 下由玩家自定义，任意 18 系
+    bloodline: str = ""               # 血脉（系别 或 BOSS_BLOODLINE「首领」）
     nature: str = "坦率"
     iv: dict[str, int] = field(default_factory=dict)   # 每项 0–iv_max，最多 3 个维度有投入，缺省 0
+
+
+# 首领血脉（2026-08-30）：组队血脉选择的特殊值——表明该精灵具有首领血脉（可首领化）。
+# 具有首领血脉的精灵**无法选用系别血脉技能**（血脉技能只按系别匹配，首领非系别）。
+BOSS_BLOODLINE = "首领"
 
 
 def learnable_skills(spirit: str, bloodline: str = "",
@@ -88,8 +93,9 @@ def validate_team(picks: list[TeamPick], items: list[str],
 
         sp = spirits[pick.spirit]
 
-        # ── 血脉：合法系别（玩家自定义 18 系任一）──
-        if pick.bloodline and pick.bloodline not in load_types(source):
+        # ── 血脉：合法系别（玩家自定义 18 系任一）或「首领」（首领血脉）──
+        if pick.bloodline and pick.bloodline != BOSS_BLOODLINE \
+                and pick.bloodline not in load_types(source):
             errors.append(f"{label}：血脉「{pick.bloodline}」不是合法系别"
                           f"（{sorted(load_types(source))}）。")
 
@@ -116,6 +122,11 @@ def validate_team(picks: list[TeamPick], items: list[str],
                 # 规则 2：血脉技能必须匹配所选血脉系别（优先于通用「不在可学池」）
                 if not pick.bloodline:
                     errors.append(f"{label}：血脉技能「{skill_name}」需要先选择血脉系别。")
+                elif pick.bloodline == BOSS_BLOODLINE:
+                    # 首领血脉（2026-08-30）：无法选用系别血脉技能
+                    errors.append(
+                        f"{label}：首领血脉精灵无法选用系别血脉技能「{skill_name}」。"
+                    )
                 elif pick.bloodline in load_types(source) and skills[skill_name].type != pick.bloodline:
                     errors.append(
                         f"{label}：血脉技能「{skill_name}」系别为「{skills[skill_name].type}」，"
@@ -159,6 +170,8 @@ def validate_team(picks: list[TeamPick], items: list[str],
 
     if len(set(items)) != len(items):
         errors.append(f"道具列表含重复项：{items}。")
+    if len(items) > 1:
+        errors.append(f"道具只能携带一种，实际 {len(items)} 种：{items}。")
     for item in items:
         if item not in ITEMS:
             errors.append(f"道具「{item}」不存在。")
