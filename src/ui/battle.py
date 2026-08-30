@@ -17,6 +17,7 @@ import threading
 from dataclasses import asdict, fields
 
 from environment.actions import Decision, boss_evolution_options, recharge_action
+from environment.datafingerprint import data_digest, rules_digest
 from environment.rules import BattleRules
 from environment.session import BattleSession
 from environment.visibility import filter_events_for
@@ -173,6 +174,8 @@ class BattleController:
             "seed": self._seed,
             "opponent": self._opponent,
             "rules": _rules_dict(self._rules),
+            "data_digest": data_digest(),
+            "rules_digest": rules_digest(),
             "team_a": self._team_a,
             "team_b": self._team_b,
             "items_a": self._items_a,
@@ -232,7 +235,8 @@ class BattleController:
             "events": cur["events"],
             "state_hash": self._session.state.state_hash(),
         })
-        self._player.on_turn_result(self._session.view("b"), cur["events"])
+        self._player.on_turn_result(
+            self._session.view("b"), filter_events_for("b", cur["events"], self._session.state))
 
     def _snapshot_locked(self, events: list[dict], llm_reply: str, events_turn: int | None) -> dict:
         """人类视角快照：观测（迷雾）+ 合法池 + 本回合事件（已过滤）。

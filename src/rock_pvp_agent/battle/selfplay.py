@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Iterator
 
 from environment.battle_config import build_battle_rules
+from environment.datafingerprint import data_digest, rules_digest
 from environment.dataset import DataSource
 from environment.match import drive_turn, run_match
 from environment.models import SIDES
@@ -99,6 +100,8 @@ def run_selfplay(*, seed: int, team_size: int = 3, lives: int = 2, max_turns: in
         "seed": seed,
         "players": {"a": players["a"].kind, "b": players["b"].kind},
         "rules": _rules_dict(rules),
+        "data_digest": data_digest(),
+        "rules_digest": rules_digest(),
         "team_a": roster_a,
         "team_b": roster_b,
         "starters": result.starters,   # 第 0 回合首发（重放据此重建入场）
