@@ -12,6 +12,7 @@ from .catalog import (
     get_spirit_profile,
     search_spirits,
 )
+from .trajectory import TrajectoryEvidence, aggregate, discover, normalize, query_trajectory_evidence
 from .validate import TeamValidation, validate_team
 
 __all__ = [
@@ -22,6 +23,11 @@ __all__ = [
     "get_spirit_profile",
     "get_skill_profile",
     "get_build_options",
+    "TrajectoryEvidence",
+    "discover",
+    "normalize",
+    "aggregate",
+    "query_trajectory_evidence",
     "TeamValidation",
     "validate_team",
 ]
