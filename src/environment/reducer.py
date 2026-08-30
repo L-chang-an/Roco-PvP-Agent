@@ -31,7 +31,7 @@ from .atom import (
     LoseHp, RevealSkill, SetCooldown, SetModLayers, SetWeather, SpendEnergy,
     StealEnergy, TraitGain,
 )
-from .damage import apply_faint, apply_heal, apply_hp_loss
+from .damage import HpLoss, apply_faint, apply_heal, apply_hp_loss
 from .domain import (DamageApplied, EnergyChanged, HpChanged, MarkChanged,
                      StatModChanged, WeatherChanged)
 from .events import ev
@@ -135,17 +135,70 @@ def _add_stat_layers(unit, stat: str, mode: str, layers: int,
     return layers
 
 
+def _morph_layers(unit) -> int:
+    """萌化层数（mode="special"；无记录 → 0）。"""
+    for m in unit.stat_mods:
+        if m.stat == "萌化" and m.mode == "special":
+            return m.layers
+    return 0
+
+
+def _morph_max_layers(unit) -> int:
+    """name 沿进化链到最低阶的最大可退阶数（迪莫=0、魔力猫=2、叶冕魔力猫=3）。"""
+    from .evolution import prev_of
+
+    cur, n = unit.name, 0
+    while prev_of(cur) is not None:
+        cur = prev_of(cur)
+        n += 1
+    return n
+
+
+def _recalc_morph(state, unit, frame: Frame) -> None:
+    """萌化层数变化 → 重算种族值资质（2026-08-30 拍板）。
+
+    - 层数夹到 [0, 最大可退阶数]，归零移除记录（灼烧同口径）；
+    - `stats` = 退化 x 阶形态的 calc_combat_stats（特性/名字/技能不变）；
+    - max_hp/current_hp **同比例缩放取整（下限 1）**，走 damage.apply_max_hp_change
+      漏斗；实际 HP 变化挂 HpChanged 领域事件（冻结力竭等持续不变量可感知）。
+    """
+    from .damage import apply_max_hp_change
+    from .evolution import base_stats_of, prev_name_of
+    from .statline import calc_combat_stats
+
+    layers = max(0, min(_morph_layers(unit), _morph_max_layers(unit)))
+    for m in list(unit.stat_mods):
+        if m.stat == "萌化" and m.mode == "special":
+            if layers <= 0:
+                unit.stat_mods.remove(m)
+            else:
+                m.layers = layers
+    target = prev_name_of(unit.name, layers)
+    new_stats = calc_combat_stats(base_stats_of(target), unit.iv, unit.nature)
+    res = apply_max_hp_change(state, unit, new_stats["hp"], source="萌化")
+    if res is not None and res.applied:
+        before = (unit.current_hp + res.applied if isinstance(res, HpLoss)
+                  else unit.current_hp - res.applied)
+        frame.domain_events.append(HpChanged(unit.id, before, unit.current_hp, "萌化"))
+    unit.stats = new_stats
+
+
 def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
     u = atom.unit
     if is_immune(u, atom.stat):
         return []   # 属性免疫（2026-08-30 拍板）：火免疫灼烧/草免疫寄生/毒免疫中毒——
     # 不落层、不发事件；中毒印记走 marks 路径不受影响
+    if atom.stat == "萌化" and atom.layers > 0 and _morph_layers(u) >= _morph_max_layers(u):
+        return []   # 萌化（2026-08-30 拍板）：实际资质已最低阶 → 不再获得层数
     if atom.stat == "energy_cost":
         total = apply_energy_cost_mod(u, layers=atom.layers, permanent=False,
                                       trait=False, source=atom.source)
     else:
         total = _add_stat_layers(u, atom.stat, atom.mode, atom.layers, atom.source,
                                  kwargs=atom.kwargs)
+    if atom.stat == "萌化":
+        _recalc_morph(state, u, frame)
+        total = _morph_layers(u)   # 事件展示夹后层数
     frame.domain_events.append(StatModChanged(
         u.id, atom.stat, atom.mode, atom.layers, total, atom.source))
     out = {"type": "stat_change", "side": atom.side, "unit": u.name, "skill": atom.source,
@@ -288,7 +341,7 @@ def _reduce_heal_flat(state, atom: HealFlat, frame: Frame) -> list[dict]:
 
 def _reduce_set_mod_layers(state, atom: SetModLayers, frame: Frame) -> list[dict]:
     """把 (stat, mode, 非永久) 记录设为指定层数，≤0 移除；发 StatModChanged
-    领域事件（引电链式触发读 total_layers）、不发展示事件。"""
+    领域事件（引电链式触发读 total_layers）、不发展示事件。萌化设层后重算资质。"""
     u = atom.unit
     for i, m in enumerate(u.stat_mods):
         if m.stat == atom.stat and m.mode == atom.mode and not m.permanent:
@@ -300,6 +353,8 @@ def _reduce_set_mod_layers(state, atom: SetModLayers, frame: Frame) -> list[dict
                 m.layers = atom.layers
                 frame.domain_events.append(StatModChanged(
                     u.id, atom.stat, atom.mode, 0, m.layers, atom.source))
+            if atom.stat == "萌化":
+                _recalc_morph(state, u, frame)   # 解除 x 层萌化 → 沿链回升重算（2026-08-30 拍板）
             return []
     return []
 

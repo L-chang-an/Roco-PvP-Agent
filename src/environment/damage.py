@@ -201,6 +201,25 @@ def apply_faint(state, target, *, source: str) -> HpLoss:
     return HpLoss(requested=applied, applied=applied, fainted=True)
 
 
+def apply_max_hp_change(state, target, new_max: int, *,
+                        source: str) -> HpLoss | HealResult | None:
+    """萌化/首领化资质变化的血量调整：设置 max_hp，current_hp 同比例缩放取整（下限 1）。
+
+    与 apply_hp_loss/apply_heal 同址（`current_hp`/`max_hp` 唯一写点纪律）：缩放后的
+    HP 增减经扣血/回血漏斗执行；**阵亡单位保持 0 不缩放**。
+    """
+    old_max = max(1, target.max_hp)
+    target.max_hp = max(1, int(new_max))
+    if target.fainted:
+        return None
+    want = max(1, int(target.max_hp * (target.current_hp / old_max)))
+    if want < target.current_hp:
+        return apply_hp_loss(state, target, target.current_hp - want, source=source)
+    if want > target.current_hp:
+        return apply_heal(state, target, want - target.current_hp, source=source)
+    return None
+
+
 def apply_heal(state, target, amount: int, *, source: str) -> HealResult:
     """唯一回复入口。amount 夹到 [0, max_hp − current_hp]；`overflow` 记录被夹掉的量
     （将来「若敌方本回合回复生命，改为失去 2 倍含溢出量」这类效果要读夹取前的值）。
