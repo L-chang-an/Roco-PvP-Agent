@@ -15,7 +15,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from .atom import TraitGain
+from .atom import AddModifier, TraitGain
 from .domain import SkillResolved
 from .primitives import apply_energy_gain, heal_pct
 
@@ -62,18 +62,35 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
             if binding.hook != "skill_resolve" or not _cond_matches(binding.cond, ctx):
                 continue
             for effect in binding.effects:
-                atoms.extend(_effect_to_atoms(unit, effect, tdef.name, energy_max))
+                atoms.extend(_effect_to_atoms(state, unit, effect, tdef.name, energy_max))
     return atoms
 
 
-def _effect_to_atoms(unit: "Unit", effect, source: str, energy_max: int) -> list["Atom"]:
-    """一条 Effect → Atom 列表（stat_mod / energy_cost_mod → TraitGain；资源类即时执行）。"""
+def _effect_to_atoms(state, unit: "Unit", effect, source: str,
+                     energy_max: int) -> list["Atom"]:
+    """一条 Effect → Atom 列表（stat_mod / energy_cost_mod → TraitGain；资源类即时执行；
+    foe_status → 对敌方在场施状态（2026-08-30，灵魂灼伤等）。"""
     if effect.op == "stat_mod":
         return [TraitGain(unit=unit, stat=effect.stat, mode=effect.mode,
                           layers=effect.layers, source=source, permanent=effect.permanent)]
     if effect.op == "energy_cost_mod":
         return [TraitGain(unit=unit, stat="energy_cost", mode="flat",
                           layers=effect.layers, source=source, permanent=effect.permanent)]
+    if effect.op == "foe_status":
+        if state is None:
+            return []
+        from .models import side_of
+        from .statuses import STATUS_TABLE, status_kwargs
+
+        side = side_of(state, unit)
+        foe_side = "b" if side == "a" else "a"
+        foe = state.active(foe_side)
+        if foe is None or foe.fainted:
+            return []
+        return [AddModifier(side=foe_side, unit=foe, stat=effect.stat,
+                            mode=STATUS_TABLE[effect.stat][0], layers=effect.layers,
+                            source=source, target="foe",
+                            kwargs=status_kwargs(effect.stat))]
     # 资源类（energy_gain / heal_pct）：即时执行（旧 emit 同语义，不产生展示事件）
     if effect.op == "energy_gain":
         apply_energy_gain(unit, effect.value, energy_max=energy_max)

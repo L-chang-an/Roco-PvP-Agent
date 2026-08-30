@@ -85,6 +85,19 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
     # 路由在 compiler._mark_space 读本名判定；此处注册名以阻止 resolve_trait_name
     # 落到 default 白板。零绑定（效果是印记施加时的路由规则，非事件反应）。
     "吟游之弦": TraitDef(name="吟游之弦", bindings=()),
+    # 冻结批 L1（2026-08-30）：灵魂灼伤——冰系技能使敌方+4层灼烧，火系技能使敌方+2层冻结。
+    # foe_status op（triggers._effect_to_atoms）：对敌方在场施状态（属性免疫同漏斗拦截）。
+    "灵魂灼伤": TraitDef(
+        name="灵魂灼伤",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_ice", effects=(
+                Effect("foe_status", stat="灼烧", layers=4),
+            )),
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_fire", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+        ),
+    ),
 }
 
 

@@ -63,9 +63,10 @@ def _emit_skill(u: Unit, s_type: str, *, dealt_counter: bool = False) -> None:
 
 # ── 目录与查找 ──
 def test_catalog_registers_default_and_four_traits() -> None:
-    """目录 = 白板 default + 已实现特性（三系 + 迪莫）+ 吟游之弦（S4 印记路由注册，零绑定）。"""
+    """目录 = 白板 default + 已实现特性（三系 + 迪莫）+ 吟游之弦（S4 印记路由注册，零绑定）
+    + 灵魂灼伤（冻结批 L1，2026-08-30）。"""
     assert set(TRAIT_CATALOG) == {DEFAULT_TRAIT_NAME, "助燃", "氧循环", "浸润", "最好的伙伴",
-                                  "吟游之弦"}
+                                  "吟游之弦", "灵魂灼伤"}
 
 
 def test_default_trait_has_no_bindings() -> None:

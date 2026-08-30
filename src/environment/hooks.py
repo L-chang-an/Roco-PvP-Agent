@@ -55,6 +55,7 @@ _CONDITIONS: dict[str, object] = {
     "used_fire": lambda ctx: _skill_type_is(ctx, "火"),
     "used_grass": lambda ctx: _skill_type_is(ctx, "草"),
     "used_water": lambda ctx: _skill_type_is(ctx, "水"),
+    "used_ice": lambda ctx: _skill_type_is(ctx, "冰"),
 }
 
 

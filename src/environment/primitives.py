@@ -75,6 +75,12 @@ def skill_energy_cost(state, side: str, unit, base_cost: int, skill=None) -> int
     cost = max(0, base_cost + buff_layers(unit, "energy_cost", "flat"))
     cost = max(0, cost + freeze_layers(unit))
     if state is not None:
+        # 冰封特性（2026-08-30）：敌方在场精灵带「冰封」→ 我方全技能能耗 +1
+        foe_side = "b" if side == "a" else "a"
+        foe_unit = state.active(foe_side)
+        if foe_unit is not None and not foe_unit.fainted and foe_unit.trait \
+                and foe_unit.trait.name == "冰封":
+            cost += 1
         cost = max(0, cost + cost_adjust(state.side(side), kind=getattr(skill, "kind", "")))
         if cost_halved(state, getattr(skill, "type", "")):
             cost = max(0, cost // 2)

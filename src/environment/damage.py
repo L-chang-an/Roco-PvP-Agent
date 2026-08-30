@@ -127,6 +127,10 @@ def build_damage_terms(state, attacker, defender, *, damage_kind: str,
     side_state = state.side(side) if side else None
     mark_pct = power_pct_bonus(side_state, acted_first=acted_first) if side_state else 0.0
     mark_flat = power_flat_bonus(side_state) if side_state else 0
+    # 冻土特性（2026-08-30）：每携带 1 个冰系技能，地系技能威力 +10%
+    if skill_type == "地" and attacker.trait is not None \
+            and attacker.trait.name == "冻土":
+        mark_pct += 0.10 * sum(1 for s in attacker.skills if s.type == "冰")
     return DamageTerms(
         atk=max(1, int(atk)),
         defense=max(1, int(defense)),
