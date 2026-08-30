@@ -107,3 +107,55 @@ def test_frozen_soil_only_ground_type() -> None:
     events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
     assert dmg == 112                                   # 非地系不吃加成（普通系 STAB 1.25）
+
+
+# ── 加个雪球：使敌方获得冻结时，额外 +2 层 ──
+def test_snowball_extra_freeze_on_apply() -> None:
+    a = _unit("甲", _sk(("霜降", "冰", "状态", 1, 0)), trait=_trait("加个雪球"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    assert freeze_layers(b) == 6                        # 霜降 4 层 + 加个雪球 2 层
+
+
+def test_snowball_no_infinite_loop() -> None:
+    """source 守卫：加个雪球自身施加的冻结不再触发自身。"""
+    a = _unit("甲", _sk(("霜降", "冰", "状态", 1, 0)), trait=_trait("加个雪球"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    # 只 +2 一次（若循环，层数会远超 6 且烧反应预算）
+    assert freeze_layers(b) == 6
+    assert all(e["type"] != "error" for e in events)
+
+
+# ── 捉迷藏：使敌方获得冻结时，敌方全技能能耗 +1 ──
+def test_hide_and_seek_cost_on_freeze() -> None:
+    a = _unit("甲", _sk(("霜降", "冰", "状态", 1, 0)), trait=_trait("捉迷藏"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    cost_mod = next((m for m in b.stat_mods if m.stat == "energy_cost"), None)
+    assert cost_mod is not None and cost_mod.layers == 1   # 敌方能耗 +1
+    # base 1 + 捉迷藏 1 + 冻结固有副作用 4 = 6
+    assert skill_energy_cost(s, "b", b, 1, None) == 6
+
+
+# ── 冰钻：敌方技能栏总能耗每有 1 点，自己攻击威力 +10% ──
+def test_ice_drill_power_per_foe_total_cost() -> None:
+    a = _unit("甲", _sk(("扬沙", "地", "物攻", 1, 100)), types=("冰",), trait=_trait("冰钻"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 2, 30), ("音爆", "普通", "魔攻", 3, 130)))
+    s = _state(a, b)
+    events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
+    # 敌方技能总能耗 2+3=5 → +50% 威力：int(100×0.9×1.5) = 135
+    assert dmg == 135
+
+
+def test_ice_drill_no_trait_no_bonus() -> None:
+    a = _unit("甲", _sk(("扬沙", "地", "物攻", 1, 100)), types=("冰",))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 2, 30), ("音爆", "普通", "魔攻", 3, 130)))
+    s = _state(a, b)
+    events = execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
+    dmg = [e for e in events if e["type"] == "damage" and e["side"] == "a"][0]["damage"]
+    assert dmg == 90                                    # 无冰钻 → 无加成

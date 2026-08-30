@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from .atom import AddModifier, TraitGain
-from .domain import SkillResolved
+from .domain import SkillResolved, StatModChanged
 from .primitives import apply_energy_gain, heal_pct
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
     emit 直调兼容）。`unit` 可为 None（TURN_END 等无单一施法者的事件）。
     """
     atoms: list["Atom"] = []
-    if isinstance(event, SkillResolved) and unit is not None:
+    if isinstance(event, (SkillResolved, StatModChanged)) and unit is not None:
         atoms += _trait_atoms(state, event, unit, trait_defs, energy_max)
     if state is not None:
         from .marks import collect as collect_marks
@@ -53,13 +53,25 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
     if trait_defs is None:
         from .traits import trait_defs_for
         trait_defs = trait_defs_for(unit)
-    skill_type = event.skill_type or _skill_type(unit, event.skill)
-    ctx = SimpleNamespace(unit=unit, skill=SimpleNamespace(type=skill_type),
-                          dealt_counter=event.dealt_counter, energy_max=energy_max)
+    etype = type(event).__name__
+    if etype == "SkillResolved":
+        skill_type = event.skill_type or _skill_type(unit, event.skill)
+        ctx = SimpleNamespace(unit=unit, skill=SimpleNamespace(type=skill_type),
+                              dealt_counter=event.dealt_counter, energy_max=energy_max,
+                              event=event)
+        hook_value = "skill_resolve"
+    elif etype == "StatModChanged":
+        ctx = SimpleNamespace(unit=unit, energy_max=energy_max, event=event)
+        hook_value = "status_applied"
+    else:
+        return []
     atoms: list["Atom"] = []
     for tdef in trait_defs:
+        # source 守卫防循环（2026-08-30）：特性自身施加的状态不再触发自身
+        if getattr(event, "source", "") == tdef.name:
+            continue
         for binding in tdef.bindings:
-            if binding.hook != "skill_resolve" or not _cond_matches(binding.cond, ctx):
+            if binding.hook != hook_value or not _cond_matches(binding.cond, ctx):
                 continue
             for effect in binding.effects:
                 atoms.extend(_effect_to_atoms(state, unit, effect, tdef.name, energy_max))
@@ -91,6 +103,19 @@ def _effect_to_atoms(state, unit: "Unit", effect, source: str,
                             mode=STATUS_TABLE[effect.stat][0], layers=effect.layers,
                             source=source, target="foe",
                             kwargs=status_kwargs(effect.stat))]
+    if effect.op == "foe_energy_cost_mod":
+        # 捉迷藏（2026-08-30）：敌方获得冻结时 → 敌方全技能能耗 +N
+        if state is None:
+            return []
+        from .models import side_of
+
+        side = side_of(state, unit)
+        foe_side = "b" if side == "a" else "a"
+        foe = state.active(foe_side)
+        if foe is None or foe.fainted:
+            return []
+        return [AddModifier(side=foe_side, unit=foe, stat="energy_cost", mode="flat",
+                            layers=effect.layers, source=source, target="foe")]
     # 资源类（energy_gain / heal_pct）：即时执行（旧 emit 同语义，不产生展示事件）
     if effect.op == "energy_gain":
         apply_energy_gain(unit, effect.value, energy_max=energy_max)

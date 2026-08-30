@@ -131,6 +131,9 @@ def build_damage_terms(state, attacker, defender, *, damage_kind: str,
     if skill_type == "地" and attacker.trait is not None \
             and attacker.trait.name == "冻土":
         mark_pct += 0.10 * sum(1 for s in attacker.skills if s.type == "冰")
+    # 冰钻特性（2026-08-30）：敌方携带技能总能耗每有 1 点，自己攻击威力 +10%
+    if attacker.trait is not None and attacker.trait.name == "冰钻":
+        mark_pct += 0.10 * sum(s.energy_cost for s in defender.skills)
     return DamageTerms(
         atk=max(1, int(atk)),
         defense=max(1, int(defense)),

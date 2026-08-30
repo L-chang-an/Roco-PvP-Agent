@@ -98,6 +98,26 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
             )),
         ),
     ),
+    # 冻结批 L2（2026-08-30）：使敌方获得冻结时附加效果——监听 STATUS_APPLIED
+    # （StatModChanged 冻结正层），source 守卫在 triggers 收集层防循环。
+    "加个雪球": TraitDef(
+        name="加个雪球",
+        bindings=(
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+        ),
+    ),
+    "捉迷藏": TraitDef(
+        name="捉迷藏",
+        bindings=(
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_energy_cost_mod", layers=1),
+            )),
+        ),
+    ),
+    # 冰钻：读钩子（敌方技能栏总能耗 → 自己攻击威力 +10%×总能耗，见 damage.build_damage_terms）
+    "冰钻": TraitDef(name="冰钻", bindings=()),
 }
 
 

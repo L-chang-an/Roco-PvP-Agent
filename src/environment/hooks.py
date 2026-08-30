@@ -30,6 +30,7 @@ class Hook(str, Enum):
     ENTER = "enter"            # 精灵入场（补位/换人/返场/开战）
     EXIT = "exit"              # 精灵离场（换人/脱离）——清非永久增益
     SKILL_RESOLVE = "skill_resolve"   # 技能结算后（一次技能恰好一次，聚合全部命中）
+    STATUS_APPLIED = "status_applied"  # 状态层数变化（获得冻结等，2026-08-30；source 守卫防循环）
     DEAL_DAMAGE = "deal_damage"
     TAKE_DAMAGE = "take_damage"
     KO = "ko"                  # 击杀
@@ -56,7 +57,15 @@ _CONDITIONS: dict[str, object] = {
     "used_grass": lambda ctx: _skill_type_is(ctx, "草"),
     "used_water": lambda ctx: _skill_type_is(ctx, "水"),
     "used_ice": lambda ctx: _skill_type_is(ctx, "冰"),
+    "freeze_applied": lambda ctx: _freeze_applied(ctx),
 }
+
+
+def _freeze_applied(ctx) -> bool:
+    """STATUS_APPLIED：敌方获得冻结层（layers > 0）。source 守卫在收集层做。"""
+    ev = getattr(ctx, "event", None)
+    return (ev is not None and getattr(ev, "stat", "") == "冻结"
+            and getattr(ev, "layers", 0) > 0)
 
 
 def _cond_matches(cond: str, ctx) -> bool:
