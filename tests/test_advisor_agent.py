@@ -67,10 +67,10 @@ def test_advisor_degrade_after_two_failures(agent_settings):
 
 
 def test_advisor_accepts_free_text(agent_settings):
-    """闲聊/自由文本不再被强制拒绝（宽松设计：问候/范围澄清可直接回复）。"""
-    llm = ScriptedLLM([AIMessage(content="你好，我可以帮你组队，也可以聊聊游戏")])
-    reply = TeamAdvisorAgent(agent_settings, llm=llm).chat("你好")
-    assert reply.reply == "你好，我可以帮你组队，也可以聊聊游戏"
+    """IN_SCOPE 消息可用 final_answer 自由文本终结（不再强制 submit_team_advice）。"""
+    llm = ScriptedLLM([AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "建议试试迪莫"}, "c1")])])
+    reply = TeamAdvisorAgent(agent_settings, llm=llm).chat("帮我组队")
+    assert reply.reply == "建议试试迪莫"
 
 
 def test_advisor_no_thinking_emitted(agent_settings):

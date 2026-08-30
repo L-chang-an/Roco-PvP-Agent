@@ -64,11 +64,11 @@ def test_serve_calls_run_ui(monkeypatch, capsys):
 
 def test_single_query_offline(monkeypatch, agent_settings, capsys):
     _patch_offline(monkeypatch, agent_settings)
-    code = _run_main(monkeypatch, ["-q", "你好"])
+    code = _run_main(monkeypatch, ["-q", "帮我组队"])
     assert code == 0
     out = capsys.readouterr().out
     assert "离线" in out
-    assert "你好" in out
+    assert "帮我组队" in out
 
 
 def test_debug_prints_thinking_and_tools(monkeypatch, agent_settings, capsys):

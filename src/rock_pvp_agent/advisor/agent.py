@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from environment.battle_config import build_battle_rules
@@ -21,9 +22,11 @@ from rock_pvp_agent.advisor.advice import submit_team_advice as _submit_team_adv
 from rock_pvp_agent.advisor.analysis import analyze_team as _analyze_team
 from rock_pvp_agent.advisor.catalog import SpiritFilter
 from rock_pvp_agent.advisor.prompt import ADVISOR_SYSTEM_PROMPT
+from rock_pvp_agent.advisor.scope import route as _route
 from rock_pvp_agent.advisor.simulate import simulate_matchups as _simulate_matchups
+from rock_pvp_agent.advisor.skills import retrieve_team_skill as _retrieve_team_skill
 from rock_pvp_agent.advisor.trajectory import query_trajectory_evidence as _query_trajectory
-from rock_pvp_agent.agent import EMPTY_REPLY, ChatAgent
+from rock_pvp_agent.agent import EMPTY_REPLY, ChatAgent, ChatReply
 from rock_pvp_agent.tools import FINAL_ANSWER_TOOL, final_answer
 
 TERMINAL_TOOL = "submit_team_advice"
@@ -110,6 +113,11 @@ def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
         return _dump(_simulate_matchups(roster, opp_rosters, seeds=seeds))
 
     @tool
+    def retrieve_team_skill(query: str) -> str:
+        """检索已激活的组队 Skill（触发关键词命中，最多 3 个，含版本/工具白名单/校验项）。"""
+        return _dump(_retrieve_team_skill(query))
+
+    @tool
     def submit_team_advice(payload: dict) -> str:
         """提交结构化组队建议（终稿，必须调用）。payload 字段：
         rules_used{team_size,lives,source}, assumptions, data_digest,
@@ -121,7 +129,7 @@ def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
     return [
         get_catalog_version, search_spirits, get_spirit_profile, get_skill_profile,
         get_build_options, validate_team, query_trajectory_evidence, analyze_team,
-        simulate_matchups, submit_team_advice, final_answer,
+        simulate_matchups, retrieve_team_skill, submit_team_advice, final_answer,
     ]
 
 
@@ -152,9 +160,19 @@ class TeamAdvisorAgent(ChatAgent):
         self._advice_failed = 0
 
     def chat(self, message, history=None, *, event_sink=None):
-        """每次对话重置「修复一次」计数。"""
+        """每次对话重置「修复一次」计数；先过 ScopeGate，越界/注入/模糊/欢迎走固定模板不进 LLM。"""
         self._advice_failed = 0
+        target, text = _route(message)
+        if target != "agent":
+            return self._scoped_reply(message, text, history, event_sink)
         return super().chat(message, history, event_sink=event_sink)
+
+    def _scoped_reply(self, message: str, text: str, history, event_sink) -> ChatReply:
+        """固定模板回复（不进 LLM）：构造 ChatReply 并发射 reply/done 事件。"""
+        history = list(history or []) + [HumanMessage(content=message), AIMessage(content=text)]
+        reply_obj = ChatReply(reply=text, history=history, offline=False, rounds=0)
+        self._emit_reply_events(event_sink, reply_obj)
+        return reply_obj
 
     def _handle_terminal(self, name: str, args: dict, call_id: str) -> tuple[str, bool]:
         """终结分流：final_answer（闲聊自由文本）与 submit_team_advice（组队，EvidenceGate 校验）。"""
