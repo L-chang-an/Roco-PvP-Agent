@@ -327,9 +327,10 @@ def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry,
         state, compile_skill(state, ctx, unit, skill, side, acted_first=acted_first), frame,
         unit=unit, trait_defs=trait_defs_for(unit),
         energy_max=state.rules.energy_max,
-        after=lambda f: [SkillResolved(unit_id=unit.id, skill=skill.name,
-                                       dealt_counter=f.dealt_counter,
-                                       skill_type=skill.type)])
+        after=lambda f, c=ctx.counters(side): [SkillResolved(unit_id=unit.id, skill=skill.name,
+                                                             dealt_counter=f.dealt_counter,
+                                                             skill_type=skill.type,
+                                                             countered=c)])
     return events
 
 

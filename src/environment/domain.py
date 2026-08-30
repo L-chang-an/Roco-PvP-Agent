@@ -60,12 +60,16 @@ class StatModChanged:
 
 @dataclass(frozen=True)
 class SkillResolved:
-    """一次技能结算完成（攻击/防御/状态三支 + 资源效果之后）。Trigger 据此触发特性。"""
+    """一次技能结算完成（攻击/防御/状态三支 + 资源效果之后）。Trigger 据此触发特性。
+
+    `countered`（2026-08-30）：本技能应对命中（防御应对攻击等，守望者特性读它）。
+    """
 
     unit_id: str
     skill: str
     dealt_counter: bool
     skill_type: str = ""   # 技能系别（Trigger 条件 used_fire/grass/water 读它；兼容测试直调无 name 场景）
+    countered: bool = False
 
 
 @dataclass(frozen=True)

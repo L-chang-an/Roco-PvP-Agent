@@ -91,8 +91,14 @@ def combo_bonus(unit) -> tuple[int, int]:
     """连击数buff：(flat 层, pct 层)。1 flat 层 = +1 连击；1 pct 层 = +10%。
 
     存放形式是 Unit.stat_mods / trait.gains 里 stat="combo" 的记录。
+    自由飘特性（2026-08-30）：自己每有 1 层萌化 → 连击数 +3（flat）。
     """
-    return buff_layers(unit, "combo", "flat"), buff_layers(unit, "combo", "pct")
+    flat = buff_layers(unit, "combo", "flat")
+    if unit.trait is not None and unit.trait.name == "自由飘":
+        from .statuses import morph_layers
+
+        flat += 3 * morph_layers(unit)
+    return flat, buff_layers(unit, "combo", "pct")
 
 
 def lifesteal_bonus(unit) -> int:

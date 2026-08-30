@@ -90,6 +90,23 @@ def _reduce_damage(state, atom: DealDamage, frame: Frame) -> list[dict]:
     if target.fainted:
         return []                     # 连击途中目标阵亡 → 剩余段跳过
     dmg = compute(_query_for(state, atom.source, target, atom), state.rules)
+    # 化茧（2026-08-30）：受到致命伤害 → 获得 1 层萌化并免疫此次伤害（最多 2 次；
+    # 只拦攻击伤害，DOT 致死不拦）
+    if (target.trait is not None and target.trait.name == "化茧"
+            and target.trait.kwargs.get("used", 0) < 2
+            and dmg >= target.current_hp):
+        target.trait.kwargs["used"] = target.trait.kwargs.get("used", 0) + 1
+        if _morph_layers(target) < _morph_max_layers(target):
+            _add_stat_layers(target, "萌化", "special", 1, "化茧", permanent=True)
+            _recalc_morph(state, target, frame)
+        return [ev(
+            "damage", atom.side,
+            attacker=atom.source.name, skill=atom.skill, target=target.name,
+            damage=0, target_hp_left=target.current_hp,
+            counter=atom.counter_cat, mult=atom.counter_mult, reduced=atom.reduction,
+            eff=atom.effectiveness, stab=atom.stab, hit=atom.hit, hits=atom.total_hits,
+            immune="化茧",
+        )]
     loss = apply_hp_loss(state, target, dmg, source=atom.skill)
     frame.total_damage += loss.applied
     if atom.effectiveness > 1.0:
@@ -141,7 +158,12 @@ def _morph_layers(unit) -> int:
 
 
 def _morph_max_layers(unit) -> int:
-    """name 沿进化链到最低阶的最大可退阶数（迪莫=0、魔力猫=2、叶冕魔力猫=3）。"""
+    """name 沿进化链到最低阶的最大可退阶数（迪莫=0、魔力猫=2、叶冕魔力猫=3）。
+
+    「无忧无虑」（2026-08-30）：可获得的萌化层数不受限制 → 返回极大值（资质仍夹
+    最低阶，只影响层数计数；首领化门控「萌化>0 不可首领化」仍然生效）。"""
+    if unit.trait is not None and unit.trait.name == "无忧无虑":
+        return 10 ** 9
     from .evolution import prev_of
 
     cur, n = unit.name, 0
@@ -187,6 +209,19 @@ def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
     # 冰免疫冻结——不落层、不发事件；中毒印记走 marks 路径不受影响
     if atom.stat == "萌化" and atom.layers > 0 and _morph_layers(u) >= _morph_max_layers(u):
         return []   # 萌化（2026-08-30 拍板）：实际资质已最低阶 → 不再获得层数
+    if atom.stat == "萌化" and atom.layers > 0 and u.trait is not None \
+            and u.trait.name == "拉拉队长" and _morph_layers(u) > 0:
+        # 拉拉队长（2026-08-30）：萌化状态下再获得萌化 → 解除萌化（回升资质）
+        for m in u.stat_mods:
+            if m.stat == "萌化" and m.mode == "special":
+                m.layers = 0
+        _recalc_morph(state, u, frame)
+        total = 0
+        frame.domain_events.append(StatModChanged(
+            u.id, atom.stat, atom.mode, atom.layers, total, atom.source))
+        return [{"type": "stat_change", "side": atom.side, "unit": u.name,
+                 "skill": atom.source, "stat": atom.stat, "mode": atom.mode,
+                 "layers": atom.layers, "total_layers": 0, "counter": atom.counter_cat}]
     # DOT 持久性（2026-08-30 拍板）：中毒/灼烧/寄生/引电 = 离场清空的非永久 debuff；
     # 萌化/冻结 = 永久 debuff（离场保留，只靠技能/特性效果清除；冻结阵亡时清除）；
     # 其余 stat 用 atom.permanent（示弱/赤子之心/撒娇的永久属性层）

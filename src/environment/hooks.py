@@ -58,6 +58,8 @@ _CONDITIONS: dict[str, object] = {
     "used_water": lambda ctx: _skill_type_is(ctx, "水"),
     "used_ice": lambda ctx: _skill_type_is(ctx, "冰"),
     "used_attack": lambda ctx: _skill_kind_is(ctx, ("物攻", "魔攻")),
+    "defense_countered": lambda ctx: _skill_kind_is(ctx, ("防御",))
+    and bool(getattr(ctx, "countered", False)),
     "freeze_applied": lambda ctx: _freeze_applied(ctx),
 }
 

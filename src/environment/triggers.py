@@ -56,6 +56,9 @@ def collect_reactions(state, event, unit: "Unit" | None = None, trait_defs=None,
             atoms += _trait_atoms(state, event, ent, None, energy_max)
             if isinstance(event, UnitEntered):
                 atoms += _crystal_water_gain(state, ent, energy_max)
+                atoms += _guardian_cost(state, ent)
+            else:
+                atoms += _welcome_morph(state, event)
     if state is not None:
         from .marks import collect as collect_marks
         from .statuses import collect as collect_statuses
@@ -93,6 +96,44 @@ def _crystal_water_gain(state: "BattleState", unit: "Unit",
     return [GainEnergy(side=side, unit=unit, amount=3 * count, source="结晶水", target="self")]
 
 
+def _guardian_cost(state: "BattleState", unit: "Unit") -> list["Atom"]:
+    """守护者（2026-08-30）：己方其他精灵每有 1 层萌化，自己入场时全技能能耗 −1。"""
+    from .models import side_of
+    from .statuses import morph_layers
+
+    if unit.trait is None or unit.trait.name != "守护者":
+        return []
+    side = side_of(state, unit)
+    total = sum(morph_layers(u) for u in state.side(side).units if u is not unit)
+    if total <= 0:
+        return []
+    return [AddModifier(side=side, unit=unit, stat="energy_cost", mode="flat",
+                        layers=-total, source="守护者")]
+
+
+def _welcome_morph(state: "BattleState", event: UnitExited) -> list["Atom"]:
+    """迎宾（2026-08-30）：自己或其他精灵离场时，更换入场的精灵获得萌化。
+
+    口径：离场精灵所在阵营有存活「迎宾」持有者 → 入场精灵施 1 层萌化
+    （最低阶拦截走 AddModifier reducer 漏斗）。"""
+    from .models import side_of
+
+    exited = _unit_by_id(state, event.unit_id)
+    incoming_id = getattr(event, "incoming_id", "")
+    if exited is None or not incoming_id:
+        return []
+    side = side_of(state, exited)
+    holder = any(u.trait is not None and u.trait.name == "迎宾" and not u.fainted
+                 for u in state.side(side).units)
+    if not holder:
+        return []
+    incoming = _unit_by_id(state, incoming_id)
+    if incoming is None:
+        return []
+    return [AddModifier(side=side, unit=incoming, stat="萌化", mode="special",
+                        layers=1, source="迎宾", target="self")]
+
+
 def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> list["Atom"]:
     from .hooks import _cond_matches
 
@@ -104,7 +145,7 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
         skill_type = event.skill_type or _skill_type(unit, event.skill)
         ctx = SimpleNamespace(unit=unit, skill=SimpleNamespace(type=skill_type),
                               dealt_counter=event.dealt_counter, energy_max=energy_max,
-                              event=event)
+                              event=event, countered=getattr(event, "countered", False))
         hook_value = "skill_resolve"
     elif etype == "StatModChanged":
         ctx = SimpleNamespace(unit=unit, energy_max=energy_max, event=event)

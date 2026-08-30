@@ -65,11 +65,13 @@ def _emit_skill(u: Unit, s_type: str, *, dealt_counter: bool = False) -> None:
 def test_catalog_registers_default_and_four_traits() -> None:
     """目录 = 白板 default + 已实现特性（三系 + 迪莫）+ 吟游之弦（S4 印记路由注册，零绑定）
     + 冻结批（灵魂灼伤/加个雪球/捉迷藏/冰钻/抓到你了/大雪球/月牙雪糕/吉利丁片/
-    冰雪魂魄/结晶水，2026-08-30）。"""
+    冰雪魂魄/结晶水）+ 萌化批（无忧无虑/自由飘/守望者/拉拉队长/守护者/迎宾/化茧，
+    2026-08-30）。"""
     assert set(TRAIT_CATALOG) == {DEFAULT_TRAIT_NAME, "助燃", "氧循环", "浸润", "最好的伙伴",
                                   "吟游之弦", "灵魂灼伤", "加个雪球", "捉迷藏", "冰钻",
                                   "抓到你了", "大雪球", "月牙雪糕", "吉利丁片",
-                                  "冰雪魂魄", "结晶水"}
+                                  "冰雪魂魄", "结晶水", "无忧无虑", "自由飘", "守望者",
+                                  "拉拉队长", "守护者", "迎宾", "化茧"}
 
 
 def test_default_trait_has_no_bindings() -> None:

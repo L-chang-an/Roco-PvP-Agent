@@ -161,6 +161,21 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
     # triggers._crystal_water_gain / models.build_unit 初始能量覆写），零绑定注册名。
     "冰雪魂魄": TraitDef(name="冰雪魂魄", bindings=()),
     "结晶水": TraitDef(name="结晶水", bindings=()),
+    # 萌化批（2026-08-30）
+    "无忧无虑": TraitDef(name="无忧无虑", bindings=()),   # 层数上限豁免（reducer._morph_max_layers）
+    "自由飘": TraitDef(name="自由飘", bindings=()),       # 每层萌化连击+3（primitives.combo_bonus）
+    "守望者": TraitDef(
+        name="守望者",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="defense_countered", effects=(
+                Effect("foe_status", stat="萌化", layers=1),
+            )),
+        ),
+    ),
+    "拉拉队长": TraitDef(name="拉拉队长", bindings=()),   # 施加漏斗转化（reducer._reduce_add_modifier）
+    "守护者": TraitDef(name="守护者", bindings=()),       # 入场能耗减（triggers._guardian_cost）
+    "迎宾": TraitDef(name="迎宾", bindings=()),           # 离场施萌化（triggers._welcome_morph）
+    "化茧": TraitDef(name="化茧", bindings=()),           # 致命免伤（reducer._reduce_damage，kwargs 计数 2 次）
 }
 
 
