@@ -108,15 +108,29 @@ _ENERGY_BAND_MID = {"low": 0.15, "mid": 0.40, "high": 0.80}
 SLOW_UPDATE_INSTANCES = 20
 
 
-def _strategy_player(playbook, side: str, seed: int, *, llm: bool, settings):
-    """被优化方玩家：真实路径 = LLMPlayer 读 `[战术手册]`；离线/无 key = 确定性 PlaybookPlayer。
+def _make_memory_retriever(store):
+    """MemoryStore → 检索器 `(side, situation_key) -> list[dict]`（部署期注入与离线采纳判定共用）。"""
+    from environment.datafingerprint import data_digest
+    from rock_pvp_agent.battle.evolution.memory import MemoryQuery, two_phase_search
+
+    def retrieve(side, situation_key):
+        return two_phase_search(store, MemoryQuery(situation_key=situation_key,
+                                                   side=side, data_digest=data_digest()))
+    return retrieve
+
+
+def _strategy_player(playbook, side: str, seed: int, *, llm: bool, settings,
+                     memory_retriever=None):
+    """被优化方玩家：真实路径 = LLMPlayer 读 `[战术手册]` + 检索记忆注入 `[记忆]`；
+    离线/无 key = 确定性 PlaybookPlayer。
 
     `llm=True` 但无 API key → **降级** PlaybookPlayer（与 build_player 的降级哲学一致：
     无 key 也能跑通闭环，Gate 测量的是确定性基线而非真实 LLM——CLI 已打印警告）。
     """
     from rock_pvp_agent.battle.player import LLMPlayer, PlaybookPlayer
     if llm and getattr(settings, "has_api_key", False):
-        return LLMPlayer(side, settings=settings, seed=seed, strategy=playbook.text())
+        return LLMPlayer(side, settings=settings, seed=seed, strategy=playbook.text(),
+                         memory=memory_retriever)
     return PlaybookPlayer(side, playbook, seed=seed)
 
 
@@ -135,12 +149,14 @@ def _opponent_player(spec, side: str, seed: int, *, settings):
     raise ValueError(f"未知对手规格：{spec!r}（Playbook / style:attack / random）")
 
 
-def _score_pair(a_pb, b_spec, instances, *, seeds, team_size, lives, llm, settings) -> float:
+def _score_pair(a_pb, b_spec, instances, *, seeds, team_size, lives, llm, settings,
+                memory_retriever=None) -> float:
     """a（被优化方）对 b（对手规格）在给定实例/seed 上的配对胜率（双向对消阵容强度）。"""
     from rock_pvp_agent.battle.evolution.bench import paired_eval
 
     def make_subject(side, s):
-        return _strategy_player(a_pb, side, s, llm=llm, settings=settings)
+        return _strategy_player(a_pb, side, s, llm=llm, settings=settings,
+                                memory_retriever=memory_retriever)
 
     def make_opponent(side, s):
         return _opponent_player(b_spec, side, s, settings=settings)
@@ -162,7 +178,8 @@ _SCENARIO_OPPONENT: dict[str, str] = {
 }
 
 
-def _aggregate_report(playbook, instances, *, seeds, team_size, lives, llm, settings) -> dict:
+def _aggregate_report(playbook, instances, *, seeds, team_size, lives, llm, settings,
+                      memory_retriever=None) -> dict:
     """playbook 在实例集上的配对评测汇总：winrate + Wilson 95%CI + n_games + per-instance。
 
     对手 = 实例**场景匹配**的冻结基准（`_SCENARIO_OPPONENT`，与分数向量同口径）。
@@ -178,7 +195,8 @@ def _aggregate_report(playbook, instances, *, seeds, team_size, lives, llm, sett
         opp = _SCENARIO_OPPONENT.get(inst.scenario, "random")
 
         def make_subject(side, s):
-            return _strategy_player(playbook, side, s, llm=llm, settings=settings)
+            return _strategy_player(playbook, side, s, llm=llm, settings=settings,
+                                    memory_retriever=memory_retriever)
 
         def make_opponent(side, s):
             return _opponent_player(opp, side, s, settings=settings)
@@ -194,7 +212,8 @@ def _aggregate_report(playbook, instances, *, seeds, team_size, lives, llm, sett
             "n_games": total_games, "per_instance": per_instance}
 
 
-def _score_strategy(playbook, instances, *, seeds, team_size, lives, llm, settings) -> dict[str, float]:
+def _score_strategy(playbook, instances, *, seeds, team_size, lives, llm, settings,
+                    memory_retriever=None) -> dict[str, float]:
     """候选在 D_sel 实例集上的分数向量（per-instance 胜率；对手 = 实例场景的冻结基准对手）。
 
     §四/§八：D_sel 使用冻结的基准对手库（人工 + 极端风格）——优化器只看到分数向量，
@@ -202,7 +221,8 @@ def _score_strategy(playbook, instances, *, seeds, team_size, lives, llm, settin
     其余 → 极端风格），分数向量捕获「对不同类型对手的胜率」。
     """
     return _aggregate_report(playbook, instances, seeds=seeds, team_size=team_size,
-                             lives=lives, llm=llm, settings=settings)["per_instance"]
+                             lives=lives, llm=llm, settings=settings,
+                             memory_retriever=memory_retriever)["per_instance"]
 
 
 def _gate_candidate(pool, cand_pb, instances, mini, *, seeds, minibatch_seeds,
@@ -286,7 +306,8 @@ def _tr_minibatch(team_size: int, *, n_seeds: int, seed_base: int = 100) -> list
 
 
 def _play_rollout(slot_a, slot_b, inst, *, seed, team_size, lives, llm, settings,
-                  subject_slot: str = "a", out_dir=None, battle_id=None) -> dict:
+                  subject_slot: str = "a", out_dir=None, battle_id=None,
+                  memory_retriever=None) -> dict:
     """一局 canonical rollout（父代 vs 采样对手，固定阵容/种子）→ run_selfplay 结果。
 
     `slot_a/slot_b`：a/b 槽的玩家规格（Playbook 或 `"style:X"`）；`subject_slot` = 被优化方
@@ -299,7 +320,8 @@ def _play_rollout(slot_a, slot_b, inst, *, seed, team_size, lives, llm, settings
     for side, spec in (("a", slot_a), ("b", slot_b)):
         s = seed + (1 if side == "a" else 2)
         if side == subject_slot:
-            players[side] = _strategy_player(spec, side, s, llm=llm, settings=settings)
+            players[side] = _strategy_player(spec, side, s, llm=llm, settings=settings,
+                                             memory_retriever=memory_retriever)
         else:
             players[side] = _opponent_player(spec, side, s, settings=settings)
     return run_selfplay(seed=seed, team_size=team_size, lives=lives,
@@ -361,7 +383,7 @@ def run_steps(*, n: int, seed: int = 7, out_dir: str = "artifacts",
               rejected=None, reject_buffer_size: int = 8,
               a_version: str = "champion", b_version: str = "sampled",
               minibatch_seeds: int = 2, pool=None, meta: str = "",
-              value_fn=None) -> dict:
+              value_fn=None, memory_dir: str | None = None) -> dict:
     """R4 多步进化闭环：池 + 两级门 + 剥削者 + 回归门（§五 ①–⑩ + §九）。
 
     每 step：**①父代** = 当前 Champion → **③对手采样**（Pareto 领先实例数加权 / PFSP 兜底）
@@ -384,6 +406,9 @@ def run_steps(*, n: int, seed: int = 7, out_dir: str = "artifacts",
     from rock_pvp_agent.battle.evolution.pool import PlaybookPool
 
     settings = settings or get_settings()
+    from rock_pvp_agent.battle.evolution.memory import MemoryStore
+    store = MemoryStore(memory_dir) if memory_dir else None
+    retriever = _make_memory_retriever(store) if store else None
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if instances is None:
@@ -434,8 +459,15 @@ def run_steps(*, n: int, seed: int = 7, out_dir: str = "artifacts",
         rollout = _play_rollout(slot_a, slot_b, mini[0], seed=step_seed,
                                 team_size=team_size, lives=lives, llm=llm, settings=settings,
                                 subject_slot=subject_slot, out_dir=str(out_dir),
-                                battle_id=f"steps-{step_seed}-{i}")
+                                battle_id=f"steps-{step_seed}-{i}",
+                                memory_retriever=retriever)
         record = rollout["record"]
+
+        # 记忆采纳判定 + Q 更新（闭环：注入的记忆是否被采纳 → 反馈 Q 值，下次检索更准）
+        memory_adoption = None
+        if store is not None:
+            from rock_pvp_agent.battle.evolution.memory_inject import apply_adoption
+            memory_adoption = apply_adoption(store, record, retriever, winner=rollout["winner"])
 
         # ⑤ 信度分配 → 卡片；⑥ 双分析师（失败分析师可见 rejected buffer + Meta Playbook）；⑧ 有界编辑
         analysis = analyze_record(record, value_fn=value_fn)
@@ -460,6 +492,7 @@ def run_steps(*, n: int, seed: int = 7, out_dir: str = "artifacts",
                      "turn_count": rollout["turn_count"], "cards": len(cards),
                      "candidates": len(candidates), "champ_winrate": champ_wr,
                      "candidate_winrate": cand_wr,
+                     "memory_adoption": memory_adoption,
                      "entered": False, "promoted": False, "front_size": 0,
                      # 行内嵌报告剥 timestamp：审计落盘文件保留时间戳，行内快照保持确定性可复现
                      "reports": [{k: v for k, v in r.to_dict().items() if k != "timestamp"}
@@ -567,7 +600,7 @@ def run_epochs(*, n: int = 8, seed: int = 7, out_dir: str = "artifacts",
                reject_buffer_size: int = 8, a_version: str = "champion",
                b_version: str = "sampled", minibatch_seeds: int = 2,
                M: int = 24, team_size: int = 3, lives: int = 2,
-               pool=None, on_epoch=None) -> dict:
+               pool=None, on_epoch=None, memory_dir: str | None = None) -> dict:
     """R5 epoch 调度：每 E 步快速进化 + 慢更新（[PROTECTED] 固化/撤回/移除，同样过门禁）+
     D_test 汇报（只汇报，不回流任何优化决策）。
 
@@ -625,7 +658,8 @@ def run_epochs(*, n: int = 8, seed: int = 7, out_dir: str = "artifacts",
                              instances=instances, seeds_per_instance=seeds_per_instance,
                              llm=llm, reflect_llm=reflect_llm, pool=pool,
                              meta=meta.render(), a_version=a_version, b_version=b_version,
-                             minibatch_seeds=minibatch_seeds, value_fn=value_fn)
+                             minibatch_seeds=minibatch_seeds, value_fn=value_fn,
+                             memory_dir=memory_dir)
         for s in step_rep["steps"]:                  # Meta：编辑接受率/诊断奏效度（M4/n2）
             meta.observe_step(s)
         cur_champion = pool.champion().playbook

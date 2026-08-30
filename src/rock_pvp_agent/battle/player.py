@@ -134,6 +134,16 @@ class PlaybookPlayer:
 # ---------------------------------------------------------------------------
 
 
+def _render_memories(memories: list[dict]) -> str:
+    """检索到的 top-k 记忆 → `[记忆]` 块（注入 LLM 决策上下文，强制标注非当前局面）。"""
+    parts = ["[记忆] 历史经验，非当前局面（仅供参考）："]
+    for m in memories:
+        sit = m.get("situation_text", "") or m.get("situation_key", "")
+        exp = m.get("experience_text", "")
+        parts.append(f"- {sit}：{exp}")
+    return "\n".join(parts)
+
+
 def build_side_tools(side: str):
     """一侧玩家的工具集：唯一工具 `battle_act_{side}`（调用被**拦截**，不真正执行）。
 
@@ -166,11 +176,12 @@ class LLMPlayer:
     kind = "llm"
 
     def __init__(self, side: str, *, settings: Settings, seed: int,
-                 strategy: str = "", llm=None, max_retries: int = 3) -> None:
+                 strategy: str = "", memory=None, llm=None, max_retries: int = 3) -> None:
         self.side = side
         self._settings = settings
         self._seed = seed
         self._strategy = strategy          # R4：Playbook 文本（注入系统提示 `[战术手册]`）
+        self._memory = memory              # 记忆检索器 callable (side, situation_key) -> list[dict]（None=不注入）
         self._max_retries = max_retries
         self._act_name = f"battle_act_{side}"
         self._random = RandomPlayer(side, seed=seed)      # 兜底（独立 RNG 流，不碰引擎流）
@@ -199,6 +210,11 @@ class LLMPlayer:
         成功与兜底都记录 `_turn_log`（R2 校准信号原料）——兜底 prediction=""。
         """
         self._history.append(HumanMessage(content=render_observation(observation, legal, items)))
+        if self._memory is not None:
+            from environment.evaluate import situation_key
+            memories = self._memory(self.side, situation_key(observation))
+            if memories:
+                self._history.append(HumanMessage(content=_render_memories(memories)))
         for _attempt in range(self._max_retries + 1):
             try:
                 resp = self._llm.invoke(self._history)
