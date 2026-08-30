@@ -12,7 +12,7 @@ from environment.models import BattleRng, BattleState, SideState, SkillInstance,
 from environment.primitives import skill_energy_cost
 from environment.rules import DEFAULT_RULES
 from environment.skillbook import P1_EFFECTS, P2_EFFECTS, SkillCategory
-from environment.weather import power_multiplier, set_weather, tick
+from environment.weather import WEATHER_SOURCE, power_multiplier, set_weather, tick
 
 
 def _unit(name: str, types=("普通",)) -> Unit:
@@ -136,6 +136,17 @@ def test_blizzard_grants_freeze_layers() -> None:
         m = s.active(side).stat_mods[0]
         assert m.stat == "冻结" and m.mode == "special" and m.layers == 2
         assert m.kwargs == {"pct": 5}
+
+
+def test_weather_status_source_is_global() -> None:
+    """天气是全局的：状态施加 source 一律是「天气」（非精灵名/技能名/阵营）——
+    供 STATUS_APPLIED 类特性据此识别「非自己直接造成」并跳过（2026-08-30 修正）。"""
+    s = _state()
+    set_weather(s, "暴风雪", 8, "冬至")
+    end_turn(s)
+    for side in ("a", "b"):
+        m = s.active(side).stat_mods[0]
+        assert m.source == WEATHER_SOURCE
 
 
 def test_thunder_grants_conduct_layers() -> None:

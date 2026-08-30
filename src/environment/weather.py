@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 
 WEATHER_KINDS: tuple[str, ...] = ("雨天", "沙暴", "暴风雪", "雷鸣")
 
+# 天气是**全局**的（`BattleState.weather`，双方共享），不归属任何一方/精灵——
+# 凡天气造成的状态施加（暴风雪冻结 / 雷鸣引电），source 一律用本常量（而非精灵名/技能名），
+# 供 STATUS_APPLIED 类特性（捉迷藏/加个雪球/抓到你了）据此识别「非自己直接造成」并跳过。
+WEATHER_SOURCE = "天气"
+
 # 暴风雪/雷鸣 的 TURN_END 施加层（stat=纯负面中文名，mode=special，kwargs 携参数；
 # 层数结算逻辑由未来 DOT 系统按 mode 分派）。
 _TURN_END_LAYERS: dict[str, tuple[str, int, dict]] = {
@@ -73,5 +78,5 @@ def collect(state: "BattleState", event) -> list["Atom"]:
         if unit.fainted:
             continue
         atoms.append(AddModifier(side=side, unit=unit, stat=stat, mode="special",
-                                 layers=layers, source=kind, kwargs=dict(kwargs)))
+                                 layers=layers, source=WEATHER_SOURCE, kwargs=dict(kwargs)))
     return atoms

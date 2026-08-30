@@ -81,19 +81,23 @@ def test_condensation_energy_per_freeze_layer() -> None:
     assert u.energy == 6   # 4 − 1（技能能耗）+ 3
 
 
-# ── 霜天：施冻结 + 冻结固有副作用（每层全技能能耗 +1）──
-def test_frost_sky_applies_freeze_and_cost_hook() -> None:
+# ── 霜天：施冻结 + 施加「等于冻结层数」的能耗 debuff ──
+def test_frost_sky_applies_freeze_and_cost_debuff() -> None:
+    # 冻结本身不含能耗副作用（2026-08-30 修正）：只靠显式 energy_cost debuff
     s = _state([("抓挠", "普通", "物攻", 3, 30)], [("抓挠", "普通", "物攻", 3, 30)])
     foe = s.active("b")
     _set_freeze(foe, 2)
-    assert skill_energy_cost(s, "b", foe, 3, None) == 5   # 3 + 2 层冻结
+    assert skill_energy_cost(s, "b", foe, 3, None) == 3   # 冻结不加能耗
     _set_freeze(foe, 0)
     assert skill_energy_cost(s, "b", foe, 3, None) == 3
-    # 霜天施加 1 层 → 固有副作用自然生效
+    # 霜天施加 1 层冻结 + 能耗 debuff = 冻结层数（1）
     s2 = _state([("霜天", "冰", "状态", 1, 0)], [("抓挠", "普通", "物攻", 1, 30)])
     execute_turn(s2, Decision(skill_action(0)), Decision(recharge_action()))
-    assert freeze_layers(s2.active("b")) == 1
-    assert skill_energy_cost(s2, "b", s2.active("b"), 1, None) == 2
+    b2 = s2.active("b")
+    assert freeze_layers(b2) == 1
+    cost_mod = next((m for m in b2.stat_mods if m.stat == "energy_cost"), None)
+    assert cost_mod is not None and cost_mod.layers == 1   # 能耗 debuff = 冻结层数
+    assert skill_energy_cost(s2, "b", b2, 1, None) == 2    # base 1 + debuff 1
 
 
 # ── 冰点：基础 5 层 + 应对防御额外 5 层 ──

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from .atom import AddModifier, ApplyMark, GainEnergy, TraitGain
 from .domain import (SkillResolved, StatModChanged, UnitEntered, UnitExited)
 from .primitives import apply_energy_gain, heal_pct
+from .weather import WEATHER_SOURCE
 
 if TYPE_CHECKING:
     from .atom import Atom
@@ -160,8 +161,10 @@ def _trait_atoms(state, event, unit: "Unit", trait_defs, energy_max: int) -> lis
         return []
     atoms: list["Atom"] = []
     for tdef in trait_defs:
-        # source 守卫防循环（2026-08-30）：特性自身施加的状态不再触发自身
-        if getattr(event, "source", "") == tdef.name:
+        # source 守卫（2026-08-30）：① 特性自身施加的状态不再触发自身（防循环）；
+        # ② 天气（全局来源，非该精灵直接造成）施加的冻结/引电不触发「自己直接造成」
+        # 类特性（捉迷藏/加个雪球/抓到你了）——天气冻结 ≠ 该精灵直接造成的冻结。
+        if getattr(event, "source", "") in (tdef.name, WEATHER_SOURCE):
             continue
         for binding in tdef.bindings:
             if binding.hook != hook_value or not _cond_matches(binding.cond, ctx):

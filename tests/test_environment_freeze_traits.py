@@ -137,8 +137,24 @@ def test_hide_and_seek_cost_on_freeze() -> None:
     execute_turn(s, Decision(skill_action(0)), Decision(recharge_action()))
     cost_mod = next((m for m in b.stat_mods if m.stat == "energy_cost"), None)
     assert cost_mod is not None and cost_mod.layers == 1   # 敌方能耗 +1
-    # base 1 + 捉迷藏 1 + 冻结固有副作用 4 = 6
-    assert skill_energy_cost(s, "b", b, 1, None) == 6
+    assert cost_mod.permanent is False                     # 非永久：换人即清除（2026-08-30 修正）
+    # 冻结本身不含能耗副作用：base 1 + 捉迷藏 1 = 2（2026-08-30 修正）
+    assert skill_energy_cost(s, "b", b, 1, None) == 2
+
+
+def test_hide_and_seek_ignores_weather_freeze() -> None:
+    """天气冻结（全局来源，非精灵自己直接造成）不触发捉迷藏——捉迷藏只在精灵
+    自己直接施冻结时给敌方 +1 能耗（2026-08-30 修正）。"""
+    from environment.engine import end_turn
+    from environment.weather import set_weather
+
+    a = _unit("甲", _sk(("抓挠", "普通", "物攻", 1, 30)), trait=_trait("捉迷藏"))
+    b = _unit("乙", _sk(("抓挠", "普通", "物攻", 1, 30)))
+    s = _state(a, b)
+    set_weather(s, "暴风雪", 8, "冬至")
+    end_turn(s)
+    assert freeze_layers(b) == 2                            # 天气给双方冻结
+    assert all(m.stat != "energy_cost" for m in b.stat_mods)  # 但捉迷藏不触发 → 无能耗层
 
 
 # ── 冰钻：敌方技能栏总能耗每有 1 点，自己攻击威力 +10% ──

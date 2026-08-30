@@ -55,7 +55,7 @@
 |---|---|---|---|---|
 | 碎冰冰 | 冰/魔攻 | 造成魔伤，敌方每有1层冻结，本次技能威力+20。 | infra A：`build_damage_terms` 读敌方冻结层 → `power_term` flat +20×层 | ★ |
 | 冷凝 | 冰/物攻 | 造成物伤，敌方每有1层冻结，自己回复1能量。 | infra A 变体：compiler 读敌方冻结层 → `GainEnergy(层数)` | ★ |
-| 霜天 | 冰/状态 | 敌方获得1层冻结，且每有1层冻结获得全技能能耗+1。 | 施加(已) + infra A 变体：`skill_energy_cost` 读敌方冻结层 → 能耗 +1×层 | ★ |
+| 霜天 | 冰/状态 | 敌方获得1层冻结，且每有1层冻结获得全技能能耗+1。 | 施加冻结(已) + **显式 energy_cost debuff**（层数 = 冻结层数，2026-08-30 修正：冻结不含能耗副作用） | ★ |
 | 冰点 | 冰/状态 | 敌方获得5层冻结，应对防御：额外获得5层。 | infra B：应对成功时 `counter_extra_layers` 扩展为「施加额外冻结层」 | ★★ |
 | 冰墙 | 冰/防御 | 减伤80%，应对攻击：敌方获得2层冻结。 | infra B：`counter_mark_effects` 泛化为 `counter_status_effects`（施状态） | ★★ |
 
@@ -151,6 +151,6 @@
 |---|---|
 | **冻结力竭判定（2026-08-30 拍板）**：血量低于冻结层数×5% → 力竭阵亡（非伤害）；`Faint` 原子 + `damage.apply_faint`（current_hp 唯一写点纪律）；`statuses.collect` 监听 DamageApplied / HpChanged / StatModChanged(冻结)；严格小于才力竭；阵亡/补位由 settle_faints 兜底 | statuses.py / atom.py / reducer.py / damage.py / tests/test_environment_freeze.py |
 | **DOT 持久性（2026-08-30 拍板）**：中毒/灼烧/寄生/引电 = 离场清空的非永久 debuff；萌化/冻结 = 永久 debuff（离场保留）；**冰免疫冻结**；**阵亡清层**（非永久 + 冻结清除，永久层如萌化保留——复活特性） | statuses.py / reducer.py / engine.py / tests/test_environment_status_persistence.py |
-| **冻结批技能（2026-08-30）**：L1 碎冰冰/冷凝/霜天/冰点/冰墙（读冻结层读钩子 + 应对施状态 + 冻结固有副作用每层能耗+1）+ L2 滚雪球（应对额外+威力翻倍）+ L3 极寒领域（条件威力+冻结翻倍）；寒潮含「巧变」跳过；battle_ready 217→224 | skillbook.py / compiler.py / primitives.py / tests/test_environment_freeze_skills.py |
+| **冻结批技能（2026-08-30）**：L1 碎冰冰/冷凝/霜天/冰点/冰墙（读冻结层读钩子 + 应对施状态 + 霜天显式 energy_cost debuff——**冻结不含能耗副作用**）+ L2 滚雪球（应对额外+威力翻倍）+ L3 极寒领域（条件威力+冻结翻倍）；寒潮含「巧变」跳过；battle_ready 217→224 | skillbook.py / compiler.py / primitives.py / tests/test_environment_freeze_skills.py |
 | **冻结批特性（2026-08-30）**：L1 灵魂灼伤/冰封/冻土 + L2 加个雪球/捉迷藏/冰钻 + L3 抓到你了/大雪球/月牙雪糕/吉利丁片/冰雪魂魄/结晶水（STATUS_APPLIED 时机 + source 守卫 + ENTER/EXIT 收集 + 特性级免疫冻结 + kwargs 计数 + ice_skills_used 阵营计数） | traits.py / triggers.py / hooks.py / damage.py / primitives.py / models.py / tests/test_environment_freeze_traits.py |
 | 本排序文档（2026-08-30）：冻结技能 11（已 10，寒潮巧变跳过）、特性 12（全部落地） | 本文档 |

@@ -170,6 +170,19 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                                              source=skill.name, target=se.target,
                                              counter_cat=counter_cat,
                                              kwargs=dict(se.kwargs)))
+            if effect.freeze_cost_per_foe_layer:
+                # 霜天（2026-08-30 修正）：施冻结后，给对方施加「等于冻结层数」的能耗
+                # debuff 层——冻结本身不含能耗副作用，靠显式 energy_cost 层实现。
+                from .statuses import freeze_layers as _foe_freeze
+
+                freeze_delta = sum(se.layers for se in effect.stat_effects
+                                   if se.stat == "冻结" and se.target == "foe")
+                total = _foe_freeze(target) + freeze_delta
+                if total > 0:
+                    atoms.append(AddModifier(side=side, unit=target, stat="energy_cost",
+                                             mode="flat",
+                                             layers=total * effect.freeze_cost_per_foe_layer,
+                                             source=skill.name, target="foe"))
         elif effect.stat or effect.layers:
             # E0 教学：单条自身状态
             layers = effect.layers + (effect.counter_extra_layers if ctx.counters(side) else 0)

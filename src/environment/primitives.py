@@ -62,18 +62,18 @@ def apply_energy_cost_mod(unit, *, layers: int, permanent: bool = False,
 
 
 def skill_energy_cost(state, side: str, unit, base_cost: int, skill=None) -> int:
-    """全技能能耗实际值（2026-08-30 扩展）：base + Σ(energy_cost 层) → 冻结固有副作用
-    （每有 1 层冻结，全技能能耗 +1）→ 印记修正（湿润 −1×层全技能 / 蓄势 +1×层仅攻击）
-    → 沙暴地系减半 → 最终夹 0。
+    """全技能能耗实际值（2026-08-30 扩展）：base + Σ(energy_cost 层) → 印记修正
+    （湿润 −1×层全技能 / 蓄势 +1×层仅攻击）→ 沙暴地系减半 → 最终夹 0。
 
     唯一读取能耗修正的地方（actions 的门控 / engine 的支付都走它），保证「付得起」
     与「扣多少」永远一致。读取 stat_mods + trait.gains 两处；`state=None`（单测 /
     无印记上下文）→ 只算单位自身层数。
-    """
-    from .statuses import freeze_layers
 
+    **冻结本身不含能耗副作用**（2026-08-30 修正）：冻结的语义只是抬高血量斩杀线，
+    任何「通过冻结加能耗」都靠显式的 energy_cost debuff（捉迷藏/霜天等施加的层），
+    不在本函数里读冻结层数。
+    """
     cost = max(0, base_cost + buff_layers(unit, "energy_cost", "flat"))
-    cost = max(0, cost + freeze_layers(unit))
     if state is not None:
         # 冰封特性（2026-08-30）：敌方在场精灵带「冰封」→ 我方全技能能耗 +1
         foe_side = "b" if side == "a" else "a"
