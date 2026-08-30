@@ -27,11 +27,11 @@ from typing import TYPE_CHECKING
 
 from .atom import (
     AddModifier, ApplyMark, BenchEnergy, ConsumeMarkLayers, DealDamage,
-    FoeCostGain, GainEnergy, HealFlat, HealPct, Lifesteal, LoseEnergy, LoseHp,
-    RevealSkill, SetCooldown, SetModLayers, SetWeather, SpendEnergy,
+    Faint, FoeCostGain, GainEnergy, HealFlat, HealPct, Lifesteal, LoseEnergy,
+    LoseHp, RevealSkill, SetCooldown, SetModLayers, SetWeather, SpendEnergy,
     StealEnergy, TraitGain,
 )
-from .damage import apply_heal, apply_hp_loss
+from .damage import apply_faint, apply_heal, apply_hp_loss
 from .domain import (DamageApplied, EnergyChanged, HpChanged, MarkChanged,
                      StatModChanged, WeatherChanged)
 from .events import ev
@@ -334,6 +334,21 @@ def _reduce_consume_mark(state, atom: ConsumeMarkLayers, frame: Frame) -> list[d
                delta=-atom.amount, source=atom.source)]
 
 
+def _reduce_faint(state, atom: Faint, frame: Frame) -> list[dict]:
+    """冻结力竭（2026-08-30）：经 damage.apply_faint 置血量 0 + fainted（非伤害）。
+
+    不发 faint/life_loss 展示事件——由引擎 settle_faints 在动作结算后统一发出
+    （与常规阵亡同一路径，避免重复计数）。已阵亡 → 空（防 reaction 循环里重复力竭）。
+    """
+    u = atom.unit
+    if u.fainted:
+        return []
+    before = u.current_hp
+    apply_faint(state, u, source=atom.source)
+    frame.domain_events.append(HpChanged(u.id, before, 0, atom.source))
+    return []
+
+
 _DISPATCH: dict[type, object] = {
     SpendEnergy: _reduce_spend,
     RevealSkill: _reduce_reveal,
@@ -354,6 +369,7 @@ _DISPATCH: dict[type, object] = {
     HealFlat: _reduce_heal_flat,
     SetModLayers: _reduce_set_mod_layers,
     SetCooldown: _reduce_set_cooldown,
+    Faint: _reduce_faint,
 }
 
 

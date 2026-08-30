@@ -249,9 +249,23 @@ class TraitGain:
     permanent: bool = False
 
 
+@dataclass(frozen=True)
+class Faint:
+    """冻结力竭（2026-08-30）：血量低于冻结层数×5% → 直接力竭阵亡。
+
+    由 statuses.collect 在血量/冻结层数变化时产出；**非伤害**（不走 apply_hp_loss、
+    不触发受击类效果），reducer 经 damage.apply_faint 力竭（血量归零），后续阵亡/
+    补位由引擎 settle_faints 兜底（与常规阵亡同一路径）。
+    """
+
+    side: str
+    unit: "Unit"
+    source: str
+
+
 Atom: TypeAlias = (
     SpendEnergy | RevealSkill | DealDamage | HealPct | AddModifier
     | GainEnergy | BenchEnergy | Lifesteal | StealEnergy | FoeCostGain | TraitGain
     | ApplyMark | SetWeather | LoseHp | LoseEnergy | ConsumeMarkLayers
-    | HealFlat | SetModLayers | SetCooldown
+    | HealFlat | SetModLayers | SetCooldown | Faint
 )

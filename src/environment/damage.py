@@ -189,6 +189,18 @@ def apply_hp_loss(state, target, amount: int, *, source: str) -> HpLoss:
     return HpLoss(requested=amount, applied=applied, fainted=fainted)
 
 
+def apply_faint(state, target, *, source: str) -> HpLoss:
+    """冻结力竭（非伤害）：置 current_hp=0 + fainted=True。
+
+    与 apply_hp_loss 同址（`current_hp` 唯一写点纪律）：力竭是「状态判定」而非
+    「伤害」，不触发受击类效果，但同样集中于此——reducer 绝不直接改 current_hp。
+    """
+    applied = target.current_hp
+    target.current_hp = 0
+    target.fainted = True
+    return HpLoss(requested=applied, applied=applied, fainted=True)
+
+
 def apply_heal(state, target, amount: int, *, source: str) -> HealResult:
     """唯一回复入口。amount 夹到 [0, max_hp − current_hp]；`overflow` 记录被夹掉的量
     （将来「若敌方本回合回复生命，改为失去 2 倍含溢出量」这类效果要读夹取前的值）。

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .atom import HealFlat, LoseHp, SetModLayers
+from .atom import Faint, HealFlat, LoseHp, SetModLayers
 
 if TYPE_CHECKING:
     from .atom import Atom
@@ -73,12 +73,41 @@ def _unit_by_id(state: "BattleState", unit_id: str) -> "Unit" | None:
     return None
 
 
+def _freeze_layers(unit: "Unit") -> int:
+    """冻结层数（mode="special" 记录；0 = 无冻结）。"""
+    for m in unit.stat_mods:
+        if m.stat == "冻结" and m.mode == "special":
+            return m.layers
+    return 0
+
+
+def _freeze_faint_atom(state: "BattleState", unit: "Unit") -> "Atom | None":
+    """冻结力竭判定（2026-08-30 拍板）：血量低于冻结层数×5% → 力竭阵亡。
+
+    非伤害（Faint 原子），触发于**血量变化**（受击/DOT/印记）与**冻结层数变化**
+    （施加/增加）。阈值用整数交叉相乘比较，避免 floor 除法 off-by-one。
+    """
+    if unit.fainted:
+        return None
+    layers = _freeze_layers(unit)
+    if layers <= 0:
+        return None
+    pct = int(STATUS_TABLE["冻结"][1].get("pct", 5))
+    if unit.current_hp * 100 < unit.max_hp * layers * pct:
+        from .models import side_of
+
+        return Faint(side=side_of(state, unit), unit=unit, source="冻结")
+    return None
+
+
 def collect(state: "BattleState", event) -> list["Atom"]:
     """事件 → DOT 结算原子。纯收集器（不改状态），triggers.collect_reactions 调用。
 
     - TurnEnded：双方在场（阵亡跳过）的 mode="dot" 记录，按 中毒→灼烧→寄生 固定序；
     - StatModChanged：引电达 at(2) 层 → 立即 25% 电伤 + 扣 2 层（余层保留；
-      链式触发由 pipeline fixpoint 自然终止）。
+      链式触发由 pipeline fixpoint 自然终止）；
+    - 冻结力竭（2026-08-30）：DamageApplied / HpChanged / StatModChanged(冻结) →
+      血量低于冻结层数×5% → Faint 原子。
     """
     if state is None:
         return []
@@ -106,6 +135,15 @@ def collect(state: "BattleState", event) -> list["Atom"]:
                     atoms.append(HealFlat(side=foe_side, unit=state.active(foe_side),
                                           amount=amount, source="寄生"))
         return atoms
+    if etype == "DamageApplied" or etype == "HpChanged":
+        uid = event.target_id if etype == "DamageApplied" else event.unit_id
+        unit = _unit_by_id(state, uid)
+        atom = _freeze_faint_atom(state, unit) if unit is not None else None
+        return [atom] if atom is not None else []
+    if etype == "StatModChanged" and event.stat == "冻结":
+        unit = _unit_by_id(state, event.unit_id)
+        atom = _freeze_faint_atom(state, unit) if unit is not None else None
+        return [atom] if atom is not None else []
     if etype == "StatModChanged" and event.stat == "引电":
         at = int(STATUS_TABLE["引电"][1].get("at", 2))
         if event.total_layers < at:
