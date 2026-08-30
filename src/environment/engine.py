@@ -389,11 +389,14 @@ def timeout_winner(state) -> tuple[str, str]:
 
 
 def _tick_cooldowns(state) -> None:
-    """防御冷却递减（2026-08-30 拍板）：**仅双方在场精灵** cd>0 逐项 −1。
+    """防御冷却递减（2026-08-30 修订）：冷却衰减只看精灵是否**完整经历「冷却回合」
+    的两个节点**——「冷却回合开始」节点（释放防御后的下一回合开始时在场）+「冷却
+    回合结束」节点（经历回合结束 / 换下离场 / 阵亡等边界），**无需完整在场持续一回合**。
 
-    在 `resolve_turn` 入口调用（先于本回合换人动作执行）——「在场」判定 = 本回合
-    开始时在场：被禁回合换下者已在入口递减（规则 1）；释放当回合即离场者不递减
-    （规则 2）。阵亡单位冷却无意义，递减无害、保持确定性。
+    实现上在 `resolve_turn` 入口对**当前在场精灵**逐项 −1：入口即「冷却回合开始」
+    节点——被禁回合开始时在场者在此递减，之后即使本回合换下/阵亡也已解禁；
+    释放防御的当回合即离场者，下一回合开始时不在场 → 不递减（未经历「开始」节点，
+    即使之后阵亡补位上场也只经历了「结束」节点，**仍不递减**）。
     """
     for s in SIDES:
         unit = state.active(s)
@@ -405,15 +408,14 @@ def apply_replacement(state, side: str, bench_idx: int) -> list[dict]:
     """应用玩家选择的补位：active = bench_idx，发 replace 事件。阵亡单位已死，无需清层。
 
     入场领域事件 UnitEntered(from_faint=True)——暗涌印记「持有者阵亡离场后、补位入场
-    者承接收减益」的落点（见 marks.collect）。防御冷却规则 3（2026-08-30 拍板）：
-    补位入场精灵若有冷却 → **立即减 1**（补位即经历完整回合边界）。"""
+    者承接收减益」的落点（见 marks.collect）。**补位不递减冷却**：补位入场者只经历了
+    「冷却回合结束」节点，未经历「开始」节点 → 不满足「两个节点」衰减条件（见
+    `_tick_cooldowns`），冷却保持原值。"""
     side_state = state.side(side)
     old = side_state.active_unit
     side_state.active = bench_idx
     events = [ev("replace", side, out=old.name, **{"in": side_state.active_unit.name})]
     incoming = side_state.active_unit
-    incoming.current_skills = [replace(sk, cooldown=sk.cooldown - 1)
-                               if sk.cooldown > 0 else sk for sk in incoming.current_skills]
     enter_ev = UnitEntered(unit_id=incoming.id, from_faint=True)
     re_events, _ = run(state, [], Frame(), unit=None, after=lambda f, e=enter_ev: [e])
     return events + re_events
@@ -483,9 +485,10 @@ def resolve_turn(state, dec_a: Decision, dec_b: Decision) -> tuple[list[dict], s
                                            "b": predictions_for(state, "b")})])
     events += start_events
 
-    # 0.45) 防御冷却递减（2026-08-30 拍板）：仅在场精灵——入口递减先于本回合换人
-    # 动作执行（规则 1/2 的分野），被禁回合已由提交门控拦住；**必须在开场兜底之前**
-    # （兜底提前返回时本回合已消耗，冷却不可因此多冻一回合）。
+    # 0.45) 防御冷却递减（2026-08-30 修订）：入口 =「冷却回合开始」节点——仅在场精灵
+    # 递减，先于本回合换人动作执行；被禁回合开始时在场者在此解禁（之后换下也仍解禁），
+    # 释放当回合即离场者下一回合开始不在场 → 不递减（未经历「开始」节点）。**必须在
+    # 开场兜底之前**（兜底提前返回时本回合已消耗，冷却不可因此多冻一回合）。
     _tick_cooldowns(state)
 
     # 0.5) 开场兜底（印记/天气批 2026-08-30）：TURN_END 效果（中毒印记等）可能在

@@ -116,7 +116,7 @@ pipeline 把新 Atom 交回 reducer 执行 → 新事件继续反应，直至静
 | 印记（mark） | `marks.py` 目录 + `collect_reactions` 多源收集（特性→印记→天气）；三槽规则见 primitives.apply_mark | ✅ 已接线（2026-08-30，14 印记全结算） |
 | 天气（weather） | `weather.py` 目录 + `damage.formula` weather 项（雨天 ×1.75）+ `skill_energy_cost`（沙暴减半）+ TURN_END（暴风雪/雷鸣） | ✅ 已接线（2026-08-30，4 天气全结算） |
 | 纯负面 buff（DOT） | `statuses.py` 目录 + TurnEnded/StatModChanged 收集——中毒/灼烧/寄生（TURN_END 固定序）+ 引电（达 2 层即时）；属性免疫（火/草/毒）在施加层拦截；灼烧（火）/中毒（毒）/引电（电）吃克制、寄生真实伤害；**冻结力竭已接线（血量低于层数×5% 力竭，2026-08-30）** | ✅ 已接线（2026-08-30）；萌化结算下批 |
-| 防御冷却 | `SetCooldown` 原子（compiler DEFENSE 分支）+ 门控（skill_block_reason）+ 回合入口仅在场递减 + 补位立即 −1 | ✅ 已接线（2026-08-30 拍板） |
+| 防御冷却 | `SetCooldown` 原子（compiler DEFENSE 分支）+ 门控（skill_block_reason）+ 冷却衰减只看「完整经历两个节点」（开始 + 结束，**缺一不可**，无需完整战场）→ 入口递减（开始节点），补位不递减 | ✅ 已接线（2026-08-30 修订） |
 | 回合开始预估特性 | TurnStarted 事件携带双侧 `predictions`（预估威力/预估伤害） | ✅ 已发事件，等绑定 |
 | 阵亡补位语义 | session 层（回合边界被动补位，见 battle_docs §9） | ⬜ 设计稿，未实施（TURN_END 阵亡由 resolve_turn 开场兜底复用现有补位流） |
 
@@ -137,5 +137,5 @@ pipeline 把新 Atom 交回 reducer 执行 → 新事件继续反应，直至静
 | **印记/天气技能入口（2026-08-30）**：4 个编译模式 + MW_EFFECTS 白名单 24 条（battle_ready 扩为 P1∪P2∪MW → 203）；valid_skills.json 重新生成；吟游之弦 exclusive 路由 | skillbook.py / compiler.py / models.py / scripts/build_valid_skills.py |
 | **DOT 结算（2026-08-30）**：statuses.py 目录（STATUS_TABLE 单一事实源）+ 属性免疫（火/草/毒，施加拦截）+ 伤害克制（灼烧火/中毒毒/引电电吃克制、寄生真实伤害吸血）+ 灼烧减半向下取整归零移除 + 引电即时结算扣 2 留余 + TURN_END 序 DOT→印记→天气；HealFlat/SetModLayers 新原子、LoseHp.skill_type 扩展 | statuses.py / atom.py / reducer.py / triggers.py / engine.py |
 | **DOT 技能入口（2026-08-30）**：A 类施加 4 模式 + ST_EFFECTS 白名单 14 条（battle_ready = P1∪P2∪MW∪ST = 217）；ATTACK 分支逐击 stat_effects 发射；valid_skills.json 重新生成 | skillbook.py / compiler.py / models.py / scripts/build_valid_skills.py |
-| **防御技能冷却（2026-08-30 拍板）**：使用防御技能 → 全防御技 cd=1；门控（skill_block_reason 第三道门）+ 回合结算入口仅在场递减（规则 1/2 分野）+ 阵亡补位立即 −1（规则 3）；cooldown 展示事件登记；SkillInstance frozen 字段写入一律 replace 重建 | atom.py / reducer.py / compiler.py / actions.py / engine.py / events.py |
+| **防御技能冷却（2026-08-30 修订）**：使用防御技能 → 全防御技 cd=1；门控（skill_block_reason 第三道门）；**冷却衰减只看精灵是否完整经历「冷却回合」的两个节点**——「冷却回合开始」节点（释放防御后的下一回合开始时在场）+「冷却回合结束」节点（经历回合结束 / 换下 / 阵亡等边界），**两个节点缺一不可**、**无需完整在场持续一回合**；实现 = 入口递减（开始节点触发，开始在场者必经历结束），**补位不递减**（补位只经历「结束」节点，未经历「开始」节点）；cooldown 展示事件登记；SkillInstance frozen 字段写入一律 replace 重建 | atom.py / reducer.py / compiler.py / actions.py / engine.py / events.py |
 | **冻结力竭判定（2026-08-30 拍板）**：血量低于冻结层数×5% → 力竭阵亡（非伤害）；`Faint` 原子 + `damage.apply_faint`（current_hp 唯一写点纪律）；`statuses.collect` 监听 DamageApplied / HpChanged / StatModChanged(冻结)；严格小于才力竭；阵亡/补位由 settle_faints 兜底；冻结技能/特性施工排序见 `freeze-impl-plan.md` | atom.py / reducer.py / damage.py / statuses.py / tests/test_environment_freeze.py |
