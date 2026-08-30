@@ -25,6 +25,7 @@ FULL_SKILLS_FILE = DATA_DIR / "full_skills.json"
 FULL_SPIRITS_FILE = DATA_DIR / "full_spirits.json"
 VALID_SKILLS_FILE = DATA_DIR / "valid_skills.json"   # E3：已实装效果的技能子集
 FAMILIES_FILE = DATA_DIR / "families.json"   # 家族详情（scripts/build_families.py 生成）
+EVOLUTION_CHAINS_FILE = DATA_DIR / "evolution_chains.json"   # 进化链（scripts/build_evolution_chains.py 生成）
 
 # 中文六维 → 英文 key。顺序即稳定输出顺序（hp, atk, sp_atk, def, sp_def, speed）。
 STAT_KEY_MAP: dict[str, str] = {
@@ -218,6 +219,41 @@ def derive_families(records: list[dict]) -> dict[str, dict]:
         key: {"lowest": sorted(set(v["lowest"])), "members": sorted(set(v["members"]))}
         for key, v in sorted(groups.items())
     }
+
+
+def derive_evolution_chains(records: list[dict]) -> dict:
+    """从原始精灵记录派生进化链（去重后的全部链）。
+
+    **evolution_chains.json 的生成逻辑**，也是它的一致性测试的比对基准——运行时不再
+    推导，只读 `evolution_chains.json`。返回：
+        {"chains": [{"id": "evo-NNN", "path": [低→高形态名...], "boss": 首领名 | None}]}
+    - path = evolution 每条链（低 → 高，名字含地区形态后缀）；
+    - boss = 链最高阶若是 isBoss 记之，否则 None——**首领化只由 boss 的上一阶触发**
+      （2026-08-30 拍板：一阶进化，多分支只有迪莫/魔力猫，其余与地区形态一一对应）；
+    - 链 id 按 path 排序后递增——与记录顺序无关，数据文件重排不漂移。
+    """
+    is_boss_by_name = {r["name"]: bool(r.get("isBoss")) for r in records}
+    paths: set[tuple[str, ...]] = set()
+    for r in records:
+        for chain in r.get("evolution") or []:
+            if chain:
+                paths.add(tuple(chain))
+    chains = []
+    for i, path in enumerate(sorted(paths), 1):
+        end = path[-1]
+        chains.append({
+            "id": f"evo-{i:03d}",
+            "path": list(path),
+            "boss": end if is_boss_by_name.get(end) else None,
+        })
+    return {"chains": chains}
+
+
+@lru_cache(maxsize=4)
+def load_evolution_chains(source: DataSource = DEFAULT_SOURCE) -> tuple[dict, ...]:
+    """进化链列表（`(path, boss)` 元组字典）。FULL/VALID：从 evolution_chains.json 直接查。"""
+    doc = json.loads(EVOLUTION_CHAINS_FILE.read_text(encoding="utf-8"))
+    return tuple(doc["chains"])
 
 
 @lru_cache(maxsize=4)
