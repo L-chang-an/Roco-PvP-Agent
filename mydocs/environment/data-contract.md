@@ -106,6 +106,38 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | `stat_mods` | list[StatModifier] | **状态栏·全部 buff 合一**（属性 / 能耗 / 连击 / 吸血 / 威力 / DOT / 纯负面，§2.5） |
 | `trait` | TraitState \| null | **特性栏**（name + desc + kwargs + gains；未实现 → 白板 `default`，§2.6） |
 
+### 2.3.1 萌化与首领化（2026-08-30，进化链数据协议）
+
+**进化链数据**：`data/evolution_chains.json`（`scripts/build_evolution_chains.py` 从
+full_spirits.json 的 evolution 字段去重生成，245 条链）：
+
+```json
+{ "chains": [ { "id": "evo-001", "path": ["喵喵", "喵呜", "魔力猫", "叶冕魔力猫"],
+                "boss": "叶冕魔力猫" } ] }
+```
+
+- `path` = 低→高的**线性链**（名字含地区形态后缀，分支 = 多条链共享低阶前缀）；
+- `boss` = 链最高阶若是 isBoss 记之，否则 null（61 条带首领）；
+- 运行时索引见 `evolution.py`（`prev_of` / `boss_targets_of` / `is_lowest` / `base_stats_of`）；
+- **退化方向唯一** = 数据不变量（多链共享低阶前缀、末端才分叉），索引构建时断言。
+
+**萌化**（`stat_mods` 里 `stat="萌化", mode="special"`，层数 x = 退 x 阶）：
+
+- 种族值资质沿链往低退 x 阶（`base_stats` 保持当前形态原始值，有效资质按层数推导）；
+  `stats` 重算 `calc_combat_stats`；**名字/特性/技能不变**；
+- 实际资质已最低阶 → 施加拦截（不落层）；解除 x 层 → 沿链回升；
+- max_hp/current_hp 同比例缩放取整（下限 1，走 `damage.apply_max_hp_change` 漏斗）。
+
+**首领化**（道具「首领进化」，2026-08-30 拍板）：
+
+- **一阶进化**：只有 boss 的上一阶可触发（57 个精灵 = 首领血脉）；多分支只有
+  迪莫（4）/魔力猫（2），其余单分支与地区形态一一对应（分支经 `Decision.item_arg` 选择）；
+- **萌化层数 > 0 → 不可首领化**（资质已退化，不再是 boss 上一阶）；
+- 原地进化：替换 `name/types/base_stats/stats/trait`（**unit_id 不变**、技能保留、
+  stat_mods 保留、能量保留、HP 同比例缩放）；发 `UnitEntered(from_boss=True)` 入场触发；
+- 首领化后路线唯一：首领形态不可再首领化、单链退化唯一（无需锁定链字段）；
+- 道具**不默认携带**（`DEFAULT_ITEMS = ("草魔法",)`，对局配置显式指定）。
+
 ### 2.4 SkillInstance（技能详情：五要素 + 冷却）
 
 | 字段 | 类型 | 意义 |
@@ -193,9 +225,10 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 |---|---|---|
 | `action` | `{type, value}` | 主动作：`skill` / `switch` / `recharge`（value = 槽位下标，skill/switch 用） |
 | `item` | str | 道具名；`""` = 本回合不用（道具不占主动作，同回合生效） |
+| `item_arg` | str | 道具参数（2026-08-30）：首领进化多分支（迪莫 4 / 魔力猫 2）时的分支精灵名；单分支可空（自动取唯一分支） |
 
 ```json
-{ "action": { "type": "skill", "value": 0 }, "item": "" }
+{ "action": { "type": "skill", "value": 0 }, "item": "首领进化", "item_arg": "武斗酷猫" }
 ```
 
 > 阵亡后的**被动补位**（回合边界）也是决策：重放轨迹里单独成键 `replace_a / replace_b`（见轨迹记录 v3）。
@@ -283,5 +316,8 @@ SideState ──► lives / active / item_uses / revealed / marks（印记槽）
 | **DOT 结算（2026-08-30 拍板）**：六状态层施加与结算（statuses.py 单一事实源）；属性免疫（火免疫灼烧/草免疫寄生/毒免疫中毒，施加层拦截，**中毒印记不受影响**）；灼烧（火）/中毒（毒）/引电（电）伤害吃属性克制、寄生真实伤害吸血；灼烧减半向下取整归零移除；引电达 2 层即时 25% 扣 2 留余 | statuses.py / reducer.py |
 | **DOT 技能入口（2026-08-30）**：ST_EFFECTS 白名单 14 条（P1∪P2∪MW∪ST = 217）；valid_skills.json 重新生成 | skillbook.py / scripts/ |
 | **冻结力竭判定（2026-08-30 拍板）**：血量低于冻结层数×5% → 力竭阵亡（非伤害）；`Faint` 原子 + `damage.apply_faint`（current_hp 唯一写点纪律）；statuses.collect 监听 DamageApplied / HpChanged / StatModChanged(冻结)；严格小于才力竭 | statuses.py / atom.py / reducer.py / damage.py |
+| **进化链数据（2026-08-30）**：`derive_evolution_chains`（245 条链 {id, path, boss}）+ build 脚本 + evolution.py 索引（prev_of / boss_targets_of / is_lowest / base_stats_of）；修正数据笔误「黑化加尔（黑化的样子）」→「黑化加尔」 | dataset.py / evolution.py / scripts/build_evolution_chains.py |
+| **萌化结算（2026-08-30 拍板）**：层数 = 退阶数；实际资质已最低阶 → 施加拦截；退化/解除回升重算 calc_combat_stats；特性/名字/技能不变；HP 同比例缩放走 `damage.apply_max_hp_change` 新漏斗 | reducer.py / damage.py / statuses.py |
+| **首领化道具（2026-08-30 拍板）**：一阶进化（仅 boss 上一阶可触发，多分支迪莫 4/魔力猫 2）；萌化层数>0 不可首领化；`Decision.item_arg` 选分支；原地替换（unit_id 不变、技能/stat_mods 保留、HP 同比例缩放）；`UnitEntered(from_boss=True)` 入场触发；道具不默认携带 | engine.py / actions.py / domain.py / events.py / rules.py / replay.py |
 
 **待负责人确认**：① roster spec 是否携带 `base_stats` 由数据源版本锁定（`data_digest` 属轨迹层，不在本文件）。
