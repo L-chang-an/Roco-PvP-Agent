@@ -82,6 +82,53 @@ class FakeLLMPlayer:
         return self._last_reply
 
 
+def policy_seed(playbook, seed: int) -> int:
+    """Playbook → 确定性策略种子：手册全文 SHA-256（**不用内置 hash**——PYTHONHASHSEED
+    随机化会让同文本两次进程产出不同种子，破坏确定性）。不同手册 = 不同策略。"""
+    import hashlib
+    digest = hashlib.sha256(playbook.text().encode("utf-8")).digest()
+    return (int(seed) & 0xFFFFFFFF) ^ (int.from_bytes(digest[:8], "big") & 0xFFFFFFFF)
+
+
+class PlaybookPlayer:
+    """确定性「读手册」对战玩家（R4 离线路径）。
+
+    真实路径：`LLMPlayer(strategy=playbook.text())` 让 LLM 读 `[战术手册]`；
+    离线路径（无 key / 测试 / CLI 冒烟）用本类把手册文本 hash 成策略种子——
+    同 seed 同手册两次逐位相同（确定性）、不同手册策略不同（Pareto 池/门禁在确定性
+    玩家上也能产生可复现的分数向量差异，让 R4 闭环离线可验）。
+
+    实现：委托 `RandomPlayer`（自带独立 RNG 流，不碰引擎流），策略种子 = 手册指纹。
+    """
+
+    kind = "playbook"
+
+    def __init__(self, side: str, playbook, *, seed: int) -> None:
+        self.side = side
+        self.playbook = playbook
+        self._seed = seed
+        self.kind = f"playbook:{playbook.version}"
+        self._random = RandomPlayer(side, seed=policy_seed(playbook, seed))
+
+    def on_match_start(self, observation: dict) -> None:
+        """开局回调：策略已固定。输入：观测；输出：无。"""
+
+    def decide(self, observation: dict, legal: list[dict], items: list[str]) -> Decision:
+        """按手册指纹策略选一个合法主动作（委托 RandomPlayer 的确定性流）。"""
+        return self._random.decide(observation, legal, items)
+
+    def choose_replacement(self, observation: dict, bench: list[int]) -> int:
+        """按手册指纹策略选补位（同上）。"""
+        return self._random.choose_replacement(observation, bench)
+
+    def on_turn_result(self, observation: dict, events: list[dict]) -> None:
+        """回合结束回调：无动作。输入：观测 + 事件流；输出：无。"""
+
+    @property
+    def last_reply(self) -> str:
+        return f"（playbook {self.playbook.version}）按手册策略行动"
+
+
 # ---------------------------------------------------------------------------
 # E6.5：真实 LLM 对战玩家
 # ---------------------------------------------------------------------------
@@ -119,10 +166,11 @@ class LLMPlayer:
     kind = "llm"
 
     def __init__(self, side: str, *, settings: Settings, seed: int,
-                 llm=None, max_retries: int = 3) -> None:
+                 strategy: str = "", llm=None, max_retries: int = 3) -> None:
         self.side = side
         self._settings = settings
         self._seed = seed
+        self._strategy = strategy          # R4：Playbook 文本（注入系统提示 `[战术手册]`）
         self._max_retries = max_retries
         self._act_name = f"battle_act_{side}"
         self._random = RandomPlayer(side, seed=seed)      # 兜底（独立 RNG 流，不碰引擎流）
@@ -133,8 +181,16 @@ class LLMPlayer:
 
     # ── Player Protocol ──
     def on_match_start(self, observation: dict) -> None:
-        """开局：重置私有 history 与 _turn_log（R2 校准信号——防止同一实例跨局累积）。"""
-        self._history = [SystemMessage(content=BATTLE_PLAYER_SYSTEM_PROMPT)]
+        """开局：重置私有 history 与 _turn_log（R2 校准信号——防止同一实例跨局累积）。
+
+        R4：`strategy`（战术手册文本）以 `[战术手册]` 块追加进系统提示——SkillOpt
+        的 skill-as-trainable-state：手册是训练目标，LLM 是执行器。无 strategy 时
+        行为与 R3 完全一致（向后兼容）。
+        """
+        prompt = BATTLE_PLAYER_SYSTEM_PROMPT
+        if self._strategy:
+            prompt += "\n\n[战术手册]\n" + self._strategy
+        self._history = [SystemMessage(content=prompt)]
         self._turn_log = []
 
     def decide(self, observation: dict, legal: list[dict], items: list[str]) -> Decision:

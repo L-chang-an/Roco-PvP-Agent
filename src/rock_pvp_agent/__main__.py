@@ -67,6 +67,16 @@ def main() -> int:
     eps.add_argument("--b", choices=("fake_llm", "random", "llm"), default="random", help="b 方玩家")
     eps.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
     eps.set_defaults(func=_run_evolve_step_cli)
+    epst = epsub.add_parser("steps", help="R4 多步进化：池 + 两级门 + 剥削者 + 回归门")
+    epst.add_argument("--n", type=int, default=4, help="step 数（默认 4）")
+    epst.add_argument("--seed", type=int, default=7, help="seed（默认 7）")
+    epst.add_argument("--out", type=str, default="artifacts", help="产物目录（默认 artifacts/）")
+    epst.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
+    epst.add_argument("--llm", action="store_true", help="真实 LLM 玩家（无 key 自动降级 PlaybookPlayer）")
+    epst.add_argument("--team-size", type=int, default=3, help="每方精灵数")
+    epst.add_argument("--lives", type=int, default=2, help="每方命数")
+    epst.add_argument("--health", action="store_true", help="打印健康度看板")
+    epst.set_defaults(func=_run_evolve_steps_cli)
 
     args = parser.parse_args()
 
@@ -228,6 +238,31 @@ def _run_evolve_step_cli(args) -> int:
     for r in out["reports"]:
         console.print(f"  [{r['status']}] {r.get('module_key')} {r.get('op')}  {r.get('reason')}")
     console.print(f"report → {out['report_path']}")
+    return 0
+
+
+def _run_evolve_steps_cli(args) -> int:
+    """evolve steps：R4 多步进化闭环（池 + 两级门 + 剥削者 + 回归门）。"""
+    from .battle.evolution.run import run_steps
+
+    out = run_steps(n=args.n, seed=args.seed, out_dir=args.out, M=args.m,
+                    llm=args.llm, team_size=args.team_size, lives=args.lives)
+    console.print(f"[bold]evolve steps[/bold] n={args.n} seed={args.seed}")
+    for s in out["steps"]:
+        console.print(f"  step#{s['step']} champion={s['champion']} opp={s['opponent']} "
+                      f"gate={s.get('gate')} entered={s.get('entered')} "
+                      f"promoted={s.get('promoted')} exploit={s.get('exploitability')}")
+        if args.health:
+            h = s.get("health", {})
+            console.print(f"    health: front_width={h.get('front_width')} "
+                          f"payoff_antisym={h.get('payoff_antisym')} "
+                          f"edit_acceptance={h.get('edit_acceptance')}")
+    f = out["final"]
+    console.print(f"[bold]final[/bold] champion={f['champion']} best={f['best']} "
+                  f"front={f['front_size']} archive={f['archive_size']}")
+    console.print(f"entered={f['entered']} promoted={f['promoted']} "
+                  f"cheap_rejected={f['cheap_rejected']} full_rejected={f['full_rejected']}")
+    console.print(f"pool → {out['pool_path']}")
     return 0
 
 
