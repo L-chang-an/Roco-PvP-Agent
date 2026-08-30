@@ -188,10 +188,11 @@ def _reduce_add_modifier(state, atom: AddModifier, frame: Frame) -> list[dict]:
     if atom.stat == "萌化" and atom.layers > 0 and _morph_layers(u) >= _morph_max_layers(u):
         return []   # 萌化（2026-08-30 拍板）：实际资质已最低阶 → 不再获得层数
     # DOT 持久性（2026-08-30 拍板）：中毒/灼烧/寄生/引电 = 离场清空的非永久 debuff；
-    # 萌化/冻结 = 永久 debuff（离场保留，只靠技能/特性效果清除；冻结阵亡时清除）
-    permanent = atom.stat in ("萌化", "冻结")
+    # 萌化/冻结 = 永久 debuff（离场保留，只靠技能/特性效果清除；冻结阵亡时清除）；
+    # 其余 stat 用 atom.permanent（示弱/赤子之心/撒娇的永久属性层）
+    permanent = atom.stat in ("萌化", "冻结") or atom.permanent
     if atom.stat == "energy_cost":
-        total = apply_energy_cost_mod(u, layers=atom.layers, permanent=False,
+        total = apply_energy_cost_mod(u, layers=atom.layers, permanent=permanent,
                                       trait=False, source=atom.source)
     else:
         total = _add_stat_layers(u, atom.stat, atom.mode, atom.layers, atom.source,

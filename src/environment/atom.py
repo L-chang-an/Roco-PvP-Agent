@@ -77,6 +77,8 @@ class AddModifier:
     """追加一条属性/连击/吸血/能耗/纯负面 增减益层（写 stat_mods；能耗走 energy_cost 层）。
 
     `kwargs` 承载扩展参数（冻结 {pct:5}、引电 {pct:25, at:2} 等），随记录进 stat_mods。
+    `permanent`（2026-08-30）：萌化/冻结恒永久（reducer 强制），其余 stat 用它
+    （示弱速度永久/赤子之心能耗永久/撒娇威力永久）。
     """
 
     side: str
@@ -88,6 +90,7 @@ class AddModifier:
     target: str = ""   # self / foe（展示用）
     counter_cat: str = ""   # 应对命中的对手类别（stat_change 事件展示）
     kwargs: dict = field(default_factory=dict)   # 扩展参数（DOT 百分比/冻结阈值/引电触发层数）
+    permanent: bool = False
 
 
 @dataclass(frozen=True)

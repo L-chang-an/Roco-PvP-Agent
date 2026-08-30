@@ -135,6 +135,18 @@ class SkillEffect:
     counter_status_effects: tuple[SkillStatEffect, ...] = ()   # 应对命中施状态（冰墙/冰点）
     freeze_power_if_frozen: int = 0         # 极寒领域：敌方有冻结 → 本次威力 +N
     freeze_double_on_counter: bool = False  # 极寒领域：应对状态 → 敌方冻结层翻倍
+    # 萌化批（2026-08-30）
+    morph_power_if_foe: int = 0             # 拆礼物：敌方有萌化 → 本次威力 +N
+    morph_apply: bool = False               # 「获得萌化：」→ 自己施萌化 +1（成功才附加）
+    morph_apply_foe: bool = False           # 甜心续航：敌方也施萌化 +1（独立判定）
+    morph_apply_bonus_power: int = 0        # 超级糖果：施萌化成功 → 本次威力 +N
+    morph_apply_bonus_speed: int = 0        # 示弱：施萌化成功 → 速度永久 +N（flat 值）
+    morph_apply_bonus_cost: int = 0         # 赤子之心：施萌化成功 → 能耗永久 +N（负 = 减）
+    morph_apply_bonus_power_perm: int = 0   # 撒娇：施萌化成功 → 威力永久 +N（attack_power flat）
+    morph_apply_bonus_heal: int = 0         # 甜心续航：施萌化成功 → 回 N% 生命
+    morph_combo_per_team_layer: int = 0     # 月光合奏：双方队伍每层萌化 → 连击 +N
+    morph_if_foe_switched: int = 0          # 转圈圈：敌方本回合换人 → 敌方获得萌化 N 层
+    morph_transfer: bool = False            # 反弹：将自己的萌化转移给敌方
 
 
 def category_of(skill) -> SkillCategory:
@@ -322,6 +334,16 @@ def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
     if m is not None:
         return _status(skill, hits=int(m.group(2)), combo_eligible=True,
                        stat_effects=tuple(_parse_stat_specs(m.group(1), "foe")))
+    # 造成(物|魔)伤，N连击。自己获得萌化：威力永久+M（撒娇，萌化批 2026-08-30）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击。自己获得萌化：威力永久\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       morph_apply=True, morph_apply_bonus_power_perm=int(m.group(2)))
+    # 造成(物|魔)伤，N连击，双方携带的所有精灵每有1层萌化，本次技能连击数+M（月光合奏）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击，双方携带的所有精灵每有1层萌化，本次技能连击数\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       morph_combo_per_team_layer=int(m.group(2)))
     return None
 
 
@@ -472,6 +494,45 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
                        freeze_power_if_frozen=int(m.group(1)),
                        freeze_double_on_counter=True)
 
+    # ── 萌化批模式（2026-08-30；蹦跶含「选择」不匹配）──
+    # 造成(物|魔)伤，若敌方有萌化，本次技能威力+N（拆礼物）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方有萌化，本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, morph_power_if_foe=int(m.group(1)))
+    # 减伤N%，应对攻击：敌方获得M层萌化（捧杀）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：敌方获得(\d+)层萌化", desc)
+    if m is not None:
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_status_effects=tuple(_status_effect("foe", "萌化", int(m.group(2))))),
+            skill)
+    # 造成(物|魔)伤，自己获得萌化：本次技能威力+N（超级糖果）
+    m = re.fullmatch(rf"造成{_DMG}，自己获得萌化：本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, morph_apply=True, morph_apply_bonus_power=int(m.group(1)))
+    # 自己获得萌化：全技能能耗永久-N（赤子之心）
+    m = re.fullmatch(r"自己获得萌化：全技能能耗永久([+-]\d+)", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_bonus_cost=int(m.group(1)))
+    # 自己获得萌化：速度永久+N（示弱）
+    m = re.fullmatch(r"自己获得萌化：速度永久\+(\d+)", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_bonus_speed=int(m.group(1)))
+    # 自己和敌方获得萌化：回复N%生命（甜心续航，双方独立判定）
+    m = re.fullmatch(r"自己和敌方获得萌化：回复(\d+)%生命", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_foe=True,
+                       morph_apply_bonus_heal=int(m.group(1)))
+    # 造成(物|魔)伤，若敌方本回合更换精灵，本次攻击使敌方获得萌化（转圈圈）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方本回合更换精灵，本次攻击使敌方获得萌化", desc)
+    if m is not None:
+        return _attack(skill, morph_if_foe_switched=1)
+    # 将自己的萌化转移给敌方（反弹）
+    m = re.fullmatch(r"将自己的萌化转移给敌方", desc)
+    if m is not None:
+        return _status(skill, morph_transfer=True)
+
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
 
@@ -552,7 +613,14 @@ def _has_status_effects(effect: SkillEffect) -> bool:
         or effect.freeze_energy_gain_per_layer > 0 \
         or effect.freeze_cost_per_foe_layer > 0 \
         or effect.freeze_power_if_frozen > 0 \
-        or effect.freeze_double_on_counter
+        or effect.freeze_double_on_counter \
+        or effect.morph_power_if_foe > 0 \
+        or effect.morph_apply or effect.morph_apply_foe \
+        or effect.morph_apply_bonus_power > 0 or effect.morph_apply_bonus_speed > 0 \
+        or effect.morph_apply_bonus_cost != 0 or effect.morph_apply_bonus_power_perm > 0 \
+        or effect.morph_apply_bonus_heal > 0 \
+        or effect.morph_combo_per_team_layer > 0 \
+        or effect.morph_if_foe_switched > 0 or effect.morph_transfer
 
 
 ST_EFFECTS: dict[str, SkillEffect] = {}

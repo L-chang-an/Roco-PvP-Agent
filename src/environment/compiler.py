@@ -29,6 +29,17 @@ if TYPE_CHECKING:
     from .models import BattleState, Skill, Unit
 
 
+def _morph_can_apply(unit: "Unit") -> bool:
+    """编译时判定：该精灵当前能否再获得萌化层（实际资质未达最低阶）。
+
+    与 reducer 施加拦截同一口径（2026-08-30 拍板：达上限 → 无附加效果）。"""
+    from .evolution import is_lowest, prev_name_of
+    from .statuses import morph_layers
+
+    cur = prev_name_of(unit.name, morph_layers(unit))
+    return not is_lowest(cur)
+
+
 def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                   skill: "Skill", side: str, acted_first: bool = False) -> list["Atom"]:
     """输入：state / TurnContext / 施法者 / 技能 / 归属方 / acted_first（本回合执行
@@ -57,10 +68,27 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
         counter_cat = ctx.category(foe).value if ctx.counters(side) else ""
         # 冻结批（2026-08-30）：敌方冻结层 → 本次威力加成（碎冰冰每层 / 极寒领域有冻结即加）
         from .statuses import freeze_layers
+        from .statuses import morph_layers as _morph_of
 
         power = skill.power + effect.freeze_power_per_layer * freeze_layers(target)
         if effect.freeze_power_if_frozen and freeze_layers(target) > 0:
             power += effect.freeze_power_if_frozen
+        # 萌化批（2026-08-30）：拆礼物（敌方有萌化 → 威力+N）；「获得萌化：」施萌化
+        # + 成功才附加（施萌化在伤害前结算）
+        if effect.morph_power_if_foe and _morph_of(target) > 0:
+            power += effect.morph_power_if_foe
+        morph_ok = False
+        if effect.morph_apply:
+            morph_ok = _morph_can_apply(unit)
+            if morph_ok:
+                atoms.append(AddModifier(side=side, unit=unit, stat="萌化", mode="special",
+                                         layers=1, source=skill.name, target="self"))
+        if morph_ok and effect.morph_apply_bonus_power:
+            power += effect.morph_apply_bonus_power
+        # 月光合奏：双方队伍每有 1 层萌化 → 连击 +N
+        if effect.morph_combo_per_team_layer:
+            total = sum(_morph_of(u) for ss in ("a", "b") for u in state.side(ss).units)
+            hits += effect.morph_combo_per_team_layer * total
         for i in range(1, hits + 1):
             atoms.append(DealDamage(
                 side=side, source=unit, target=target, skill=skill.name,
@@ -90,6 +118,19 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
             if n > 0:
                 atoms.append(SetModLayers(unit=target, stat="冻结", mode="special",
                                           layers=n * 2, source=skill.name))
+        if morph_ok and effect.morph_apply_bonus_power_perm:
+            # 撒娇（2026-08-30）：施萌化成功 → 威力永久 +N（attack_power flat 1 层 = +10）
+            atoms.append(AddModifier(side=side, unit=unit, stat="attack_power", mode="flat",
+                                     layers=effect.morph_apply_bonus_power_perm // 10,
+                                     source=skill.name, permanent=True))
+        if effect.morph_if_foe_switched:
+            # 转圈圈（2026-08-30）：敌方本回合更换精灵 → 敌方获得萌化
+            from .models import ActionType
+
+            if ctx.decision(foe).action.get("type") == ActionType.SWITCH.value:
+                atoms.append(AddModifier(side=side, unit=target, stat="萌化", mode="special",
+                                         layers=effect.morph_if_foe_switched,
+                                         source=skill.name, target="foe"))
         if effect.freeze_energy_gain_per_layer:
             # 冻结批：敌方每层冻结 → 自己回 N 能量（冷凝）
             n = freeze_layers(target)
@@ -167,6 +208,41 @@ def compile_skill(state: "BattleState", ctx: "TurnContext", unit: "Unit",
                 atoms.append(AddModifier(side=side, unit=tgt, stat=se.stat, mode=se.mode,
                                          layers=se.layers, source=skill.name, target=se.target,
                                          counter_cat=counter_cat, kwargs=dict(se.kwargs)))
+        # 萌化批（2026-08-30）：「获得萌化：」施萌化 + 成功才附加（示弱/赤子之心/甜心续航）；
+        # 反弹（转移：移除自己萌化 → 敌方施同层）
+        from .statuses import morph_layers as _morph_of
+
+        morph_ok = False
+        if effect.morph_apply:
+            morph_ok = _morph_can_apply(unit)
+            if morph_ok:
+                atoms.append(AddModifier(side=side, unit=unit, stat="萌化", mode="special",
+                                         layers=1, source=skill.name, target="self"))
+            if morph_ok and effect.morph_apply_bonus_speed:
+                atoms.append(AddModifier(side=side, unit=unit, stat="speed", mode="flat",
+                                         layers=effect.morph_apply_bonus_speed // 10,
+                                         source=skill.name, permanent=True))
+            if morph_ok and effect.morph_apply_bonus_cost:
+                atoms.append(AddModifier(side=side, unit=unit, stat="energy_cost", mode="flat",
+                                         layers=effect.morph_apply_bonus_cost,
+                                         source=skill.name, permanent=True))
+            if morph_ok and effect.morph_apply_bonus_heal:
+                atoms.append(HealPct(side=side, unit=unit, pct=effect.morph_apply_bonus_heal,
+                                     source=skill.name))
+        if effect.morph_apply_foe:
+            # 甜心续航：敌方独立施萌化（一方失败不影响另一方）
+            if _morph_can_apply(target):
+                atoms.append(AddModifier(side=side, unit=target, stat="萌化", mode="special",
+                                         layers=1, source=skill.name, target="foe"))
+        if effect.morph_transfer:
+            # 反弹：将自己的萌化转移给敌方（敌方最低阶 → 施加拦截，转不过去的层丢失）
+            n = _morph_of(unit)
+            if n > 0:
+                atoms.append(SetModLayers(unit=unit, stat="萌化", mode="special",
+                                          layers=0, source=skill.name))
+                if _morph_can_apply(target):
+                    atoms.append(AddModifier(side=side, unit=target, stat="萌化", mode="special",
+                                             layers=n, source=skill.name, target="foe"))
     # DEFENSE：减伤已在 build_turn_context 武装；应对命中时施加印记/状态（印记/天气批、
     # 冻结批）；使用防御技能 → 该精灵所有防御技冷却一回合（2026-08-30 拍板，规则声明化）
     if effect.counter_mark_effects and ctx.counters(side):
