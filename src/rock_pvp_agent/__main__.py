@@ -77,6 +77,17 @@ def main() -> int:
     epst.add_argument("--lives", type=int, default=2, help="每方命数")
     epst.add_argument("--health", action="store_true", help="打印健康度看板")
     epst.set_defaults(func=_run_evolve_steps_cli)
+    epe = epsub.add_parser("epoch", help="R5 epoch 调度：慢更新 + D_test 汇报")
+    epe.add_argument("--n", type=int, default=8, help="epoch 数（默认 8）")
+    epe.add_argument("--e", type=int, default=8, dest="E", help="每 epoch 的 step 数（默认 8）")
+    epe.add_argument("--seed", type=int, default=7, help="seed（默认 7）")
+    epe.add_argument("--out", type=str, default="artifacts", help="产物目录（默认 artifacts/）")
+    epe.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
+    epe.add_argument("--llm", action="store_true", help="真实 LLM 玩家")
+    epe.add_argument("--no-slow-update", action="store_true", help="关慢更新（A/B 消融）")
+    epe.add_argument("--team-size", type=int, default=3, help="每方精灵数")
+    epe.add_argument("--lives", type=int, default=2, help="每方命数")
+    epe.set_defaults(func=_run_evolve_epoch_cli)
 
     args = parser.parse_args()
 
@@ -262,6 +273,24 @@ def _run_evolve_steps_cli(args) -> int:
                   f"front={f['front_size']} archive={f['archive_size']}")
     console.print(f"entered={f['entered']} promoted={f['promoted']} "
                   f"cheap_rejected={f['cheap_rejected']} full_rejected={f['full_rejected']}")
+    console.print(f"pool → {out['pool_path']}")
+    return 0
+
+
+def _run_evolve_epoch_cli(args) -> int:
+    """evolve epoch：R5 epoch 调度（慢更新 + Meta Playbook + D_test 汇报）。"""
+    from .battle.evolution.run import run_epochs
+
+    out = run_epochs(n=args.n, seed=args.seed, out_dir=args.out, E=args.E, M=args.m,
+                     llm=args.llm, no_slow_update=args.no_slow_update,
+                     team_size=args.team_size, lives=args.lives)
+    console.print(f"[bold]evolve epoch[/bold] n={args.n} E={args.E} seed={args.seed} "
+                  f"no_slow_update={args.no_slow_update}")
+    for e in out["epochs"]:
+        dt = e.get("dtest", {})
+        console.print(f"  epoch#{e['epoch']} champion={e['champion']} improved={e['improved']} "
+                      f"v_tier={e.get('v_tier')} dtest_winrate={dt.get('winrate')} "
+                      f"delta={e.get('dtest_delta')}")
     console.print(f"pool → {out['pool_path']}")
     return 0
 
