@@ -40,8 +40,10 @@ def replay_record(record: dict) -> dict:
 
     results: list[dict] = []
     for tr in record["turns"]:
-        da = Decision(action=tr["decision_a"]["action"], item=tr["decision_a"].get("item", ""))
-        db = Decision(action=tr["decision_b"]["action"], item=tr["decision_b"].get("item", ""))
+        da = Decision(action=tr["decision_a"]["action"], item=tr["decision_a"].get("item", ""),
+                      item_arg=tr["decision_a"].get("item_arg", ""))
+        db = Decision(action=tr["decision_b"]["action"], item=tr["decision_b"].get("item", ""),
+                      item_arg=tr["decision_b"].get("item_arg", ""))
         ok = bool(session.submit("a", da)["ok"])
         ok &= bool(session.submit("b", db)["ok"])
         res = session.resolve()

@@ -179,7 +179,7 @@ def test_controller_replacement_flow():
     rep = ctrl.replace(1)
     assert rep["ok"] and rep["phase"] == "decision" and not rep["done"]
     rec = ctrl.record()["turns"][0]
-    assert rec["turn"] == 1 and rec["replace_a"] == 1 and rec["decision_a"] == {"action": skill_action(0), "item": ""}
+    assert rec["turn"] == 1 and rec["replace_a"] == 1 and rec["decision_a"] == {"action": skill_action(0), "item": "", "item_arg": ""}
 
 
 def test_controller_replace_returns_delta_events():

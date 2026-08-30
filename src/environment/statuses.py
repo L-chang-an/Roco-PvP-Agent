@@ -58,6 +58,12 @@ def is_immune(unit: "Unit", stat: str) -> bool:
     return bool(immune_type and immune_type in unit.types)
 
 
+def morph_layers(unit: "Unit") -> int:
+    """萌化层数（0 = 无萌化）。首领化门控（萌化中不可首领化）读它。"""
+    m = _find(unit, "萌化", "special")
+    return m.layers if m is not None else 0
+
+
 def _find(unit: "Unit", stat: str, mode: str):
     for m in unit.stat_mods:
         if m.stat == stat and m.mode == mode:

@@ -32,7 +32,7 @@ from typing import Any
 
 from .dataset import DataSource, load_skills
 from .rng import BattleRng
-from .rules import DEFAULT_RULES, ITEMS, BattleRules
+from .rules import DEFAULT_ITEMS, DEFAULT_RULES, ITEMS, BattleRules
 from .skillbook import MW_EFFECTS, P1_EFFECTS, P2_EFFECTS, ST_EFFECTS, battle_ready
 
 SIDES: tuple[str, str] = ("a", "b")
@@ -632,8 +632,8 @@ def new_battle(roster_a: list[dict], roster_b: list[dict], *,
                for i, spec in enumerate(roster_a)]
     units_b = [build_unit({**spec, "id": f"b-{i}-{spec['name']}"}, rules)
                for i, spec in enumerate(roster_b)]
-    item_names_a = items_a if items_a is not None else list(ITEMS)
-    item_names_b = items_b if items_b is not None else list(ITEMS)
+    item_names_a = items_a if items_a is not None else list(DEFAULT_ITEMS)
+    item_names_b = items_b if items_b is not None else list(DEFAULT_ITEMS)
     return BattleState(
         side_a=SideState(units=units_a, lives=rules.lives,
                          item_uses={name: ITEMS[name] for name in item_names_a}),

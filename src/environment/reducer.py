@@ -40,7 +40,7 @@ from .primitives import (
     apply_energy_cost_mod, apply_energy_gain, heal_pct, lifesteal_bonus,
 )
 from .models import StatModifier
-from .statuses import is_immune
+from .statuses import is_immune, morph_layers
 
 if TYPE_CHECKING:
     from .atom import Atom
@@ -136,11 +136,8 @@ def _add_stat_layers(unit, stat: str, mode: str, layers: int,
 
 
 def _morph_layers(unit) -> int:
-    """萌化层数（mode="special"；无记录 → 0）。"""
-    for m in unit.stat_mods:
-        if m.stat == "萌化" and m.mode == "special":
-            return m.layers
-    return 0
+    """萌化层数（委托 statuses.morph_layers 单一事实源）。"""
+    return morph_layers(unit)
 
 
 def _morph_max_layers(unit) -> int:

@@ -23,11 +23,12 @@ from .damage import apply_heal
 from .domain import SkillResolved, TurnEnded, TurnStarted, UnitEntered, UnitExited
 from .events import ev
 from .marks import speed_penalty
-from .models import (ActionType, BattleState, SIDES, Skill, Unit, aggregate_stats,
-                     skill_from_instance)
+from .models import (ActionType, BattleState, SIDES, Skill, TraitState, Unit,
+                     aggregate_stats, skill_from_instance)
 from .pipeline import run
 from .prediction import predictions_for
 from .reducer import Frame
+from .rules import BOSS_EVOLUTION_ITEM
 from .skillbook import SkillCategory
 from .traits import trait_defs_for
 
@@ -226,10 +227,13 @@ def build_queue(state, ctx: TurnContext) -> list[QueuedEntry]:
 
 # ── 四个结算函数 ──
 def resolve_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
-    """扣 1 次道具次数 → 对**当前在场**单位调 apply_heal(max_hp // 2)
-    → 发 item_use + heal。次数已尽在 validate_decision 就被拦住，这里只做防负数兜底。"""
+    """道具分派：首领进化 → `_resolve_boss_item`；其余（草魔法）→ 回血 50%。
+
+    次数已尽在 validate_decision 就被拦住，这里只做防负数兜底。"""
     side = entry.side
     item = ctx.decision(side).item
+    if item == BOSS_EVOLUTION_ITEM:
+        return _resolve_boss_item(state, ctx, entry)
     uses = state.side(side).item_uses
     if uses.get(item, 0) <= 0:
         return [ev("skipped", side, kind="item", unit=entry.actor.name, reason="道具次数已尽")]
@@ -242,6 +246,58 @@ def resolve_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
         ev("heal", side, unit=target.name, applied=hr.applied, overflow=hr.overflow,
            hp=target.current_hp, source=item),
     ]
+
+
+def _resolve_boss_item(state, ctx: TurnContext, entry: QueuedEntry) -> list[dict]:
+    """首领进化道具（2026-08-30 拍板）：**一阶进化** name → 选定 boss 形态。
+
+    - 只有 boss 的上一阶可触发（无首领血脉 / 萌化中 → skipped）；
+    - 原地替换 name/types/base_stats/stats/trait（**unit_id 不变**；技能保留、
+      stat_mods 保留、能量保留；HP 同比例缩放走 damage.apply_max_hp_change）；
+    - 发 boss_evolution 展示事件 + UnitEntered(from_boss=True) → 首领化后的
+      入场类特性/印记触发。
+    """
+    from .damage import apply_max_hp_change
+    from .dataset import load_spirits
+    from .evolution import boss_targets_of
+    from .statline import calc_combat_stats
+    from .statuses import morph_layers
+    from .traits import resolve_trait_name
+
+    side = entry.side
+    unit = entry.actor
+    dec = ctx.decision(side)
+    item = dec.item
+    uses = state.side(side).item_uses
+    if uses.get(item, 0) <= 0:
+        return [ev("skipped", side, kind="item", unit=unit.name, reason="道具次数已尽")]
+    targets = boss_targets_of(unit.name)
+    if not targets or morph_layers(unit) > 0:
+        return [ev("skipped", side, kind="item", unit=unit.name,
+                   reason="当前精灵不可首领化")]
+    boss = dec.item_arg if dec.item_arg else targets[0]
+    if boss not in targets:
+        return [ev("skipped", side, kind="item", unit=unit.name, reason="首领化分支非法")]
+    uses[item] -= 1
+
+    sp = load_spirits().get(boss)
+    base = dict(sp.stats)
+    new_stats = calc_combat_stats(base, unit.iv, unit.nature)
+    old_name = unit.name
+    unit.name = boss
+    unit.types = list(sp.types)
+    unit.base_stats = base
+    unit.trait = TraitState(name=resolve_trait_name(sp.trait_name), desc=sp.trait_desc)
+    apply_max_hp_change(state, unit, new_stats["hp"], source="首领进化")
+    unit.stats = new_stats
+
+    events = [
+        ev("item_use", side, item=item, unit=boss, uses_left=uses[item]),
+        ev("boss_evolution", side, from_=old_name, to=boss, unit=boss),
+    ]
+    enter_ev = UnitEntered(unit_id=unit.id, from_faint=False, from_boss=True)
+    re_events, _ = run(state, [], Frame(), unit=None, after=lambda f, e=enter_ev: [e])
+    return events + re_events
 
 
 def resolve_skill(state, ctx: TurnContext, entry: QueuedEntry,

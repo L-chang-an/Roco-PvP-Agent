@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .evolution import boss_targets_of
 from .models import ActionType
 from .primitives import skill_energy_cost
-from .rules import ITEMS
+from .rules import BOSS_EVOLUTION_ITEM, ITEMS
+from .statuses import morph_layers
 
 _ACTION_TYPES: frozenset[str] = frozenset(a.value for a in ActionType)
 
@@ -33,10 +35,26 @@ def recharge_action() -> dict:
 @dataclass(frozen=True)
 class Decision:
     """一方一回合的完整提交：一个主动作 + 可选一个道具（附赠动作）。
-    道具**不占用**主动作，两者同回合生效、各自入队。"""
+    道具**不占用**主动作，两者同回合生效、各自入队。
+
+    `item_arg`：道具参数（2026-08-30）——首领进化多分支（迪莫/魔力猫）时的分支
+    精灵名；单分支可空（自动取唯一分支）。"""
 
     action: dict
     item: str = ""     # "" = 本回合不用道具
+    item_arg: str = "" # 首领化分支精灵名（多分支时必填）
+
+
+def boss_evolution_options(state, side: str) -> list[str]:
+    """首领化分支列表（玩家 `item_arg` 从这里选）；空 = 当前不可首领化。
+
+    已拍板（2026-08-30）：首领化 = 一阶进化，只有 boss 的上一阶可触发（57 个）；
+    萌化层数 > 0 → 不可首领化（资质已退化）；多分支只有迪莫（4）/魔力猫（2）。
+    """
+    unit = state.side(side).active_unit
+    if unit.fainted or morph_layers(unit) > 0:
+        return []
+    return list(boss_targets_of(unit.name))
 
 
 def skill_block_reason(state, side: str, unit, index) -> str | None:
@@ -138,4 +156,26 @@ def validate_decision(state, side: str, dec: Decision) -> str | None:
             return f"道具「{dec.item}」不存在。"
         if side_state.item_uses.get(dec.item, 0) <= 0:
             return f"道具「{dec.item}」次数已尽。"
+        if dec.item == BOSS_EVOLUTION_ITEM:
+            reason = _boss_item_reason(state, side, dec)
+            if reason is not None:
+                return reason
+    return None
+
+
+def _boss_item_reason(state, side: str, dec: Decision) -> str | None:
+    """首领进化道具门控（2026-08-30 拍板）：合法 → None，否则中文原因。
+
+    ① 场上精灵须是 boss 的上一阶（首领血脉，一阶进化）；
+    ② 萌化层数 == 0（资质已退化则不再是 boss 上一阶）；
+    ③ 多分支（迪莫/魔力猫）时 item_arg 必须给出合法分支；单分支可空。
+    """
+    unit = state.side(side).active_unit
+    targets = boss_targets_of(unit.name)
+    if not targets:
+        return f"「{unit.name}」无首领血脉，无法使用首领进化。"
+    if morph_layers(unit) > 0:
+        return f"「{unit.name}」处于萌化状态，无法首领化。"
+    if len(targets) > 1 and dec.item_arg not in targets:
+        return f"首领化分支必须从 {list(targets)} 中选择。"
     return None

@@ -17,6 +17,8 @@ EVENT_TYPES: frozenset[str] = frozenset({
     "mark", "weather", "energy_loss",
     # 防御冷却（2026-08-30）
     "cooldown",
+    # 首领化（2026-08-30）
+    "boss_evolution",
 })
 
 

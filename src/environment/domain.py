@@ -70,10 +70,12 @@ class SkillResolved:
 
 @dataclass(frozen=True)
 class UnitEntered:
-    """精灵入场（换人 / 补位 / 开局）。`from_faint` = 补位入场（前一在场者阵亡）。"""
+    """精灵入场（换人 / 补位 / 开局 / 首领化）。`from_faint` = 补位入场（前一在场者
+    阵亡）；`from_boss` = 首领化原地进化入场（2026-08-30，触发入场类特性/印记）。"""
 
     unit_id: str
     from_faint: bool = False
+    from_boss: bool = False
 
 
 @dataclass(frozen=True)
