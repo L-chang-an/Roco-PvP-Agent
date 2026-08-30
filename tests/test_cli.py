@@ -26,7 +26,7 @@ class _RichAgent:
     def chat(self, message, history=None):
         return ChatReply(
             reply="答案是 14.0",
-            tool_calls=[{"name": "calculator", "args": {"expression": "3.5*4"}, "result": "14.0"}],
+            tool_calls=[{"name": "echo", "args": {"expression": "3.5*4"}, "result": "14.0"}],
             thinking=["我先算一下"],
             history=[],
         )
@@ -74,12 +74,12 @@ def test_single_query_offline(monkeypatch, agent_settings, capsys):
 def test_debug_prints_thinking_and_tools(monkeypatch, agent_settings, capsys):
     """--debug：思考与工具调用过程打印出来。"""
     _patch_offline(monkeypatch, agent_settings)
-    monkeypatch.setattr(climod, "ChatAgent", lambda settings: _RichAgent())
+    monkeypatch.setattr(climod, "TeamAdvisorAgent", lambda settings: _RichAgent())
     code = _run_main(monkeypatch, ["-q", "计算", "--debug"])
     assert code == 0
     out = capsys.readouterr().out
     assert "我先算一下" in out
-    assert "calculator" in out
+    assert "echo" in out
     assert "答案是 14.0" in out
 
 
@@ -88,7 +88,7 @@ def test_debug_prints_thinking_and_tools(monkeypatch, agent_settings, capsys):
 def test_repl_loop_history_and_exit(monkeypatch, agent_settings, capsys):
     """REPL：空行跳过 / 上下文历史累积 / 退出词 q 结束。"""
     _patch_offline(monkeypatch, agent_settings)
-    monkeypatch.setattr(climod, "ChatAgent", lambda settings: _FakeAgent(settings))
+    monkeypatch.setattr(climod, "TeamAdvisorAgent", lambda settings: _FakeAgent(settings))
     _inputs = iter(["   ", "你好", "q"])
     monkeypatch.setattr(builtins, "input", lambda prompt="": next(_inputs))
     code = _run_main(monkeypatch, [])
@@ -100,7 +100,7 @@ def test_repl_loop_history_and_exit(monkeypatch, agent_settings, capsys):
 def test_repl_handles_eof(monkeypatch, agent_settings, capsys):
     """EOF（Ctrl-D）→ 优雅退出，不抛异常。"""
     _patch_offline(monkeypatch, agent_settings)
-    monkeypatch.setattr(climod, "ChatAgent", lambda settings: _FakeAgent(settings))
+    monkeypatch.setattr(climod, "TeamAdvisorAgent", lambda settings: _FakeAgent(settings))
 
     def _raise_eof(prompt=""):
         raise EOFError

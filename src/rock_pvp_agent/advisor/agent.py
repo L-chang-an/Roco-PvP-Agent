@@ -23,7 +23,8 @@ from rock_pvp_agent.advisor.catalog import SpiritFilter
 from rock_pvp_agent.advisor.prompt import ADVISOR_SYSTEM_PROMPT
 from rock_pvp_agent.advisor.simulate import simulate_matchups as _simulate_matchups
 from rock_pvp_agent.advisor.trajectory import query_trajectory_evidence as _query_trajectory
-from rock_pvp_agent.agent import ChatAgent
+from rock_pvp_agent.agent import EMPTY_REPLY, ChatAgent
+from rock_pvp_agent.tools import FINAL_ANSWER_TOOL, final_answer
 
 TERMINAL_TOOL = "submit_team_advice"
 
@@ -120,7 +121,7 @@ def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
     return [
         get_catalog_version, search_spirits, get_spirit_profile, get_skill_profile,
         get_build_options, validate_team, query_trajectory_evidence, analyze_team,
-        simulate_matchups, submit_team_advice,
+        simulate_matchups, submit_team_advice, final_answer,
     ]
 
 
@@ -145,7 +146,7 @@ class TeamAdvisorAgent(ChatAgent):
             system_prompt=ADVISOR_SYSTEM_PROMPT,
             max_llm_rounds=max_llm_rounds,
             tools=_build_advisor_tools(battles_dir=battles_dir, runs_dir=runs_dir),
-            terminal_tool=TERMINAL_TOOL,
+            terminal_tools={TERMINAL_TOOL, FINAL_ANSWER_TOOL},
             emit_thinking=False,
         )
         self._advice_failed = 0
@@ -156,7 +157,9 @@ class TeamAdvisorAgent(ChatAgent):
         return super().chat(message, history, event_sink=event_sink)
 
     def _handle_terminal(self, name: str, args: dict, call_id: str) -> tuple[str, bool]:
-        """submit_team_advice → EvidenceGate 校验；失败修复一次，再失败安全降级。"""
+        """终结分流：final_answer（闲聊自由文本）与 submit_team_advice（组队，EvidenceGate 校验）。"""
+        if name == FINAL_ANSWER_TOOL:
+            return str(args.get("text", "")) or EMPTY_REPLY, True
         payload = args.get("payload", args)
         result = _submit_team_advice(payload)
         if result["ok"]:
@@ -166,7 +169,3 @@ class TeamAdvisorAgent(ChatAgent):
         if self._advice_failed >= 2:
             return _degraded_answer(result["errors"]), True
         return _dump({"ok": False, "errors": result["errors"]}), False
-
-    def _handle_no_tool_call(self, content: str) -> str:
-        """顾问拒绝自由文本终稿：必须走 submit_team_advice。"""
-        return "（顾问必须通过 submit_team_advice 提交结构化建议；模型未遵守协议，未返回终稿。）"

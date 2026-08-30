@@ -66,10 +66,11 @@ def test_advisor_degrade_after_two_failures(agent_settings):
     assert "degraded" in reply.reply and reply.rounds == 2
 
 
-def test_advisor_rejects_free_text(agent_settings):
-    llm = ScriptedLLM([AIMessage(content="直接给你一个阵容，不调用工具")])
-    reply = TeamAdvisorAgent(agent_settings, llm=llm).chat("组队")
-    assert "submit_team_advice" in reply.reply
+def test_advisor_accepts_free_text(agent_settings):
+    """闲聊/自由文本不再被强制拒绝（宽松设计：问候/范围澄清可直接回复）。"""
+    llm = ScriptedLLM([AIMessage(content="你好，我可以帮你组队，也可以聊聊游戏")])
+    reply = TeamAdvisorAgent(agent_settings, llm=llm).chat("你好")
+    assert reply.reply == "你好，我可以帮你组队，也可以聊聊游戏"
 
 
 def test_advisor_no_thinking_emitted(agent_settings):
@@ -85,7 +86,7 @@ def test_advisor_no_thinking_emitted(agent_settings):
 
     # 对照：默认 ChatAgent 仍发射 thinking（回归保障）
     chat_llm = ScriptedLLM([
-        AIMessage(content="思考中", tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")]),
+        AIMessage(content="思考中", tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
     ])
     chat_events: list[dict] = []

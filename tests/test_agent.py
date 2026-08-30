@@ -62,7 +62,7 @@ def test_online_empty_content_and_no_tool_call(agent_settings):
 
 def test_online_tool_round_then_final(agent_settings):
     llm = ScriptedLLM([
-        AIMessage(content="我先算一下", tool_calls=[tool_call("calculator", {"expression": "3.5*4"}, "call-1")]),
+        AIMessage(content="我先算一下", tool_calls=[tool_call("echo", {"text": "3.5*4"}, "call-1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "3.5*4 = 14.0"}, "call-2")]),
     ])
     agent = ChatAgent(agent_settings, llm=llm)
@@ -70,7 +70,7 @@ def test_online_tool_round_then_final(agent_settings):
     assert reply.reply == "3.5*4 = 14.0"
     assert reply.rounds == 2
     assert len(reply.tool_calls) == 1
-    assert reply.tool_calls[0]["name"] == "calculator"
+    assert reply.tool_calls[0]["name"] == "echo"
     assert reply.thinking == ["我先算一下"]
 
 
@@ -78,14 +78,14 @@ def test_online_multiple_tools_in_one_round(agent_settings):
     """一次回复多个 tool_calls → 顺序逐个执行。"""
     llm = ScriptedLLM([
         AIMessage(content="", tool_calls=[
-            tool_call("calculator", {"expression": "1+1"}, "call-a"),
-            tool_call("calculator", {"expression": "2*3"}, "call-b"),
+            tool_call("echo", {"text": "1+1"}, "call-a"),
+            tool_call("echo", {"text": "2*3"}, "call-b"),
         ]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2 和 6"}, "call-c")]),
     ])
     reply = ChatAgent(agent_settings, llm=llm).chat("算两个")
     assert len(reply.tool_calls) == 2
-    assert [tc["result"] for tc in reply.tool_calls] == ["2", "6"]
+    assert [tc["result"] for tc in reply.tool_calls] == ["1+1", "2*3"]
     assert reply.rounds == 2
 
 
@@ -100,13 +100,22 @@ def test_online_fallback_when_no_final_answer(agent_settings):
 
 
 def test_tool_error_is_swallowed(agent_settings):
-    """工具执行抛错 → 吞成错误字符串，不崩。"""
+    """工具执行抛异常 → 吞成错误字符串，不崩（_invoke_tool 的 except 分支）。"""
+    from langchain_core.tools import tool as _tool
+
+    from rock_pvp_agent.tools import final_answer
+
+    @_tool
+    def boom(text: str) -> str:
+        """总是抛异常。"""
+        raise RuntimeError("boom")
+
     llm = ScriptedLLM([
-        AIMessage(content="", tool_calls=[tool_call("calculator", {"expression": "1/0"}, "call-1")]),
-        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "计算失败"}, "call-2")]),
+        AIMessage(content="", tool_calls=[tool_call("boom", {"text": "x"}, "call-1")]),
+        AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "继续"}, "call-2")]),
     ])
-    reply = ChatAgent(agent_settings, llm=llm).chat("1/0")
-    assert reply.reply == "计算失败"
+    reply = ChatAgent(agent_settings, llm=llm, tools=[boom, final_answer]).chat("hi")
+    assert reply.reply == "继续"
     assert "失败" in reply.tool_calls[0]["result"]
 
 
@@ -128,9 +137,9 @@ def test_thinking_extracted_from_anthropic_blocks(agent_settings):
         AIMessage(
             content=[
                 {"type": "text", "text": "先算一下"},
-                {"type": "tool_use", "id": "c1", "name": "calculator", "input": {"expression": "1+1"}},
+                {"type": "tool_use", "id": "c1", "name": "echo", "input": {"text": "1+1"}},
             ],
-            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")],
         ),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
     ])
@@ -143,14 +152,14 @@ def test_thinking_extracted_from_anthropic_blocks(agent_settings):
 def test_event_sequence_contract(agent_settings):
     events: list[dict] = []
     llm = ScriptedLLM([
-        AIMessage(content="思考中", tool_calls=[tool_call("calculator", {"expression": "1+1"}, "call-1")]),
+        AIMessage(content="思考中", tool_calls=[tool_call("echo", {"text": "1+1"}, "call-1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "call-2")]),
     ])
     agent = ChatAgent(agent_settings, llm=llm)
     agent.chat("1+1?", event_sink=events.append)
     assert [e["event"] for e in events] == ["thinking", "tool", "reply", "done"]
     assert events[0]["text"] == "思考中"
-    assert events[1]["name"] == "calculator"
+    assert events[1]["name"] == "echo"
     assert events[2]["text"] == "2"
 
 
@@ -173,7 +182,7 @@ def test_usage_accumulated_across_rounds(agent_settings):
     llm = ScriptedLLM([
         AIMessage(
             content="",
-            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")],
             usage_metadata={"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
         ),
         AIMessage(
@@ -220,7 +229,7 @@ def test_reasoning_content_becomes_thinking(agent_settings):
     llm = ScriptedLLM([
         AIMessage(
             content="",
-            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")],
             additional_kwargs={"reasoning_content": "先心算，再用工具验证"},
         ),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
@@ -245,7 +254,7 @@ def test_content_and_reasoning_both_thinking(agent_settings):
     llm = ScriptedLLM([
         AIMessage(
             content="我先算一下",
-            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")],
             additional_kwargs={"reasoning_content": "推理：直接算"},
         ),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
@@ -261,9 +270,9 @@ def test_thinking_block_extracted_from_anthropic_style(agent_settings):
             content=[
                 {"type": "thinking", "thinking": "内部推理"},
                 {"type": "text", "text": "我算一下"},
-                {"type": "tool_use", "id": "c1", "name": "calculator", "input": {"expression": "1+1"}},
+                {"type": "tool_use", "id": "c1", "name": "echo", "input": {"text": "1+1"}},
             ],
-            tool_calls=[tool_call("calculator", {"expression": "1+1"}, "c1")],
+            tool_calls=[tool_call("echo", {"text": "1+1"}, "c1")],
         ),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "2"}, "c2")]),
     ])
@@ -299,10 +308,10 @@ def test_final_answer_appends_tool_result(agent_settings):
 
 
 def test_mixed_tools_and_terminal_are_all_fulfilled(agent_settings):
-    """同一条回复里 [calculator, final_answer] 都要有 tool_result，不能中途 break 遗留。"""
+    """同一条回复里 [echo, final_answer] 都要有 tool_result，不能中途 break 遗留。"""
     llm = ScriptedLLM([
         AIMessage(content="", tool_calls=[
-            tool_call("calculator", {"expression": "1+1"}, "call-a"),
+            tool_call("echo", {"text": "1+1"}, "call-a"),
             tool_call("final_answer", {"text": "结果是 2"}, "call-b"),
         ]),
     ])

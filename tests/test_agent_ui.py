@@ -98,15 +98,15 @@ def test_stream_event_sequence_final():
 
 
 def test_stream_event_sequence_with_tool():
-    """工具循环：meta → thinking → tool → reply → done。"""
+    """工具循环：meta → tool → reply → done（顾问不发射思维链）。"""
     llm = lambda settings: ScriptedLLM([
-        AIMessage(content="先算一下", tool_calls=[tool_call("calculator", {"expression": "3.5*4"}, "c1")]),
+        AIMessage(content="先查一下", tool_calls=[tool_call("get_catalog_version", {}, "c1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "14.0"}, "c2")]),
     ])
-    events = _stream_events(_client(llm), "/api/chat/stream?message=计算")
-    assert [e["event"] for e in events] == ["meta", "thinking", "tool", "reply", "done"]
-    assert events[2]["name"] == "calculator"
-    assert events[3]["text"] == "14.0"
+    events = _stream_events(_client(llm), "/api/chat/stream?message=组队")
+    assert [e["event"] for e in events] == ["meta", "tool", "reply", "done"]
+    assert events[1]["name"] == "get_catalog_version"
+    assert events[2]["text"] == "14.0"
 
 
 def test_stream_requires_message():

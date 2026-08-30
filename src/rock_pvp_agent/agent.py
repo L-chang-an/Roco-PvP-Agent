@@ -18,7 +18,6 @@ from langchain_core.messages import (
 
 from .config import Settings
 from .llm import build_chat_llm
-from .prompts import CHAT_SYSTEM_PROMPT
 from .tools import FINAL_ANSWER_TOOL, build_agent_tools
 
 EMPTY_REPLY = "（模型未返回有效回复）"
@@ -84,19 +83,21 @@ class ChatAgent:
         settings: Settings,
         *,
         llm=None,
-        system_prompt: str = CHAT_SYSTEM_PROMPT,
+        system_prompt: str = "",
         max_llm_rounds: int = 3,
         tools=None,
-        terminal_tool: str = FINAL_ANSWER_TOOL,
+        terminal_tools=None,
         emit_thinking: bool = True,
     ):
         self._settings = settings
-        # 工具集注入缝：顾问用 advisor 工具集，默认仍是通用 [calculator, final_answer]。
+        # 工具集注入缝：顾问用 advisor 工具集，默认仍是基础 [final_answer]。
         self._tools = tools if tools is not None else build_agent_tools()
         self._llm = llm  # 测试注入缝
         self._system_prompt = system_prompt
         self._max_llm_rounds = max_llm_rounds
-        self._terminal_tool = terminal_tool      # 终结工具名（顾问 = submit_team_advice）
+        # 终结工具名集合（顾问 = submit_team_advice + final_answer）。
+        self._terminal_tools = frozenset(terminal_tools) if terminal_tools is not None \
+            else frozenset({FINAL_ANSWER_TOOL})
         self._emit_thinking = emit_thinking      # 思维链外显开关（顾问关闭）
 
     @property
@@ -194,7 +195,7 @@ class ChatAgent:
                 args = call.get("args", {})
                 call_id = call.get("id", "")
 
-                if name == self._terminal_tool:
+                if name in self._terminal_tools:
                     result_content, terminal = self._handle_terminal(name, args, call_id)
                     if terminal:
                         reply_text = result_content
