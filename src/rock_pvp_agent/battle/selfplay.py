@@ -119,6 +119,12 @@ def run_selfplay(*, seed: int, team_size: int = 3, lives: int = 2, max_turns: in
             for t in result.turns
         ],
     }
+    # R2：真实 LLM 玩家（LLMPlayer）的逐回合 _turn_log → 可选字段 analysis_a/b
+    # （向后兼容：replay_record 忽略未知键；确定性玩家无 _turn_log → 不写）。
+    for side in ("a", "b"):
+        turn_log = getattr(players[side], "_turn_log", None)
+        if turn_log:
+            record[f"analysis_{side}"] = turn_log
     path = None
     if out_dir is not None:
         path = TrajectoryStore(out_dir).save(record)

@@ -97,8 +97,9 @@ def build_side_tools(side: str):
     name = f"battle_act_{side}"
 
     @tool
-    def battle_act(action_type: str, target: int | None = None, item: str = "") -> str:
-        """提交你本回合的行动。action_type ∈ {skill, switch, recharge}；skill/switch 的 target 是槽位下标（从 0 开始）；recharge 不需要 target；item 是道具名（不用则留空）。"""
+    def battle_act(action_type: str, target: int | None = None, item: str = "",
+                   prediction: str = "") -> str:
+        """提交你本回合的行动。action_type ∈ {skill, switch, recharge}；skill/switch 的 target 是槽位下标（从 0 开始）；recharge 不需要 target；item 是道具名（不用则留空）；prediction 是可选的预期结果一句话（离线校准用，不用则留空）。"""
         return "行动已接收。"   # 拦截：真提交由编排器完成，这里不被调用
 
     battle_act.name = name
@@ -128,20 +129,27 @@ class LLMPlayer:
         self._tools = build_side_tools(side)
         self._llm = build_chat_llm(settings, self._tools, llm=llm)   # llm= 为测试注入缝
         self._history: list = []
+        self._turn_log: list[dict] = []   # R2：逐回合 (turn/situation_key/action/prediction)
 
     # ── Player Protocol ──
     def on_match_start(self, observation: dict) -> None:
-        """开局：重置私有 history 为系统提示（首回合观测由 decide 渲染追加）。"""
+        """开局：重置私有 history 与 _turn_log（R2 校准信号——防止同一实例跨局累积）。"""
         self._history = [SystemMessage(content=BATTLE_PLAYER_SYSTEM_PROMPT)]
+        self._turn_log = []
 
     def decide(self, observation: dict, legal: list[dict], items: list[str]) -> Decision:
-        """渲染观测 → tool-call 循环 → 解析 battle_act → 合法则返回 Decision。"""
+        """渲染观测 → tool-call 循环 → 解析 battle_act → 合法则返回 Decision。
+
+        成功与兜底都记录 `_turn_log`（R2 校准信号原料）——兜底 prediction=""。
+        """
         self._history.append(HumanMessage(content=render_observation(observation, legal, items)))
         for _attempt in range(self._max_retries + 1):
             try:
                 resp = self._llm.invoke(self._history)
             except Exception:
-                return self._random.decide(observation, legal, items)   # 异常直接兜底
+                dec = self._random.decide(observation, legal, items)   # 异常直接兜底
+                self._record_turn(observation, dec, "")
+                return dec
             self._history.append(resp)
             calls = getattr(resp, "tool_calls", None) or []
             acted = next((c for c in calls if c.get("name") == self._act_name), None)
@@ -161,9 +169,24 @@ class LLMPlayer:
                     content = "（多余的调用已忽略）"
                 self._history.append(ToolMessage(content=content, tool_call_id=c.get("id", "")))
             if dec is not None:
+                prediction = str((acted.get("args") or {}).get("prediction", "") or "").strip()
+                self._record_turn(observation, dec, prediction)
                 return dec
             # 非法：原因已在 ToolMessage 里，下一轮 LLM 看到后修正重试
-        return self._random.decide(observation, legal, items)            # 重试耗尽兜底
+        dec = self._random.decide(observation, legal, items)            # 重试耗尽兜底
+        self._record_turn(observation, dec, "")
+        return dec
+
+    def _record_turn(self, observation: dict, dec: Decision, prediction: str) -> None:
+        """R2：记录本回合 (turn / situation_key / 实际提交 action / prediction)。"""
+        from environment.evaluate import situation_key
+        self._turn_log.append({
+            "turn": observation.get("turn"),
+            "situation_key": situation_key(observation),
+            "action": dict(dec.action),
+            "item": dec.item,
+            "prediction": prediction,
+        })
 
     def choose_replacement(self, observation: dict, bench: list[int]) -> int:
         """渲染补位提示 → LLM 调 battle_act(action_type='replace', target=…) → 返回选中槽位。"""

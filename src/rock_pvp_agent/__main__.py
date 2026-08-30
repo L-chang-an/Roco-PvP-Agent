@@ -8,6 +8,7 @@ import argparse
 from rich.console import Console
 
 from .agent import ChatAgent, ChatReply
+from .advisor.agent import TeamAdvisorAgent
 from .config import get_settings
 
 console = Console()
@@ -53,6 +54,12 @@ def main() -> int:
     eph = epsub.add_parser("health", help="记忆健康度：Q 分布 / 命中率 / Forgetting Rate")
     eph.add_argument("--memory", required=True, help="MemoryStore 目录")
     eph.set_defaults(func=_run_evolve_health_cli)
+    epc = epsub.add_parser("credit", help="信度分配：定位关键回合（校准偏差/价值落差/反事实）")
+    epc.add_argument("--traj", required=True, help="轨迹 JSON 路径")
+    epc.add_argument("--out", default=None, help="关键回合卡片写入该 JSONL 文件")
+    epc.add_argument("--repeat", action="store_true", help="跑两遍验证反事实确定性")
+    epc.add_argument("--m", type=int, default=24, help="反事实回放场次（默认 24）")
+    epc.set_defaults(func=_run_evolve_credit_cli)
 
     args = parser.parse_args()
 
@@ -72,7 +79,7 @@ def main() -> int:
             return 1
         return run_ui()
 
-    agent = ChatAgent(get_settings())
+    agent = TeamAdvisorAgent(get_settings())
     if args.query:
         return _run_once(agent, args.query, args.debug)
     return _repl(agent, args.debug)
@@ -168,6 +175,36 @@ def _run_evolve_health_cli(args) -> int:
                   f"source_type_counts={h['source_type_counts']}")
     console.print(f"forgetting_rate={h['forgetting_rate']}  retrieval_hits={h['retrieval_hits']}")
     return 0
+
+
+def _run_evolve_credit_cli(args) -> int:
+    """evolve credit：信度分配，定位关键回合（校准偏差 + 价值落差 + 反事实确认）。"""
+    import json
+
+    from .battle.evolution.analysis import analyze_record
+    from .battle.evolution.credit import mine_critical_turns
+
+    with open(args.traj, encoding="utf-8") as f:
+        record = json.load(f)
+    analysis = analyze_record(record)
+    cards = mine_critical_turns(analysis, record, M=args.m)
+    console.print(f"[bold]evolve credit[/bold] traj={args.traj}  cards={len(cards)}")
+    for c in cards[:10]:
+        console.print(f"  T{c['turn_no']:>3} {c['side']} delta={c['delta_winrate']:+.3f} "
+                      f"signals={','.join(c['signals']) or '-'}")
+    if len(cards) > 10:
+        console.print(f"  … 其余 {len(cards) - 10} 张卡片省略")
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            for c in cards:
+                f.write(json.dumps(c, ensure_ascii=False) + "\n")
+        console.print(f"卡片写入 {len(cards)} 条 → {args.out}")
+    if args.repeat:
+        cards2 = mine_critical_turns(analysis, record, M=args.m)
+        same = json.dumps(cards, sort_keys=True) == json.dumps(cards2, sort_keys=True)
+        console.print(f"确定性复现：{'✅ 逐位一致' if same else '❌ 不一致'}")
+        return 0 if (analysis.replay_ok and same) else 1
+    return 0 if analysis.replay_ok else 1
 
 
 def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
