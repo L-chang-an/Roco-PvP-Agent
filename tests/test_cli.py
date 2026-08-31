@@ -4,6 +4,7 @@ import builtins
 
 import pytest
 
+import rock_pvp_agent
 import rock_pvp_agent.__main__ as climod
 from rock_pvp_agent.agent import ChatReply
 
@@ -47,7 +48,7 @@ def test_version_flag(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["--version"])
     assert exc.value.code == 0
-    assert "0.1.0" in capsys.readouterr().out
+    assert rock_pvp_agent.__version__ in capsys.readouterr().out
 
 
 def test_serve_calls_run_ui(monkeypatch, capsys):

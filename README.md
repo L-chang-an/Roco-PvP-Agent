@@ -1,11 +1,11 @@
 # Rock PVP Agent
 
-<!--
-正式发布前请替换 OWNER/REPOSITORY，并根据实际 CI、许可证和发布渠道启用徽章。
-
-[![Tests](https://github.com/OWNER/REPOSITORY/actions/workflows/tests.yml/badge.svg)](https://github.com/OWNER/REPOSITORY/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/Python-3.10--3.13-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-TBD-lightgrey.svg)](#开源协议)
+[![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
+
+<!--
+配置 CI 后启用测试徽章：
+[![Tests](https://github.com/L-chang-an/Rock-PvP-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/L-chang-an/Rock-PvP-Agent/actions/workflows/tests.yml)
 -->
 
 Rock PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化构建的实验性 Agent 项目。项目包含可独立运行的确定性对战引擎、组队顾问（Chat Agent）、Web 界面、人类与 Agent 对战、Agent 自博弈、轨迹重放，以及带评测门禁的策略进化管线。
@@ -29,7 +29,6 @@ Rock PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 - [贡献指南](#贡献指南)
 - [安全与隐私](#安全与隐私)
 - [常见问题](#常见问题)
-- [特别鸣谢](#特别鸣谢)
 - [开源协议](#开源协议)
 - [免责声明](#免责声明)
 
@@ -154,7 +153,7 @@ flowchart LR
 ### 1. 获取项目
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone https://github.com/L-chang-an/Rock-PvP-Agent.git
 cd MySelfPlayAgent
 ```
 
@@ -421,11 +420,11 @@ uv build
 
 | 来源 | 当前值 | 备注 |
 |---|---|---|
-| `pyproject.toml` | `0.1.0` | 项目元数据版本 |
-| 包内 `__version__` | `0.1.0` | 与 `pyproject.toml` 一致 |
+| `pyproject.toml` | `0.2.0` | 项目元数据版本 |
+| 包内 `__version__` | `0.2.0` | 与 `pyproject.toml` 一致 |
+| Git 标签 | `v0.2.0` | 与上述版本对齐 |
 
-> [!WARNING]
-> 正式发布前需要统一 Git 标签、`pyproject.toml` 和 `rock_pvp_agent.__version__`，并补充 CHANGELOG。在统一之前，不建议发布新的安装包或对外声明确定版本号。
+版本变更记录见 [CHANGELOG](CHANGELOG.md)。
 
 ### 版本策略模板
 
@@ -441,7 +440,7 @@ uv build
 
 ### 近期
 
-- [ ] 统一包版本、Git 标签和 Changelog；
+- [x] 统一包版本、Git 标签和 Changelog（v0.2.0）；
 - [ ] 完善 README、API、轨迹 schema 和数据版本文档；
 - [ ] 补全人机对战轨迹的模型、Playbook 和数据来源信息；
 - [ ] 增加浏览器端 XSS、并发会话和路径安全测试。
@@ -462,34 +461,7 @@ uv build
 
 ## 贡献指南
 
-<!-- 正式开源后可将本节迁移到 CONTRIBUTING.md。 -->
-
-欢迎通过 Issue 和 Pull Request 参与项目。在提交修改前，请遵循以下流程：
-
-1. 先描述问题、目标和影响范围；
-2. 一次提交只解决一个清晰问题；
-3. 为行为变化增加测试，包括至少一个失败或边界场景；
-4. 执行相关模块测试和全量测试；
-5. 更新 README、Changelog 或相应文档；
-6. 不提交 `.env`、API Key、真实用户轨迹和大体积运行产物。
-
-提交信息建议采用：
-
-```text
-feat: add ...
-fix: prevent ...
-docs: update ...
-test: cover ...
-refactor: simplify ...
-```
-
-正式公开仓库后，请补充：
-
-- Issue 模板；
-- Pull Request 模板；
-- 行为准则；
-- 贡献者许可约定；
-- 维护者和代码审查规则。
+欢迎通过 Issue 和 Pull Request 参与项目。提交流程、模板与行为准则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 安全与隐私
 
@@ -527,45 +499,12 @@ uv run python -m rock_pvp_agent selfplay --help
 uv run python -m rock_pvp_agent evolve --help
 ```
 
-## 特别鸣谢
-
-本项目的开发和运行依赖以下开源项目与生态：
-
-- [Python](https://www.python.org/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Pydantic](https://docs.pydantic.dev/)
-- [LangChain](https://python.langchain.com/)
-- [Rich](https://rich.readthedocs.io/)
-- [uv](https://docs.astral.sh/uv/)
-- [pytest](https://pytest.org/)
-
-策略进化、Agent 记忆和对局搜索部分参考了相关强化学习、Agentic RL、Skill Optimization、Monte Carlo 搜索和多智能体博弈研究。相关论文见 [tmpdocs/reference/](tmpdocs/reference/)。正式发布时，应在此处补充完整论文名称、作者、链接和引用格式。
-
 ## 开源协议
 
-当前仓库尚未提供 `LICENSE` 文件，因此目前不能默认视为 MIT、Apache-2.0 或其他开源协议项目。
+本项目基于 [Apache-2.0](LICENSE) 许可证发布，详情见 [LICENSE](LICENSE)。
 
-正式开源前，请由项目所有者选择并添加许可证：
-
-| 许可证 | 适合情况 | 主要特点 |
-|---|---|---|
-| MIT | 希望限制较少、便于复用 | 简短宽松，保留版权和许可声明 |
-| Apache-2.0 | 希望加入明确专利授权 | 宽松，包含专利条款和 NOTICE 机制 |
-| GPL-3.0 | 希望衍生项目继续开源 | 强 Copyleft |
-| AGPL-3.0 | 希望网络服务修改也公开源码 | 比 GPL 更强调网络部署 |
-| Proprietary | 暂不开放复制和再分发 | 需要自行编写授权条款 |
-
-选定后应完成三项工作：
-
-1. 在项目根目录添加标准 `LICENSE` 文件；
-2. 将本节替换为明确的许可证名称和链接；
-3. 核对精灵数据、图片、名称、论文和第三方代码是否拥有兼容的使用权。
-
-许可证确定后的推荐写法：
-
-```text
-本项目基于 [LICENSE_NAME] 许可证发布，详情见 [LICENSE](LICENSE)。
-```
+- 代码部分遵循 Apache License 2.0（宽松，含专利授权条款与 NOTICE 机制）；
+- 内置精灵、技能与家族数据为项目自制或整理；涉及第三方游戏资料时，其知识产权归各自权利人所有，详见[免责声明](#免责声明)。
 
 ## 免责声明
 
@@ -576,14 +515,13 @@ uv run python -m rock_pvp_agent evolve --help
 ---
 
 <!--
-发布前最终检查：
+发布前剩余待办（完成后移除本节）：
 
-- [ ] 替换 REPOSITORY_URL、OWNER/REPOSITORY 和安全联系地址
 - [ ] 添加项目 Logo 和真实截图
-- [ ] 统一 Git tag、pyproject.toml、__version__ 和 CHANGELOG
-- [ ] 确认安装、CLI、Web、自博弈和 evolve 示例均可运行
-- [ ] 添加 LICENSE、CONTRIBUTING.md、SECURITY.md 和 CODE_OF_CONDUCT.md
+- [ ] 配置 CI（.github/workflows）并启用 Tests 徽章
+- [ ] 添加 SECURITY.md 和 CODE_OF_CONDUCT.md
 - [ ] 核对所有第三方数据、论文、图像和商标的引用与授权
 - [ ] 更新测试数量、覆盖率和 CI 徽章
-- [ ] 明确标识稳定功能、实验功能和未来规划
+
+已完成：仓库地址替换、Git tag/pyproject.toml/__version__/CHANGELOG 统一（v0.2.0）、LICENSE（Apache-2.0）、CONTRIBUTING.md。
 -->
