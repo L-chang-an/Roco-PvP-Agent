@@ -125,6 +125,11 @@ def run_selfplay(*, seed: int, team_size: int = 3, lives: int = 2, max_turns: in
         turn_log = getattr(players[side], "_turn_log", None)
         if turn_log:
             record[f"analysis_{side}"] = turn_log
+    # G2：开局加载的 GlobalMem entry_id（G3 分析师据此决定 update/create；G5 据此更新 Q）。
+    for side in ("a", "b"):
+        gm_id = getattr(players[side], "loaded_global_mem_id", None)
+        if gm_id:
+            record[f"global_mem_{side}"] = gm_id
     path = None
     if out_dir is not None:
         path = TrajectoryStore(out_dir).save(record)

@@ -443,6 +443,45 @@ def search_global_mem(store: GlobalMemStore, query: MatchupQuery, *,
     return [e for _, _, e in scored[:top_k]]
 
 
+def matchup_key_from_observation(observation: dict, *,
+                                 source: DataSource = DEFAULT_SOURCE) -> str:
+    """迷雾 observation → matchup_key（G2 注入路径用，**不需要 roster spec**）。
+
+    为什么能这么做：引擎的迷雾模型是「团队预览」——`me` 侧全见（含 stats.speed 与技能名），
+    `opponent` 侧公开精灵名/系别但技能未揭示，`rules` 段含 team_size/lives。三个分量齐全，
+    且全部是玩家**合法可见**的信息，比把 roster spec 传进玩家更安全（后者会绕过迷雾）。
+
+    对手侧只取 `types`/`names`（与 `matchup_key` 同口径，防技能透题）。
+    """
+    me, foe = observation["me"], observation["opponent"]
+    rules = observation.get("rules") or {}
+    my_roster = [{"name": u.get("name", ""), "types": u.get("types") or [],
+                  "stats": u.get("stats") or {},
+                  "skills": [s.get("name") for s in (u.get("skills") or [])]}
+                 for u in me["units"]]
+    foe_roster = [{"name": u.get("name", ""), "types": u.get("types") or []}
+                  for u in foe["units"]]
+    return matchup_key(my_roster, foe_roster,
+                       team_size=rules.get("team_size", len(my_roster)),
+                       lives=rules.get("lives", 0), source=source)
+
+
+def make_global_retriever(store: "GlobalMemStore", *, data_digest: str,
+                          source: DataSource = DEFAULT_SOURCE,
+                          delta: float = DEFAULT_DELTA, lam: float = DEFAULT_LAM,
+                          top_k: int = DEFAULT_TOP_K):
+    """构造 GlobalMem 检索器 `(side, observation) -> list[dict]`（注入 LLMPlayer 用）。
+
+    闭包捕获 store 与当前 `data_digest`（跨版本硬隔离）。签名吃 observation 而非
+    matchup_key —— 因为建键需要 evolution 层的 `matchup_key`，玩家不能 import（循环依赖）。
+    """
+    def retrieve(_side: str, observation: dict) -> list[dict]:
+        key = matchup_key_from_observation(observation, source=source)
+        return search_global_mem(store, MatchupQuery(matchup_key=key, data_digest=data_digest),
+                                 delta=delta, lam=lam, top_k=top_k)
+    return retrieve
+
+
 def update_global_q(store: GlobalMemStore, entry_id: str, won: bool, *,
                     alpha: float = DEFAULT_ALPHA) -> float:
     """加载过的 GlobalMem 打完一局 → Q 的 EMA 更新 + 使用计数。
