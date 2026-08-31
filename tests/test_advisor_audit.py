@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 
 from environment.dataset import DataSource
-from rock_pvp_agent.advisor.audit import AnswerAudit, log_answer, revalidate
-from rock_pvp_agent.advisor.validate import validate_team
+from roco_pvp_agent.advisor.audit import AnswerAudit, log_answer, revalidate
+from roco_pvp_agent.advisor.validate import validate_team
 from environment.teambuilder import TeamPick
 
 _LEGAL_TEAM = [

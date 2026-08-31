@@ -23,7 +23,7 @@ from environment.players import ScriptedPlayer  # noqa: E402
 from environment.rules import DEFAULT_RULES  # noqa: E402
 from environment.session import BattleSession  # noqa: E402
 from environment.teambuilder import learnable_skills  # noqa: E402
-from rock_pvp_agent.config import Settings  # noqa: E402
+from roco_pvp_agent.config import Settings  # noqa: E402
 from ui.battle import BattleController  # noqa: E402
 from ui.server import create_chat_app  # noqa: E402
 

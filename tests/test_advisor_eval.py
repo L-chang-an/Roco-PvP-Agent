@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from rock_pvp_agent.advisor.eval.cases import CATEGORIES, CASES, EvalCase
-from rock_pvp_agent.advisor.eval.run import cluster_failures, gate, run_case, run_eval
+from roco_pvp_agent.advisor.eval.cases import CATEGORIES, CASES, EvalCase
+from roco_pvp_agent.advisor.eval.run import cluster_failures, gate, run_case, run_eval
 
 _ILLEGAL_TEAM = [
     {"spirit": "迪莫", "skills": ["抓挠"], "bloodline": "", "nature": "坦率", "iv": {}},

@@ -22,7 +22,7 @@ from environment.rules import BattleRules
 from environment.session import BattleSession
 from environment.visibility import filter_events_for
 
-from rock_pvp_agent.battle.player import FakeLLMPlayer
+from roco_pvp_agent.battle.player import FakeLLMPlayer
 
 
 def _rules_dict(r: BattleRules) -> dict:

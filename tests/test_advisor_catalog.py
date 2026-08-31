@@ -7,7 +7,7 @@ import pytest
 import environment.datafingerprint as fp
 from environment.dataset import DataSource, load_families, load_skills, load_spirits
 from environment.teambuilder import learnable_skills
-from rock_pvp_agent.advisor.catalog import (
+from roco_pvp_agent.advisor.catalog import (
     QueryNotAllowed,
     SpiritFilter,
     get_build_options,

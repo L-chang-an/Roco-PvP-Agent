@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from rock_pvp_agent.advisor.agent import TeamAdvisorAgent
-from rock_pvp_agent.advisor.scope import (
+from roco_pvp_agent.advisor.agent import TeamAdvisorAgent
+from roco_pvp_agent.advisor.scope import (
     AMBIGUOUS_TEMPLATE,
     OUT_OF_SCOPE_TEMPLATE,
     REFUSE_TEMPLATE,

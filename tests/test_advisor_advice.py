@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from environment.datafingerprint import data_digest
 from environment.dataset import DataSource, load_spirits
-from rock_pvp_agent.advisor.advice import TeamAdviceSchema, submit_team_advice
+from roco_pvp_agent.advisor.advice import TeamAdviceSchema, submit_team_advice
 
 _BOSS = next(s.name for s in load_spirits(DataSource.VALID).values() if s.is_boss)
 

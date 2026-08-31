@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rock-pvp-agent"
+name = "roco-pvp-agent"
 version = "0.2.0"
-description = "Rock PVP Agent — 人机协作从零重建的自对战 LLM agent（chat mode 起步）"
+description = "Roco PVP Agent — 人机协作从零重建的自对战 LLM agent（chat mode 起步）"
 license = "Apache-2.0"
 requires-python = ">=3.10,<3.14"
 dependencies = [
@@ -22,7 +22,7 @@ ui = ["fastapi>=0.115.0", "uvicorn>=0.30.0"]
 [tool.hatch.build.targets.wheel]
 # packages 模式：每个包目录下的全部文件（含 environment/data、ui/static）自动进 wheel，
 # 无需 force-include（原 force-include 会与 packages 重复导致构建失败，2026-08-25 移除）。
-packages = ["src/rock_pvp_agent", "src/environment", "src/ui"]
+packages = ["src/roco_pvp_agent", "src/environment", "src/ui"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

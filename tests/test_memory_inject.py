@@ -9,10 +9,10 @@ from langchain_core.messages import AIMessage
 from environment.players import RandomPlayer
 from environment.rules import DEFAULT_RULES
 from environment.session import BattleSession
-from rock_pvp_agent.battle.evolution.memory import MemoryStore, make_entry_id
-from rock_pvp_agent.battle.evolution.memory_inject import apply_adoption
-from rock_pvp_agent.battle.player import LLMPlayer, _render_memories
-from rock_pvp_agent.config import Settings
+from roco_pvp_agent.battle.evolution.memory import MemoryStore, make_entry_id
+from roco_pvp_agent.battle.evolution.memory_inject import apply_adoption
+from roco_pvp_agent.battle.player import LLMPlayer, _render_memories
+from roco_pvp_agent.config import Settings
 from rosters import spec
 
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from rock_pvp_agent.llm import build_chat_llm, normalize_base_url
-from rock_pvp_agent.tools import build_agent_tools
+from roco_pvp_agent.llm import build_chat_llm, normalize_base_url
+from roco_pvp_agent.tools import build_agent_tools
 
 
 class FakeLLM:
@@ -59,7 +59,7 @@ class _FakeChatOpenAI:
 
 def _monkeypatch_chat(monkeypatch):
     """build_chat_llm 用 ReasoningChatOpenAI（ChatOpenAI 子类），monkeypatch 它。"""
-    from rock_pvp_agent import llm as llm_module
+    from roco_pvp_agent import llm as llm_module
 
     monkeypatch.setattr(llm_module, "ReasoningChatOpenAI", _FakeChatOpenAI)
 
@@ -68,7 +68,7 @@ def _monkeypatch_chat(monkeypatch):
 
 def test_reasoning_content_survives_conversion():
     """真实 ReasonChatOpenAI 把网关的 reasoning_content 捞进 additional_kwargs。"""
-    from rock_pvp_agent.llm import ReasoningChatOpenAI
+    from roco_pvp_agent.llm import ReasoningChatOpenAI
 
     llm = ReasoningChatOpenAI(api_key="sk-test", base_url="http://test.invalid", model="m")
     resp = {
@@ -110,7 +110,7 @@ def test_cache_distinct_for_different_tools(agent_settings, monkeypatch):
 
 
 def test_cache_distinct_for_different_api_key(monkeypatch):
-    from rock_pvp_agent.config import Settings
+    from roco_pvp_agent.config import Settings
 
     _monkeypatch_chat(monkeypatch)
     s1 = Settings(api_key="k1", base_url="http://test.invalid", model="m")

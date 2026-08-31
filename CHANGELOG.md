@@ -33,7 +33,7 @@
 
 ### 新增（M0–M4 完整交付）
 
-- **项目骨架**：`uv` + `hatchling` 工程，Python 3.12，`rock_pvp_agent` 包（v0.1.0）
+- **项目骨架**：`uv` + `hatchling` 工程，Python 3.12，`roco_pvp_agent` 包（v0.1.0）
 - **CLI chat**：单发 `-q` / 交互 REPL / `--debug` / `--version` / `--serve`
 - **配置**：pydantic `Settings` + `.env` 加载（`LLM_API_KEY` 回退 `OPENAI_API_KEY`），缺 key 自动离线降级
 - **LLM 层**：`build_chat_llm` 工厂（线程安全缓存、注入缝）+ `normalize_base_url`（自动补 `/v1`）

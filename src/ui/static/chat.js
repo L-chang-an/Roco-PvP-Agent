@@ -2,7 +2,7 @@
 
 /** 聊天逻辑：session 管理、SSE 消费、事件渲染、POST 兜底。 */
 
-const SESSION_KEY = "rock_pvp_session_id";
+const SESSION_KEY = "roco_pvp_session_id";
 
 function getSessionId() {
   let id = sessionStorage.getItem(SESSION_KEY);

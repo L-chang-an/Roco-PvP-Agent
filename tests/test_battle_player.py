@@ -17,14 +17,14 @@ from langchain_core.messages import AIMessage, ToolMessage
 from environment.actions import legal_actions
 from environment.rules import DEFAULT_RULES
 from environment.session import BattleSession
-from rock_pvp_agent.battle.player import LLMPlayer, build_side_tools
-from rock_pvp_agent.battle.prompts import (
+from roco_pvp_agent.battle.player import LLMPlayer, build_side_tools
+from roco_pvp_agent.battle.prompts import (
     _describe_action,
     render_events,
     render_observation,
     render_replacement,
 )
-from rock_pvp_agent.config import Settings
+from roco_pvp_agent.config import Settings
 
 from fakes import AlwaysToolLLM, ScriptedLLM, tool_call
 from rosters import RULES_1V1, duel, spec
@@ -225,7 +225,7 @@ def test_battle_act_tool_standalone_sentinel() -> None:
 def test_fake_llm_summarize_unknown_action() -> None:
     """_summarize_decision 兜底分支（未知 action type）——防御性文案。"""
     from environment.actions import Decision
-    from rock_pvp_agent.battle.player import _summarize_decision
+    from roco_pvp_agent.battle.player import _summarize_decision
     assert "行动 banana" in _summarize_decision(Decision(action={"type": "banana"}))
 
 

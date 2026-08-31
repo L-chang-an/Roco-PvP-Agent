@@ -7,7 +7,7 @@
 - 事件顺序契约：meta → thinking* → tool* → reply → done（meta 由本服务补发）。
 - 组队页：`/team` 静态页 + `/api/team/*` REST（见 routes_team.py）。
 
-注意：本包已提级为顶层 `ui`（原 `rock_pvp_agent.ui`），依赖 `rock_pvp_agent` 的
+注意：本包已提级为顶层 `ui`（原 `roco_pvp_agent.ui`），依赖 `roco_pvp_agent` 的
 agent/config 层走绝对导入。
 """
 
@@ -23,9 +23,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from rock_pvp_agent.advisor.agent import TeamAdvisorAgent
-from rock_pvp_agent.agent import EVENT_DONE, EVENT_REPLY
-from rock_pvp_agent.config import Settings, get_settings
+from roco_pvp_agent.advisor.agent import TeamAdvisorAgent
+from roco_pvp_agent.agent import EVENT_DONE, EVENT_REPLY
+from roco_pvp_agent.config import Settings, get_settings
 from .context import ChatContext
 from .routes_battle import router as battle_router
 from .routes_team import router as team_router
@@ -86,7 +86,7 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     agent = TeamAdvisorAgent(settings, llm=llm)
     context = ChatContext(agent)
 
-    app = FastAPI(title="Rock PVP Agent")
+    app = FastAPI(title="Roco PVP Agent")
     app.state.agent = agent
     app.state.context = context
     app.state.settings = settings

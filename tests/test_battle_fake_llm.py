@@ -1,4 +1,4 @@
-"""假 LLM 对战玩家测试（rock_pvp_agent/battle/player.py）。
+"""假 LLM 对战玩家测试（roco_pvp_agent/battle/player.py）。
 
 FakeLLMPlayer = 固定回复前缀 + 随机动作（委托 RandomPlayer，独立 RNG 流）。
 真实 LLM 玩家以后实现同一个 Player Protocol；本测试钉死假玩家的行为契约。
@@ -12,7 +12,7 @@ pytest.importorskip("fastapi")  # 未装 ui extra 时优雅跳过（该模块依
 
 from environment.actions import Decision, validate_decision  # noqa: E402
 from environment.session import BattleSession  # noqa: E402
-from rock_pvp_agent.battle.player import FIXED_REPLY_PREFIX, FakeLLMPlayer  # noqa: E402
+from roco_pvp_agent.battle.player import FIXED_REPLY_PREFIX, FakeLLMPlayer  # noqa: E402
 
 from rosters import RULES_1V1, duel  # noqa: E402
 

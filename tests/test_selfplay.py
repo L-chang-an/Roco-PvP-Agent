@@ -1,4 +1,4 @@
-"""自博弈编排 + 轨迹落盘（E6）：`rock_pvp_agent/battle/selfplay.py` + `store.py`。
+"""自博弈编排 + 轨迹落盘（E6）：`roco_pvp_agent/battle/selfplay.py` + `store.py`。
 
 覆盖：自博弈打完 + 重放自检、同 seed 确定性、落盘 + index.jsonl 保序、坏行容错、
 battle_id 防穿越、**迷雾隔离**（传给玩家的观测 == E4 白名单）、`run_match` 记录补位。
@@ -24,10 +24,10 @@ from environment.players import RandomPlayer, ScriptedPlayer
 from environment.rules import DEFAULT_RULES
 from environment.session import BattleSession
 
-from rock_pvp_agent.battle.player import FakeLLMPlayer, LLMPlayer
-from rock_pvp_agent.battle.selfplay import build_player, run_selfplay, run_spectate
-from rock_pvp_agent.battle.store import TrajectoryStore
-from rock_pvp_agent.config import Settings
+from roco_pvp_agent.battle.player import FakeLLMPlayer, LLMPlayer
+from roco_pvp_agent.battle.selfplay import build_player, run_selfplay, run_spectate
+from roco_pvp_agent.battle.store import TrajectoryStore
+from roco_pvp_agent.config import Settings
 
 from fakes import AlwaysToolLLM
 from rosters import spec
@@ -157,12 +157,12 @@ def test_run_match_records_replacements() -> None:
 
 
 def test_selfplay_cli_smoke(tmp_path) -> None:
-    """`python -m rock_pvp_agent selfplay --games 1 --seed 7`：打一局 + 落盘 + replay=✅。"""
+    """`python -m roco_pvp_agent selfplay --games 1 --seed 7`：打一局 + 落盘 + replay=✅。"""
     root = Path(__file__).resolve().parents[1]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root / "src") + os.pathsep + env.get("PYTHONPATH", "")
     out = subprocess.run(
-        [sys.executable, "-m", "rock_pvp_agent", "selfplay", "--games", "1",
+        [sys.executable, "-m", "roco_pvp_agent", "selfplay", "--games", "1",
          "--seed", "7", "--out", str(tmp_path)],
         capture_output=True, text=True, cwd=root, env=env, timeout=120,
     )
@@ -330,7 +330,7 @@ def test_selfplay_cli_llm_no_key_degrades(tmp_path) -> None:
     env["LLM_API_KEY"] = ""
     env["OPENAI_API_KEY"] = ""
     out = subprocess.run(
-        [sys.executable, "-m", "rock_pvp_agent", "selfplay",
+        [sys.executable, "-m", "roco_pvp_agent", "selfplay",
          "--a", "llm", "--b", "llm", "--games", "1", "--seed", "7", "--out", str(tmp_path)],
         capture_output=True, text=True, cwd=root, env=env, timeout=120,
     )

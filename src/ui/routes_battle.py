@@ -312,8 +312,8 @@ def spectate_stream(seed: int = 7, a: str = "llm", b: str = "llm",
     帧协议：`meta → state → turn* → done`（见 `run_spectate`）。两个 LLM 玩家仍走迷雾口径
     （`drive_turn` 只喂 `view()` + 过滤事件）——只有流本身是全局的。配置错误 → `error` 帧。
     """
-    from rock_pvp_agent.battle.selfplay import run_spectate
-    from rock_pvp_agent.config import get_settings
+    from roco_pvp_agent.battle.selfplay import run_spectate
+    from roco_pvp_agent.config import get_settings
 
     def _gen():
         try:

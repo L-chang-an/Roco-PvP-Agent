@@ -9,7 +9,7 @@ pytest.importorskip("fastapi")  # 未装 ui extra 时优雅跳过，不硬失败
 from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
 
-from rock_pvp_agent.config import Settings  # noqa: E402
+from roco_pvp_agent.config import Settings  # noqa: E402
 from ui.server import create_chat_app  # noqa: E402
 
 from fakes import ScriptedLLM, tool_call  # noqa: E402
@@ -47,7 +47,7 @@ def test_index_serves_html():
     res = _client(_final_llm()).get("/")
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
-    assert "Rock PVP Agent" in res.text
+    assert "Roco PVP Agent" in res.text
 
 
 def test_static_files_served():

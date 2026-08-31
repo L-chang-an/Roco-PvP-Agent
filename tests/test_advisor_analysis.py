@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from environment.dataset import DataSource, load_skills
 from environment.types import TYPE_NAMES, type_effectiveness
-from rock_pvp_agent.advisor.analysis import analyze_team
+from roco_pvp_agent.advisor.analysis import analyze_team
 
 from rosters import mirror_pair
 

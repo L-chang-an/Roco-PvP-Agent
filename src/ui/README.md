@@ -1,6 +1,6 @@
 # ui — Web 界面（FastAPI + SSE）
 
-本目录是 Web 界面：聊天（组队顾问）、组队页、对战页、观战流。依赖 `rock_pvp_agent` 与 `environment`（绝对导入）。
+本目录是 Web 界面：聊天（组队顾问）、组队页、对战页、观战流。依赖 `roco_pvp_agent` 与 `environment`（绝对导入）。
 
 ## 模块
 
@@ -25,5 +25,5 @@
 
 ```bash
 uv sync --all-extras
-python -m rock_pvp_agent --serve      # 或 python -m ui
+python -m roco_pvp_agent --serve      # 或 python -m ui
 ```

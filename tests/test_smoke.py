@@ -3,14 +3,14 @@
 import re
 from pathlib import Path
 
-import rock_pvp_agent
+import roco_pvp_agent
 
 
 def test_import_package() -> None:
-    assert rock_pvp_agent is not None
+    assert roco_pvp_agent is not None
 
 
 def test_version() -> None:
-    assert re.fullmatch(r"\d+\.\d+\.\d+", rock_pvp_agent.__version__)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", roco_pvp_agent.__version__)
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert f'version = "{rock_pvp_agent.__version__}"' in pyproject.read_text()
+    assert f'version = "{roco_pvp_agent.__version__}"' in pyproject.read_text()

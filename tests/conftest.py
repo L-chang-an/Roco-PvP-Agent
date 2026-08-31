@@ -5,7 +5,7 @@ M1：agent_settings（完全离线）；fake LLM 类放在 tests/fakes.py。
 
 import pytest
 
-from rock_pvp_agent.config import Settings
+from roco_pvp_agent.config import Settings
 
 
 @pytest.fixture

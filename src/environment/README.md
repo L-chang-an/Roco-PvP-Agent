@@ -1,7 +1,7 @@
 # environment — E 线：确定性回合制战斗引擎
 
 本目录是项目的**冻结地基**：一个纯 Python、零第三方依赖的回合制精灵对战引擎。它不 import 任何
-`rock_pvp_agent` / `ui` 代码（隔离不变量），只提供数据加载、组队校验、回合结算、重放与观测。
+`roco_pvp_agent` / `ui` 代码（隔离不变量），只提供数据加载、组队校验、回合结算、重放与观测。
 
 ## 设计原则
 
@@ -42,6 +42,6 @@
 
 - **加一个技能效果**：在 `skillbook` 的效果表注册，实现结算逻辑（`effects`/`engine`），扩 `data/valid_skills.json` 白名单。改动会改变 `data_digest`，历史轨迹/记忆自动重基线。
 - **加一个特性/状态/天气/印记**：在对应模块实现 + 注册，补确定性/迷雾/重放三不变式测试。
-- **本模块不 import `rock_pvp_agent`**：引擎与 Agent 层解耦，扩展时保持这一隔离。
+- **本模块不 import `roco_pvp_agent`**：引擎与 Agent 层解耦，扩展时保持这一隔离。
 
 详见 `tmpdocs/engine/` 下的引擎设计文档。

@@ -4,9 +4,9 @@ import builtins
 
 import pytest
 
-import rock_pvp_agent
-import rock_pvp_agent.__main__ as climod
-from rock_pvp_agent.agent import ChatReply
+import roco_pvp_agent
+import roco_pvp_agent.__main__ as climod
+from roco_pvp_agent.agent import ChatReply
 
 
 class _FakeAgent:
@@ -34,7 +34,7 @@ class _RichAgent:
 
 
 def _run_main(monkeypatch, args):
-    monkeypatch.setattr("sys.argv", ["rock_pvp_agent", *args])
+    monkeypatch.setattr("sys.argv", ["roco_pvp_agent", *args])
     return climod.main()
 
 
@@ -48,7 +48,7 @@ def test_version_flag(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["--version"])
     assert exc.value.code == 0
-    assert rock_pvp_agent.__version__ in capsys.readouterr().out
+    assert roco_pvp_agent.__version__ in capsys.readouterr().out
 
 
 def test_serve_calls_run_ui(monkeypatch, capsys):

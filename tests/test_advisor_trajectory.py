@@ -15,7 +15,7 @@ from environment.datafingerprint import data_digest as current_data_digest
 from environment.datafingerprint import rules_digest as current_rules_digest
 from environment.presets import p1_preset
 from environment.rules import DEFAULT_RULES
-from rock_pvp_agent.advisor.trajectory import (
+from roco_pvp_agent.advisor.trajectory import (
     TrajectoryEvidence,
     _wilson,
     aggregate,
@@ -24,8 +24,8 @@ from rock_pvp_agent.advisor.trajectory import (
     query_trajectory_evidence,
     team_key,
 )
-from rock_pvp_agent.battle.selfplay import run_selfplay
-from rock_pvp_agent.battle.store import TrajectoryStore
+from roco_pvp_agent.battle.selfplay import run_selfplay
+from roco_pvp_agent.battle.store import TrajectoryStore
 
 
 def _rules_dict() -> dict:

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import ui.routes_team as routes_team  # noqa: E402
 from environment.dataset import DataSource, load_skills, load_spirits  # noqa: E402
 from environment.teambuilder import learnable_skills  # noqa: E402
-from rock_pvp_agent.config import Settings  # noqa: E402
+from roco_pvp_agent.config import Settings  # noqa: E402
 from ui.server import create_chat_app  # noqa: E402
 
 

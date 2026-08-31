@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from rock_pvp_agent.advisor.simulate import _play, simulate_matchups
+from roco_pvp_agent.advisor.simulate import _play, simulate_matchups
 
 from rosters import mirror_pair, spec
 

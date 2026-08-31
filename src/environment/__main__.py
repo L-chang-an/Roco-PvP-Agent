@@ -420,7 +420,7 @@ def main() -> int:
     """CLI 入口。输入：sys.argv（argparse 解析）；输出：进程退出码（0=成功，1=校验失败）。"""
     parser = argparse.ArgumentParser(
         prog="environment",
-        description="Rock PVP battle environment（E0a：组队与数据层 / E0b：回合内核）",
+        description="Roco PVP battle environment（E0a：组队与数据层 / E0b：回合内核）",
     )
     parser.add_argument("--team-report", action="store_true", help="打印阵容与最终六维，末尾校验合法")
     parser.add_argument("--data-report", action="store_true", help="数据自检")

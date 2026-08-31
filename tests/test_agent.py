@@ -5,7 +5,7 @@
 
 from langchain_core.messages import AIMessage
 
-from rock_pvp_agent.agent import ChatAgent, EMPTY_REPLY, OFFLINE_HINT
+from roco_pvp_agent.agent import ChatAgent, EMPTY_REPLY, OFFLINE_HINT
 
 from fakes import AlwaysToolLLM, ScriptedLLM, tool_call
 
@@ -103,7 +103,7 @@ def test_tool_error_is_swallowed(agent_settings):
     """工具执行抛异常 → 吞成错误字符串，不崩（_invoke_tool 的 except 分支）。"""
     from langchain_core.tools import tool as _tool
 
-    from rock_pvp_agent.tools import final_answer
+    from roco_pvp_agent.tools import final_answer
 
     @_tool
     def boom(text: str) -> str:

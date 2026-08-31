@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from environment.players import RandomPlayer
-from rock_pvp_agent.battle.evolution.analysis import analyze_record
-from rock_pvp_agent.battle.evolution.bench import build_instances, paired_eval, wilson_ci
-from rock_pvp_agent.battle.evolution.league import PayoffMatrix, alpha_rank, elo_update
-from rock_pvp_agent.battle.selfplay import run_selfplay
+from roco_pvp_agent.battle.evolution.analysis import analyze_record
+from roco_pvp_agent.battle.evolution.bench import build_instances, paired_eval, wilson_ci
+from roco_pvp_agent.battle.evolution.league import PayoffMatrix, alpha_rank, elo_update
+from roco_pvp_agent.battle.selfplay import run_selfplay
 
 
 # ---------- analysis ----------

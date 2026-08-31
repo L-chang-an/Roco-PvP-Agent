@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from rock_pvp_agent.battle.evolution.bench import build_instances
-from rock_pvp_agent.battle.evolution.league import promotion_gate
-from rock_pvp_agent.battle.evolution.playbook import Playbook
-from rock_pvp_agent.battle.evolution.pool import PlaybookPool
-from rock_pvp_agent.battle.evolution.run import run_steps
+from roco_pvp_agent.battle.evolution.bench import build_instances
+from roco_pvp_agent.battle.evolution.league import promotion_gate
+from roco_pvp_agent.battle.evolution.playbook import Playbook
+from roco_pvp_agent.battle.evolution.pool import PlaybookPool
+from roco_pvp_agent.battle.evolution.run import run_steps
 
 
 def _pool():

@@ -1001,7 +1001,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rock-pvp-agent"
+name = "roco-pvp-agent"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

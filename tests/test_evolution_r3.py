@@ -6,14 +6,14 @@ import json
 
 from langchain_core.messages import AIMessage
 
-from rock_pvp_agent.battle.evolution.editor import EditCandidate, bounded_edit
-from rock_pvp_agent.battle.evolution.playbook import Playbook
-from rock_pvp_agent.battle.evolution.reflect import (
+from roco_pvp_agent.battle.evolution.editor import EditCandidate, bounded_edit
+from roco_pvp_agent.battle.evolution.playbook import Playbook
+from roco_pvp_agent.battle.evolution.reflect import (
     ReflectionService,
     _normalize_module,
     _parse_reflection_json,
 )
-from rock_pvp_agent.config import Settings
+from roco_pvp_agent.config import Settings
 
 
 def _cand(**kw):

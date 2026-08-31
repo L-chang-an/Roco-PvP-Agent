@@ -5,8 +5,8 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage
 
 from environment.datafingerprint import data_digest
-from rock_pvp_agent.agent import ChatAgent
-from rock_pvp_agent.advisor.agent import TeamAdvisorAgent, _build_advisor_tools
+from roco_pvp_agent.agent import ChatAgent
+from roco_pvp_agent.advisor.agent import TeamAdvisorAgent, _build_advisor_tools
 
 from fakes import ScriptedLLM, tool_call
 

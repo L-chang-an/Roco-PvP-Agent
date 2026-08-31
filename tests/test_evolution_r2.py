@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from rock_pvp_agent.battle.evolution.analysis import analyze_record
-from rock_pvp_agent.battle.evolution.credit import calibration_miss, mine_critical_turns
-from rock_pvp_agent.battle.selfplay import run_selfplay
+from roco_pvp_agent.battle.evolution.analysis import analyze_record
+from roco_pvp_agent.battle.evolution.credit import calibration_miss, mine_critical_turns
+from roco_pvp_agent.battle.selfplay import run_selfplay
 
 
 def test_calibration_miss():

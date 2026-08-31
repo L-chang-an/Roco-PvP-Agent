@@ -1,6 +1,6 @@
 # 贡献指南
 
-欢迎通过 Issue 和 Pull Request 参与 Rock PVP Agent 项目。在提交修改前，请遵循以下流程。
+欢迎通过 Issue 和 Pull Request 参与 Roco PVP Agent 项目。在提交修改前，请遵循以下流程。
 
 ## 提交前流程
 

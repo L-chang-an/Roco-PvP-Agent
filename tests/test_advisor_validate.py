@@ -14,7 +14,7 @@ import pytest
 
 from environment.dataset import DataSource, load_families, load_skills, load_spirits, load_types
 from environment.teambuilder import BOSS_BLOODLINE, TeamPick, learnable_skills
-from rock_pvp_agent.advisor.validate import UNKNOWN, TeamValidation, _map_error, validate_team
+from roco_pvp_agent.advisor.validate import UNKNOWN, TeamValidation, _map_error, validate_team
 
 VALID = DataSource.VALID
 _spirits = load_spirits(VALID)

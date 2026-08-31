@@ -1,14 +1,14 @@
-# Rock PVP Agent
+# Roco PVP Agent
 
 [![Python](https://img.shields.io/badge/Python-3.10--3.13-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
 
 <!--
 配置 CI 后启用测试徽章：
-[![Tests](https://github.com/L-chang-an/Rock-PvP-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/L-chang-an/Rock-PvP-Agent/actions/workflows/tests.yml)
+[![Tests](https://github.com/L-chang-an/Roco-PvP-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/L-chang-an/Roco-PvP-Agent/actions/workflows/tests.yml)
 -->
 
-Rock PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化构建的实验性 Agent 项目。项目包含可独立运行的确定性对战引擎、组队顾问（Chat Agent）、Web 界面、人类与 Agent 对战、Agent 自博弈、轨迹重放，以及带评测门禁的策略进化管线。
+Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化构建的实验性 Agent 项目。项目包含可独立运行的确定性对战引擎、组队顾问（Chat Agent）、Web 界面、人类与 Agent 对战、Agent 自博弈、轨迹重放，以及带评测门禁的策略进化管线。
 
 > [!IMPORTANT]
 > 本项目目前处于研究与开发阶段。自进化、价值评估和长期记忆等功能应视为实验能力；任何“策略提升”结论都需要在真实模型、独立数据集和完整评测上下文下复验。
@@ -37,7 +37,7 @@ Rock PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 本项目希望为精灵对战场景提供一套可运行、可重放、可评测、可扩展的 Agent 基础设施。它由三线 + UI 组成，共享同一套引擎与数据指纹：
 
 - `environment`：负责精灵数据、队伍校验、战斗规则、状态转移、迷雾视角和确定性重放（纯 Python、零引擎依赖）；
-- `rock_pvp_agent`：负责 Chat Agent、LLM 接入、组队顾问、对战玩家、自博弈和策略进化；
+- `roco_pvp_agent`：负责 Chat Agent、LLM 接入、组队顾问、对战玩家、自博弈和策略进化；
 - `ui`：提供聊天、组队、对战和观战页面，以及对应的 REST/SSE 接口。
 
 项目既可以在没有 API Key 的情况下运行确定性离线模式，也可以连接兼容 OpenAI Chat Completions API 的模型服务。
@@ -153,7 +153,7 @@ flowchart LR
 ### 1. 获取项目
 
 ```bash
-git clone https://github.com/L-chang-an/Rock-PvP-Agent.git
+git clone https://github.com/L-chang-an/Roco-PvP-Agent.git
 cd MySelfPlayAgent
 ```
 
@@ -184,7 +184,7 @@ DEBUG=false
 ### 4. 运行一次验证
 
 ```bash
-uv run python -m rock_pvp_agent --version
+uv run python -m roco_pvp_agent --version
 uv run pytest -q
 ```
 
@@ -195,25 +195,25 @@ uv run pytest -q
 单轮提问：
 
 ```bash
-uv run python -m rock_pvp_agent -q "帮我组个克制水系的三精灵队"
+uv run python -m roco_pvp_agent -q "帮我组个克制水系的三精灵队"
 ```
 
 进入交互模式：
 
 ```bash
-uv run python -m rock_pvp_agent
+uv run python -m roco_pvp_agent
 ```
 
 显示调试信息：
 
 ```bash
-uv run python -m rock_pvp_agent --debug
+uv run python -m roco_pvp_agent --debug
 ```
 
 ### Web UI
 
 ```bash
-uv run python -m rock_pvp_agent --serve
+uv run python -m roco_pvp_agent --serve
 ```
 
 也可以直接启动 UI 包：
@@ -235,8 +235,8 @@ uv run python -m ui
 默认只监听 `127.0.0.1`。如需修改：
 
 ```env
-ROCK_UI_HOST=127.0.0.1
-ROCK_UI_PORT=8001
+ROCO_UI_HOST=127.0.0.1
+ROCO_UI_PORT=8001
 ```
 
 ### Agent 自博弈
@@ -244,14 +244,14 @@ ROCK_UI_PORT=8001
 运行两局确定性测试对战：
 
 ```bash
-uv run python -m rock_pvp_agent selfplay \
+uv run python -m roco_pvp_agent selfplay \
   --games 2 --seed 7 --a fake_llm --b random --out runs
 ```
 
 使用真实 LLM：
 
 ```bash
-uv run python -m rock_pvp_agent selfplay \
+uv run python -m roco_pvp_agent selfplay \
   --games 2 --a llm --b llm --out runs
 ```
 
@@ -262,34 +262,34 @@ uv run python -m rock_pvp_agent selfplay \
 查看所有进化子命令：
 
 ```bash
-uv run python -m rock_pvp_agent evolve --help
+uv run python -m roco_pvp_agent evolve --help
 ```
 
 常用示例：
 
 ```bash
 # 配对评测
-uv run python -m rock_pvp_agent evolve eval --bench d_sel --games 8
+uv run python -m roco_pvp_agent evolve eval --bench d_sel --games 8
 
 # 从轨迹提取反馈与经验
-uv run python -m rock_pvp_agent evolve reflect \
+uv run python -m roco_pvp_agent evolve reflect \
   --traj runs/example.json --out artifacts/memory
 
 # 识别关键回合并运行反事实分析
-uv run python -m rock_pvp_agent evolve credit \
+uv run python -m roco_pvp_agent evolve credit \
   --traj runs/example.json --out artifacts/critical-cards.jsonl
 
 # 单步进化：rollout → credit → reflect → edit
-uv run python -m rock_pvp_agent evolve step --seed 7 --out artifacts
+uv run python -m roco_pvp_agent evolve step --seed 7 --out artifacts
 
 # 多步进化（R4：池 + 两级门 + 剥削者 + 回归门）
-uv run python -m rock_pvp_agent evolve steps --n 4 --seed 7 --out artifacts
+uv run python -m roco_pvp_agent evolve steps --n 4 --seed 7 --out artifacts
 
 # 长期 epoch 调度（R5：慢更新 + D_test 汇报）
-uv run python -m rock_pvp_agent evolve epoch --n 8 --e 8 --seed 7 --out artifacts
+uv run python -m roco_pvp_agent evolve epoch --n 8 --e 8 --seed 7 --out artifacts
 
 # 记忆健康度
-uv run python -m rock_pvp_agent evolve health --memory artifacts/memory
+uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 ```
 
 使用真实 LLM 参与策略评测或优化时，根据子命令增加 `--llm`。未配置 API Key 时的确定性代理结果只能用于验证流程，不能单独证明 LLM 策略提升。
@@ -306,8 +306,8 @@ uv run python -m rock_pvp_agent evolve health --memory artifacts/memory
 | `LLM_BASE_URL` | 空 | OpenAI 兼容接口地址；空值使用客户端默认地址 |
 | `LLM_TIMEOUT` | `60` | 请求超时时间，单位为秒 |
 | `DEBUG` | `false` | 是否开启调试模式 |
-| `ROCK_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
-| `ROCK_UI_PORT` | `8001` | Web UI 监听端口 |
+| `ROCO_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
+| `ROCO_UI_PORT` | `8001` | Web UI 监听端口 |
 
 ### 实验性记忆配置
 
@@ -325,7 +325,7 @@ uv run python -m rock_pvp_agent evolve health --memory artifacts/memory
 | `MEMORY_ALPHA` | `0.3` | Q 值 EMA 更新系数 |
 | `MEMORY_COUNTERFACTUAL_M` | `24` | 反事实回放次数 |
 
-其余高级参数可参考 `src/rock_pvp_agent/config.py`。修改实验参数时，应在结果中同时记录配置、模型、规则、数据和 Playbook 版本。
+其余高级参数可参考 `src/roco_pvp_agent/config.py`。修改实验参数时，应在结果中同时记录配置、模型、规则、数据和 Playbook 版本。
 
 ## 数据与输出
 
@@ -352,7 +352,7 @@ uv run python -m rock_pvp_agent evolve health --memory artifacts/memory
 MySelfPlayAgent/
 ├── src/
 │   ├── environment/                 # E 线：对战数据、规则、状态机、迷雾和重放（纯 Python）
-│   ├── rock_pvp_agent/
+│   ├── roco_pvp_agent/
 │   │   ├── agent.py                 # ChatAgent 工具循环（基类）
 │   │   ├── config.py                # 环境变量与运行配置
 │   │   ├── llm.py                   # LLM 客户端构造
@@ -385,7 +385,7 @@ uv run pytest -q
 
 ```bash
 uv run pytest \
-  --cov=rock_pvp_agent \
+  --cov=roco_pvp_agent \
   --cov=environment \
   --cov=ui \
   --cov-report=term-missing
@@ -494,9 +494,9 @@ uv build
 ### 如何查看全部命令？
 
 ```bash
-uv run python -m rock_pvp_agent --help
-uv run python -m rock_pvp_agent selfplay --help
-uv run python -m rock_pvp_agent evolve --help
+uv run python -m roco_pvp_agent --help
+uv run python -m roco_pvp_agent selfplay --help
+uv run python -m roco_pvp_agent evolve --help
 ```
 
 ## 开源协议

@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from rock_pvp_agent.advisor.skills import (
+from roco_pvp_agent.advisor.skills import (
     Skill,
     load_skills,
     register_skill,
@@ -31,7 +31,7 @@ def test_load_skills_detects_tampered_body(tmp_path, monkeypatch):
     bad_dir = tmp_path / "skills"
     bad_dir.mkdir()
     (bad_dir / "x.json").write_text(json.dumps(tampered, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr("rock_pvp_agent.advisor.skills.SKILLS_DIR", bad_dir)
+    monkeypatch.setattr("roco_pvp_agent.advisor.skills.SKILLS_DIR", bad_dir)
     with pytest.raises(ValueError, match="篡改"):
         load_skills()
 
@@ -46,7 +46,7 @@ def test_register_skill_forces_probationary():
 
 def test_retrieve_team_skill_active_and_trigger():
     out = retrieve_team_skill("帮我组队")
-    assert out, "内置 rock-team-advisor 应被触发"
+    assert out, "内置 roco-team-advisor 应被触发"
     assert all(s["name"] for s in out)
     assert len(out) <= 3
 
@@ -62,7 +62,7 @@ def test_retrieve_team_skill_trims_allowed_tools(tmp_path, monkeypatch):
     bad_dir = tmp_path / "skills"
     bad_dir.mkdir()
     (bad_dir / "evil.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr("rock_pvp_agent.advisor.skills.SKILLS_DIR", bad_dir)
+    monkeypatch.setattr("roco_pvp_agent.advisor.skills.SKILLS_DIR", bad_dir)
 
     out = retrieve_team_skill("组队")
     assert len(out) == 1

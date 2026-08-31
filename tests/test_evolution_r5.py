@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from rock_pvp_agent.battle.evolution.bench import build_instances
-from rock_pvp_agent.battle.evolution.meta import MetaPlaybook
-from rock_pvp_agent.battle.evolution.run import run_epochs
-from rock_pvp_agent.battle.evolution.valuefn import v_provider
+from roco_pvp_agent.battle.evolution.bench import build_instances
+from roco_pvp_agent.battle.evolution.meta import MetaPlaybook
+from roco_pvp_agent.battle.evolution.run import run_epochs
+from roco_pvp_agent.battle.evolution.valuefn import v_provider
 
 
 def test_meta_playbook_empty():

@@ -10,7 +10,7 @@
   超过 2 击（或打不死）不建键。纯引擎穷举（compute_damage + 克制/STAB），供 R6 构筑 L3 数值
   剪枝与信度分析的伤害线参考。
 
-本模块是 environment 包的一部分：**永不 import rock_pvp_agent**，保持引擎零第三方依赖、
+本模块是 environment 包的一部分：**永不 import roco_pvp_agent**，保持引擎零第三方依赖、
 确定性不变式不受影响。全部输入输出都是 JSON 原生类型，可单测。
 """
 

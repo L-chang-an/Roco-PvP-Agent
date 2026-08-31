@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from rock_pvp_agent.battle.evolution.memory import (
+from roco_pvp_agent.battle.evolution.memory import (
     MemoryQuery,
     MemoryStore,
     make_entry_id,
     two_phase_search,
     update_q,
 )
-from rock_pvp_agent.battle.evolution.reflect import extract_experiences
-from rock_pvp_agent.battle.selfplay import run_selfplay
+from roco_pvp_agent.battle.evolution.reflect import extract_experiences
+from roco_pvp_agent.battle.selfplay import run_selfplay
 
 
 def _entry(store, side="a", key="my2/foe2/迪莫/水蓝蓝/high/high/0/early/2/2",
