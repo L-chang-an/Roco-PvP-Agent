@@ -33,3 +33,7 @@ runs/
 # docs/
 # tests/
 # scripts/
+
+# 缓存与临时文件
+.cache/
+tmp/
