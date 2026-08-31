@@ -4,6 +4,8 @@ M1：-q/--query 单发 + 交互 REPL；--debug 打印思考与工具过程；--s
 """
 
 import argparse
+import time
+from contextlib import contextmanager
 
 from rich.console import Console
 
@@ -46,6 +48,7 @@ def main() -> int:
     epe.add_argument("--b", choices=("fake_llm", "random", "llm"), default="random", help="opponent 方玩家")
     epe.add_argument("--games", type=int, default=8, help="每实例 seed 数（默认 8）")
     epe.add_argument("--seed", type=int, default=7, help="seed 平移（默认 7）")
+    epe.add_argument("--progress", action="store_true", help="显示进度条（默认关闭）")
     epe.set_defaults(func=_run_evolve_eval_cli)
     epr = epsub.add_parser("reflect", help="轨迹重放分析 + 可选提取记忆条目")
     epr.add_argument("--traj", required=True, help="轨迹 JSON 路径")
@@ -76,6 +79,17 @@ def main() -> int:
     epst.add_argument("--team-size", type=int, default=3, help="每方精灵数")
     epst.add_argument("--lives", type=int, default=2, help="每方命数")
     epst.add_argument("--health", action="store_true", help="打印健康度看板")
+    epst.add_argument("--instances", type=int, default=None,
+                      help="只用前 N 个 d_sel 实例（默认全部 60；缩小 = 省钱/省时的主旋钮）")
+    epst.add_argument("--seeds-per-instance", type=int, default=None,
+                      help="每实例用几个 seed（默认全部 8）")
+    epst.add_argument("--minibatch-seeds", type=int, default=2,
+                      help="D_tr 训练 minibatch 的 seed 数（默认 2）")
+    epst.add_argument("--memory-dir", type=str, default=None,
+                      help="记忆库目录；给出则启用记忆注入 + 采纳判定/Q 更新（默认关闭）")
+    epst.add_argument("--progress", action="store_true", help="显示进度条（默认关闭）")
+    epst.add_argument("--resume", action="store_true",
+                      help="从 <out>/pool.json 续跑（实例数/seed 参数须与上次一致）")
     epst.set_defaults(func=_run_evolve_steps_cli)
     epe = epsub.add_parser("epoch", help="R5 epoch 调度：慢更新 + D_test 汇报")
     epe.add_argument("--n", type=int, default=8, help="epoch 数（默认 8）")
@@ -87,6 +101,19 @@ def main() -> int:
     epe.add_argument("--no-slow-update", action="store_true", help="关慢更新（A/B 消融）")
     epe.add_argument("--team-size", type=int, default=3, help="每方精灵数")
     epe.add_argument("--lives", type=int, default=2, help="每方命数")
+    epe.add_argument("--instances", type=int, default=None,
+                     help="只用前 N 个 d_sel 实例（默认全部 60）")
+    epe.add_argument("--dtest-instances", type=int, default=None,
+                     help="只用前 N 个 d_test 实例（默认全部 16）")
+    epe.add_argument("--seeds-per-instance", type=int, default=None,
+                     help="每实例用几个 seed（默认全部 8）")
+    epe.add_argument("--minibatch-seeds", type=int, default=2,
+                     help="D_tr 训练 minibatch 的 seed 数（默认 2）")
+    epe.add_argument("--memory-dir", type=str, default=None,
+                     help="记忆库目录；给出则启用记忆注入 + 采纳判定/Q 更新（默认关闭）")
+    epe.add_argument("--progress", action="store_true", help="显示进度条（默认关闭）")
+    epe.add_argument("--resume", action="store_true",
+                     help="从 <out>/pool.json 续跑（实例数/seed 参数须与上次一致）")
     epe.set_defaults(func=_run_evolve_epoch_cli)
 
     args = parser.parse_args()
@@ -146,13 +173,14 @@ def _run_evolve_eval_cli(args) -> int:
 
     settings = get_settings()
     instances = build_instances(args.bench)
-    result = paired_eval(
-        lambda side, seed: build_player(side, args.a, seed=seed, settings=settings),
-        lambda side, seed: build_player(side, args.b, seed=seed, settings=settings),
-        instances,
-        seeds=args.games,
-        seed_offset=args.seed,
-    )
+    with _evolve_progress(args.progress):
+        result = paired_eval(
+            lambda side, seed: build_player(side, args.a, seed=seed, settings=settings),
+            lambda side, seed: build_player(side, args.b, seed=seed, settings=settings),
+            instances,
+            seeds=args.games,
+            seed_offset=args.seed,
+        )
     console.print(f"[bold]evolve eval[/bold] bench={args.bench}  "
                   f"subject={result['players']['subject']} vs opponent={result['players']['opponent']}")
     console.print(f"winrate={result['winrate']:.3f}  "
@@ -252,12 +280,104 @@ def _run_evolve_step_cli(args) -> int:
     return 0
 
 
+@contextmanager
+def _evolve_progress(enabled: bool):
+    """`--progress`：阶段级确定进度条 + 累计局数/速率/已用时。
+
+    每次 `paired_eval` 是一个「阶段」（其总局数开跑前可精确算出）；阶段边界重置进度条，
+    累计计数与速率跨阶段保留。未启用 → no-op（输出与原来完全一致，可安全进管道/CI）。
+    """
+    if not enabled:
+        yield
+        return
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    from .battle.evolution.bench import progress_sink
+
+    state = {"cum": 0, "phase": 0}
+    start = time.monotonic()
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(),
+                  TextColumn("{task.completed}/{task.total} 局"), TimeElapsedColumn(),
+                  console=console, transient=True) as prog:
+        task = prog.add_task("评测中", total=1)
+
+        def sink(ev: dict) -> None:
+            total, done = ev.get("total", 1), ev.get("done", 0)
+            if done == 0:                       # 新阶段：结算上一阶段进累计，重置条
+                state["cum"] += state["phase"]
+                state["phase"] = 0
+                prog.reset(task, total=max(1, total))
+            state["phase"] = done
+            cum = state["cum"] + done
+            mins = (time.monotonic() - start) / 60
+            rate = f"{cum / mins:.1f}" if mins > 0.01 else "—"
+            prog.update(task, completed=done, description=f"累计 {cum} 局 · {rate} 局/分")
+
+        with progress_sink(sink):
+            yield
+
+
+def _limited_instances(kind: str, limit, team_size: int):
+    if limit is None:
+        return None
+    from .battle.evolution.bench import build_instances
+    insts = build_instances(kind, team_size=team_size)
+    if limit < 1:
+        raise ValueError(f"实例数须 ≥1，实际 {limit}")
+    return insts[:limit]
+
+
+def _resume_pool(out_dir: str, resume: bool, instances=None):
+    """`--resume`：从 `out_dir/pool.json` 载入既有池续跑；否则 None（新建池）。
+
+    - `--resume` 但文件不存在 → 提示后按新建走（首次跑加 --resume 不该报错）；
+    - **不** resume 且 pool.json 已存在 → 明确警告「将覆盖」，避免误以为在续跑
+      （历史踩坑：同目录重跑会把池重置成初始手册，而审计日志仍在追加）；
+    - 续跑时实例空间必须与上次完全一致（池的分数向量按实例名索引）——不一致时
+      在这里给**可操作**的提示，而不是让 run_steps 抛裸 ValueError。
+    """
+    from pathlib import Path
+
+    path = Path(out_dir) / "pool.json"
+    if not resume:
+        if path.exists():
+            console.print(f"[yellow]警告：{path} 已存在，本次将从初始手册重新开始并覆盖它"
+                          f"（要续跑请加 --resume）。[/yellow]")
+        return None
+    if not path.exists():
+        console.print(f"[yellow]--resume 但 {path} 不存在，按新建池开始。[/yellow]")
+        return None
+    from .battle.evolution.pool import PlaybookPool
+
+    pool = PlaybookPool.load(str(path))
+    champ = pool.champion()
+    saved_n = len(pool.instances)
+    if instances is not None and pool.instances != [i.name for i in instances]:
+        console.print(
+            f"[red]续跑失败：池的实例空间与本次不一致。[/red]\n"
+            f"  池里是 {saved_n} 个实例，本次要求 {len(instances)} 个。\n"
+            f"  续跑必须沿用上次的 --instances / --team-size（池的分数向量按实例名索引）。\n"
+            f"  → 改用 --instances {saved_n}，或换一个 --out 目录从头开始。")
+        raise SystemExit(1)
+    console.print(f"[cyan]续跑：载入 {path}（成员 {len(pool.members)} 个，实例 {saved_n} 个，"
+                  f"champion={champ.playbook.version if champ else None}）[/cyan]")
+    return pool
+
+
 def _run_evolve_steps_cli(args) -> int:
     """evolve steps：R4 多步进化闭环（池 + 两级门 + 剥削者 + 回归门）。"""
     from .battle.evolution.run import run_steps
 
-    out = run_steps(n=args.n, seed=args.seed, out_dir=args.out, M=args.m,
-                    llm=args.llm, team_size=args.team_size, lives=args.lives)
+    insts = _limited_instances("d_sel", args.instances, args.team_size)
+    pool = _resume_pool(args.out, args.resume, insts)
+    with _evolve_progress(args.progress):
+        out = run_steps(n=args.n, seed=args.seed, out_dir=args.out, M=args.m,
+                        llm=args.llm, team_size=args.team_size, lives=args.lives,
+                        instances=insts,
+                        seeds_per_instance=args.seeds_per_instance,
+                        minibatch_seeds=args.minibatch_seeds,
+                        memory_dir=args.memory_dir,
+                        pool=pool)
     console.print(f"[bold]evolve steps[/bold] n={args.n} seed={args.seed}")
     for s in out["steps"]:
         console.print(f"  step#{s['step']} champion={s['champion']} opp={s['opponent']} "
@@ -281,9 +401,19 @@ def _run_evolve_epoch_cli(args) -> int:
     """evolve epoch：R5 epoch 调度（慢更新 + Meta Playbook + D_test 汇报）。"""
     from .battle.evolution.run import run_epochs
 
-    out = run_epochs(n=args.n, seed=args.seed, out_dir=args.out, E=args.E, M=args.m,
-                     llm=args.llm, no_slow_update=args.no_slow_update,
-                     team_size=args.team_size, lives=args.lives)
+    insts = _limited_instances("d_sel", args.instances, args.team_size)
+    pool = _resume_pool(args.out, args.resume, insts)
+    with _evolve_progress(args.progress):
+        out = run_epochs(n=args.n, seed=args.seed, out_dir=args.out, E=args.E, M=args.m,
+                         llm=args.llm, no_slow_update=args.no_slow_update,
+                         team_size=args.team_size, lives=args.lives,
+                         instances=insts,
+                         dtest_instances=_limited_instances("d_test", args.dtest_instances,
+                                                            args.team_size),
+                         seeds_per_instance=args.seeds_per_instance,
+                         minibatch_seeds=args.minibatch_seeds,
+                         memory_dir=args.memory_dir,
+                         pool=pool)
     console.print(f"[bold]evolve epoch[/bold] n={args.n} E={args.E} seed={args.seed} "
                   f"no_slow_update={args.no_slow_update}")
     for e in out["epochs"]:

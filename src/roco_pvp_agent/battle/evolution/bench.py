@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from environment.battle_config import build_battle_rules
@@ -30,6 +31,23 @@ from environment.match import run_match
 from environment.presets import p1_team, valid_spirit_candidates
 from environment.session import BattleSession
 from environment.teambuilder import build_roster
+
+# ── 进度观测钩子（横切关注点，同 logging 性质；**不是**业务依赖）──
+# CLI 进度条用 `progress_sink()` 作用域化设置；库调用方不设 → `paired_eval` 零开销、
+# 行为完全不变。作用域退出恢复前值，不留长期全局状态。
+_progress_sink = None
+
+
+@contextmanager
+def progress_sink(fn):
+    """作用域化注册进度观测回调 `fn({"total": int, "done": int})`；退出恢复前值。"""
+    global _progress_sink
+    prev, _progress_sink = _progress_sink, fn
+    try:
+        yield
+    finally:
+        _progress_sink = prev
+
 
 # 场景标签（§八：能量压制/高速强攻/耐久消耗/状态控制/镜像）。R0 里标签是结构元数据
 # （决定配对模式：镜像 = 同阵），真正的「原型语义」由 R6 Build Oracle 落地。
@@ -168,12 +186,22 @@ def paired_eval(make_subject, make_opponent, instances, *,
     - `seeds` 限每实例 seed 数（快速冒烟）；`seed_offset` 全局平移（CLI --seed）；
     - `rules` 直接注入引擎规则（测试可传 team_size=1 等管理接口之外的小规模；
       缺省用 `build_battle_rules(team_size, lives)`）。
+
+    进度观测：本次总局数**开跑前可精确算出**（镜像 1 方向 / 非镜像 2 方向），逐局上报
+    `progress_sink`（未设 sink 时零开销、零行为变化）。
     """
     if rules is None:
         rules = build_battle_rules(team_size=team_size, lives=lives) if rules is None else rules
     subject_kind = opponent_kind = None
     rows: list[dict] = []
     total_wins = total_games = 0
+    sink = _progress_sink
+    if sink is not None:                      # 开跑前算出本阶段总局数（确定进度的依据）
+        planned = 0
+        for inst in instances:
+            n_seeds = len(inst.seeds if seeds is None else inst.seeds[:seeds])
+            planned += n_seeds * (1 if inst.roster_a == inst.roster_b else 2)
+        sink({"total": planned, "done": 0})
     for inst in instances:
         if len(inst.roster_a) != rules.team_size or len(inst.roster_b) != rules.team_size:
             raise ValueError(
@@ -194,6 +222,8 @@ def paired_eval(make_subject, make_opponent, instances, *,
                     subject_kind, opponent_kind = sk, ok_
                 games += 1
                 wins += 1 if winner == "a" else 0
+                if sink is not None:
+                    sink({"total": planned, "done": total_games + games})
         if games:
             rows.append({
                 "name": inst.name,
