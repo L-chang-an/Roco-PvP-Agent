@@ -116,6 +116,30 @@ def main() -> int:
                      help="从 <out>/pool.json 续跑（实例数/seed 参数须与上次一致）")
     epe.set_defaults(func=_run_evolve_epoch_cli)
 
+    epb = epsub.add_parser("battles", help="G5 GlobalMem 闭环：战斗→双视角复盘→双库落地→Q 更新")
+    epb.add_argument("--n", type=int, default=4, help="对局数（默认 4）")
+    epb.add_argument("--seed", type=int, default=7, help="seed（默认 7）")
+    epb.add_argument("--out", type=str, default="artifacts/gm", help="产物目录")
+    epb.add_argument("--instances", type=int, default=None,
+                     help="只用前 N 个 d_sel 实例作阵容池（默认全部 60）")
+    epb.add_argument("--team-size", type=int, default=3, help="每方精灵数")
+    epb.add_argument("--lives", type=int, default=2, help="每方命数")
+    epb.add_argument("--llm", action="store_true",
+                     help="真实 LLM 对战 + 分析（无 key 自动降级离线确定性，且跳过分析）")
+    epb.add_argument("--globalmem-dir", type=str, default=None,
+                     help="GlobalMem 库目录；给出才启用全局经验注入/复盘/Q 更新")
+    epb.add_argument("--memory-dir", type=str, default=None,
+                     help="局部记忆库目录；给出才启用逐回合注入/提取/采纳判定")
+    epb.add_argument("--ab-every", type=int, default=0,
+                     help="每 N 局做一次 A/B 度量（开/关 GlobalMem 对比）；0=关闭")
+    epb.add_argument("--ab-instances", type=int, default=None,
+                     help="A/B 用前 N 个实例（默认取训练池前 3 个）")
+    epb.add_argument("--ab-seeds", type=int, default=1, help="A/B 每实例 seed 数（默认 1）")
+    epb.add_argument("--fake-analyst", action="store_true",
+                     help="用确定性占位分析师（零 LLM）离线验证完整闭环；产出非真经验")
+    epb.add_argument("--progress", action="store_true", help="显示进度条（默认关闭）")
+    epb.set_defaults(func=_run_evolve_battles_cli)
+
     args = parser.parse_args()
 
     if args.command == "selfplay":
@@ -422,6 +446,44 @@ def _run_evolve_epoch_cli(args) -> int:
                       f"v_tier={e.get('v_tier')} dtest_winrate={dt.get('winrate')} "
                       f"delta={e.get('dtest_delta')}")
     console.print(f"pool → {out['pool_path']}")
+    return 0
+
+
+def _run_evolve_battles_cli(args) -> int:
+    """evolve battles：G5 GlobalMem 闭环（战斗 → 双视角复盘 → 双库落地 → Q 更新 → A/B）。"""
+    from .battle.evolution.globalmem_run import run_battles
+
+    settings = get_settings()
+    if args.llm and not settings.has_api_key:
+        console.print("[yellow]--llm 但无 API key：降级离线确定性玩家，且跳过战后分析。[/yellow]")
+    if args.globalmem_dir is None:
+        console.print("[yellow]未给 --globalmem-dir：GlobalMem 注入/复盘/Q 更新全部关闭。[/yellow]")
+    insts = _limited_instances("d_sel", args.instances, args.team_size)
+    ab_insts = _limited_instances("d_sel", args.ab_instances, args.team_size)
+    with _evolve_progress(args.progress):
+        out = run_battles(n=args.n, seed=args.seed, out_dir=args.out, settings=settings,
+                          team_size=args.team_size, lives=args.lives, instances=insts,
+                          llm=args.llm, globalmem_dir=args.globalmem_dir,
+                          memory_dir=args.memory_dir, ab_every=args.ab_every,
+                          ab_instances=ab_insts, ab_seeds=args.ab_seeds,
+                          fake_analyst=args.fake_analyst)
+    console.print(f"[bold]evolve battles[/bold] n={args.n} seed={args.seed}")
+    for b in out["battles"]:
+        loaded = ",".join(f"{s}={(b['loaded'][s] or '-')[:12]}" for s in ("a", "b"))
+        acts = ",".join(f"{s}:{v.get('action')}" for s, v in sorted(b["globalmem"].items())) or "-"
+        console.print(f"  #{b['battle']} {b['instance']} winner={b['winner'] or '平'} "
+                      f"turns={b['turns']} loaded({loaded}) gm({acts}) "
+                      f"analyst={b['analyst']}")
+        if b.get("ab"):
+            ab = b["ab"]
+            console.print(f"    A/B: 开={ab['on']['winrate']:.3f}{ab['on']['ci95']} "
+                          f"关={ab['off']['winrate']:.3f}{ab['off']['ci95']} "
+                          f"delta={ab['delta']:+.3f}（n={ab['on']['n_games']}/边）",
+                          markup=False)
+    gm, mem = out["globalmem"], out["memory"]
+    console.print(f"[bold]final[/bold] GlobalMem active={gm['active']} total={gm['total']} "
+                  f"· 局部记忆 entries={mem['entries']}")
+    console.print(f"产物 → {out['out_dir']}")
     return 0
 
 
