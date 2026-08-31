@@ -30,6 +30,16 @@ class Settings(BaseModel):
     memory_w_used: float = 0.3
     memory_counterfactual_m: int = 24
 
+    # GlobalMem 配置（G1）：全局对局经验（占据原 Playbook 生态位）。
+    # `globalmem_max_tokens` 是唯一的膨胀约束——它注入 system prompt 并随每回合重发，
+    # 单局额外输入 ≈ 该值 × 回合数（详见 evolution/globalmem.py 的常量注释）。
+    globalmem_dir: str = "artifacts/globalmem"
+    globalmem_max_tokens: int = 400
+    globalmem_delta: float = 0.5
+    globalmem_lam: float = 0.5
+    globalmem_top_k: int = 1
+    globalmem_alpha: float = 0.3
+
     @property
     def has_api_key(self) -> bool:
         return bool(self.api_key.strip())
