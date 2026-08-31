@@ -23,7 +23,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from rock_pvp_agent.agent import EVENT_DONE, EVENT_REPLY, ChatAgent
+from rock_pvp_agent.advisor.agent import TeamAdvisorAgent
+from rock_pvp_agent.agent import EVENT_DONE, EVENT_REPLY
 from rock_pvp_agent.config import Settings, get_settings
 from .context import ChatContext
 from .routes_battle import router as battle_router
@@ -82,7 +83,7 @@ def _serialize_history(messages) -> list[dict]:
 
 def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = None) -> FastAPI:
     llm = llm_factory(settings) if llm_factory else None
-    agent = ChatAgent(settings, llm=llm)
+    agent = TeamAdvisorAgent(settings, llm=llm)
     context = ChatContext(agent)
 
     app = FastAPI(title="Rock PVP Agent")

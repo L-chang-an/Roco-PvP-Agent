@@ -40,9 +40,9 @@ def test_learnable_bloodline_filtered_by_type() -> None:
 
 
 def test_e0_learnable_unchanged() -> None:
-    """E0 路径逐字节不变：选合法血脉才拓宽。"""
-    assert "撞击2" in learnable_skills("迪莫", "火")
-    assert "撞击2" not in learnable_skills("迪莫")
+    """（E0 已删）替代：默认源 FULL 的血脉拓宽语义。"""
+    assert "折线冲击" not in learnable_skills("迪莫")           # 无血脉 → 禁血脉技
+    assert "折线冲击" in learnable_skills("迪莫", "光")          # 光血脉 → 光系血脉技
 
 
 # ── 规则 1：同一家族只能入队一只 ──
@@ -89,6 +89,24 @@ def test_rule2_invalid_bloodline_type_rejected() -> None:
     assert any("血脉「火火」不是合法系别" in e for e in errs)
 
 
+def test_boss_bloodline_valid() -> None:
+    """首领血脉「首领」：合法选择（非系别），不报「不是合法系别」。"""
+    picks = [_t("迪莫", ["闪光"], bloodline="首领"), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]
+    assert validate_team(picks, [], source=F) == []
+
+
+def test_boss_bloodline_forbids_bloodline_skill() -> None:
+    """首领血脉精灵无法选用系别血脉技能（2026-08-30）。"""
+    picks = [_t("迪莫", ["折线冲击"], bloodline="首领"), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]
+    errs = validate_team(picks, [], source=F)
+    assert any("首领血脉精灵无法选用系别血脉技能「折线冲击」" in e for e in errs)
+
+
+def test_boss_bloodline_learnable_excludes_bloodline_skills() -> None:
+    """learnable_skills 首领血脉 → 不含系别血脉技能（首领非系别）。"""
+    assert "折线冲击" not in learnable_skills("迪莫", "首领", source=F)
+
+
 # ── 规则 3：首领形态不可入队 ──
 def test_rule3_boss_rejected() -> None:
     picks = [_t("圣光迪莫", ["闪光"]), _t("喵喵", ["抓挠"]), _t("火花", ["火苗"])]
@@ -125,23 +143,18 @@ def test_reports_all_rules_at_once() -> None:
     assert len(errs) >= 8
 
 
-def test_e0_rules_not_applied() -> None:
-    """E0 默认路径：首领/家族概念不存在，同名重复仍允许（判断 3）。"""
-    picks = [_t("迪莫", ["抓挠1", "加物攻"]), _t("迪莫", ["撞击", "防御"]), _t("小火猴", ["抓挠"])]
-    assert validate_team(picks, []) == []
-
-
 # ── build_roster（FULL）──
 def test_build_roster_full_shape() -> None:
     roster = build_roster(_valid_trio(), source=F)
     assert len(roster) == 3
     entry = roster[0]
-    assert set(entry) == {"name", "types", "stats", "skills", "nature", "bloodline", "iv", "trait"}
+    assert set(entry) == {"name", "types", "base_stats", "stats", "skills",
+                          "nature", "bloodline", "iv", "trait"}
     assert entry["name"] == "迪莫"
     assert entry["types"] == ["光"]          # 真实系别
-    # 迪莫中性六维 = 真实种族值公式：1.7×120+70+100=374；1.1×80+50+50=188 …
-    assert entry["stats"] == {"hp": 374, "atk": 188, "sp_atk": 188,
-                              "def": 215, "sp_def": 215, "speed": 201}
+    # 迪莫中性六维（⚠️ 实现 _STAT_GROWTH_BASE=10）：1.7×120+70+100=374；1.1×80+10+50=148 …
+    assert entry["stats"] == {"hp": 374, "atk": 148, "sp_atk": 148,
+                              "def": 175, "sp_def": 175, "speed": 161}
     assert entry["skills"] == ["闪光"] and entry["bloodline"] == ""
     assert entry["trait"] == "最好的伙伴"     # 特性名进入 roster（build_unit 据此绑定）
 

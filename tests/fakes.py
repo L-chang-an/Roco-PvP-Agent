@@ -31,9 +31,9 @@ class ScriptedLLM:
 class AlwaysToolLLM:
     """永远调用同一工具，用于测试轮次终止与兜底。"""
 
-    def __init__(self, tool_name: str = "calculator", args: dict | None = None):
+    def __init__(self, tool_name: str = "echo", args: dict | None = None):
         self._tool_name = tool_name
-        self._args = args if args is not None else {"expression": "1+1"}
+        self._args = args if args is not None else {"text": "1+1"}
 
     def invoke(self, messages):
         return AIMessage(content="", tool_calls=[tool_call(self._tool_name, self._args)])

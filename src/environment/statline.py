@@ -1,9 +1,6 @@
 """属性公式：种族值 + 个体值 + 性格 → 最终六维。
-
-真实公式由负责人给定（替代原占位公式）：
-
     生命：    (1.7 × (种族值 + 个体值×3) + 70) × 性格修正 + 100
-    其他五维：(1.1 × (种族值 + 个体值×3) + 50) × 性格修正 + 50
+    其他五维：(1.1 × (种族值 + 个体值×3) + 10) × 性格修正 + 50
 """
 
 from __future__ import annotations
@@ -61,7 +58,7 @@ _HP_GROWTH_FACTOR = 1.7
 _HP_GROWTH_BASE = 70
 _HP_FLAT_BASE = 100
 _STAT_GROWTH_FACTOR = 1.1
-_STAT_GROWTH_BASE = 50
+_STAT_GROWTH_BASE = 10
 _STAT_FLAT_BASE = 50
 _IV_POINTS_PER_POINT = 3  # 个体值每点折合 3 点修正值
 
@@ -79,7 +76,7 @@ def calc_combat_stats(base: dict[str, int], iv: dict[str, int] | None = None,
     """真实属性公式（负责人给定，替代原占位公式）：
 
         生命：    (1.7 × (种族值 + 个体值×3) + 70) × 性格修正 + 100
-        其他五维：(1.1 × (种族值 + 个体值×3) + 50) × 性格修正 + 50
+        其他五维：(1.1 × (种族值 + 个体值×3) + 10) × 性格修正 + 50
 
     输入：base=种族值六维（英文 key 的 int）；iv=个体值（缺省 0，每点 +3）；
     nature=性格名（未知 → 中性不抛）。输出：最终六维 dict[str, int]（含 hp）。

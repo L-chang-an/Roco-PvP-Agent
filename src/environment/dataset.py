@@ -1,9 +1,8 @@
 """数据加载与归一：把 JSON 读成引擎认识的结构。
 
-三数据源：`E0`（手写教学数据，6 精灵 / 14 技能）、`FULL`（真实数据，594 精灵 / 553 技能）、
-`VALID`（E3：FULL 精灵 + **已实装效果的** 179 技能，见 valid_skills.json）。`load_skills` /
-`load_spirits` 带 `source` 参数，默认 `DEFAULT_SOURCE`（E0）——翻转默认的唯一前提是真实技能名
-进了效果表（`E0_EFFECTS`），在那之前真实 roster 只做配队校验、不进引擎。
+两数据源：`FULL`（真实数据，594 精灵 / 553 技能）、`VALID`（E3：FULL 精灵 + **已实装效果的**
+179 技能，见 valid_skills.json）。`load_skills` / `load_spirits` 带 `source` 参数，默认
+`DEFAULT_SOURCE = FULL`；引擎对战用 `battle_ready` 白名单（P1∪P2 效果表）约束可入场技能。
 
 唯一的坑在 `_to_int`：数值字段**绝不写 `x or default`**——`"0"` 与 `0` 都是合法值，
 而 `0` 是 falsy。参考项目正是在这里栽的：防御技能 `strong: null` → `power=0.0` →
@@ -22,12 +21,11 @@ from pathlib import Path
 from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-E0_SKILLS_FILE = DATA_DIR / "e0_skills.json"
-E0_SPIRITS_FILE = DATA_DIR / "e0_spirits.json"
 FULL_SKILLS_FILE = DATA_DIR / "full_skills.json"
 FULL_SPIRITS_FILE = DATA_DIR / "full_spirits.json"
 VALID_SKILLS_FILE = DATA_DIR / "valid_skills.json"   # E3：已实装效果的技能子集
 FAMILIES_FILE = DATA_DIR / "families.json"   # 家族详情（scripts/build_families.py 生成）
+EVOLUTION_CHAINS_FILE = DATA_DIR / "evolution_chains.json"   # 进化链（scripts/build_evolution_chains.py 生成）
 
 # 中文六维 → 英文 key。顺序即稳定输出顺序（hp, atk, sp_atk, def, sp_def, speed）。
 STAT_KEY_MAP: dict[str, str] = {
@@ -45,21 +43,15 @@ STAT_KEYS: tuple[str, ...] = ("hp", "atk", "sp_atk", "def", "sp_def", "speed")
 class DataSource(str, Enum):
     """数据源。str 子类，兼容 3.10（StrEnum 是 3.11+）。
 
-    E0 教学 / FULL 全量真实 / VALID（E3）：FULL 精灵 + 已实装效果的技能子集。
+    FULL 全量真实 / VALID（E3）：FULL 精灵 + 已实装效果的技能子集。
     """
 
-    E0 = "E0"
     FULL = "FULL"
     VALID = "VALID"
 
 
-# 唯一翻转点：效果表覆盖真实技能名之前必须留在 E0。
-DEFAULT_SOURCE = DataSource.E0
-
-
-def _is_full_like(source: DataSource) -> bool:
-    """FULL / VALID 共享「真实数据」语义（精灵表、家族、脏值跳过都走 FULL 路径）。"""
-    return source in (DataSource.FULL, DataSource.VALID)
+# 唯一翻转点：默认数据源 = FULL（真实数据）。
+DEFAULT_SOURCE = DataSource.FULL
 
 
 def _to_int(raw: str | int | None, default: int = 0) -> int:
@@ -121,9 +113,8 @@ class RawSkill:
 class RawSpirit:
     """归一后的精灵。stats 已为英文 key 的 int；skills 拆成各池。
 
-    E0 数据只有 `默认` / `血脉` 两池；FULL 数据有 `默认` / `血脉` / `技能石` /
-    `传说`，并携带家族 / 首领 / 图鉴号 / 形态信息。新增字段全带默认值，E0
-    反序列化不受影响。
+    FULL 数据有 `默认` / `血脉` / `技能石` / `传说` 四池，并携带家族 / 首领 /
+    图鉴号 / 形态信息。
     """
 
     name: str
@@ -133,9 +124,9 @@ class RawSpirit:
     stats: dict[str, int]                  # 已归一（英文 key、int）
     skills_default: tuple[str, ...]        # skills.默认
     skills_bloodline: tuple[str, ...]      # skills.血脉
-    bloodlines: tuple[str, ...] = ()       # 合法血脉列表（E0 手写数据自带；FULL 无此概念）
+    bloodlines: tuple[str, ...] = ()       # 合法血脉列表（预留；FULL 血脉为任意 18 系，不由列表限定）
 
-    # ── FULL 新增（E0 全走默认值）──
+    # ── 真实数据字段 ──
     skills_stone: tuple[str, ...] = ()     # skills.技能石
     skills_legend: tuple[str, ...] = ()    # skills.传说（仅 14 条有，1 个技能名）
     is_boss: bool = False                  # isBoss：首领形态不可入队
@@ -145,11 +136,10 @@ class RawSpirit:
     region: str = ""                       # 形态描述符（"蜕皮时的样子"等）
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any], *, full: bool = False,
+    def from_dict(cls, d: dict[str, Any], *,
                   family_key: str | None = None, family_lowest: bool = False) -> "RawSpirit":
         """输入：JSON 原始精灵 dict（name/type/trait/stats/skills/bloodlines…）。
-        full=False（E0 形状）只取公共字段；full=True（FULL/VALID）再补技能石/传说/
-        首领/家族/形态字段。输出：归一化的 RawSpirit（stats 已转英文 key 的 int）。"""
+        输出：归一化的 RawSpirit（stats 已转英文 key 的 int；含技能石/传说/首领/家族/形态字段）。"""
         stats = d.get("stats") or {}
         trait = d.get("trait") or {}
         skills = d.get("skills") or {}
@@ -163,8 +153,6 @@ class RawSpirit:
             skills_bloodline=tuple(skills.get("血脉") or []),
             bloodlines=tuple(d.get("bloodlines") or []),
         )
-        if not full:
-            return cls(**common)
         return cls(
             **common,
             skills_stone=tuple(skills.get("技能石") or []),
@@ -233,19 +221,49 @@ def derive_families(records: list[dict]) -> dict[str, dict]:
     }
 
 
+def derive_evolution_chains(records: list[dict]) -> dict:
+    """从原始精灵记录派生进化链（去重后的全部链）。
+
+    **evolution_chains.json 的生成逻辑**，也是它的一致性测试的比对基准——运行时不再
+    推导，只读 `evolution_chains.json`。返回：
+        {"chains": [{"id": "evo-NNN", "path": [低→高形态名...], "boss": 首领名 | None}]}
+    - path = evolution 每条链（低 → 高，名字含地区形态后缀）；
+    - boss = 链最高阶若是 isBoss 记之，否则 None——**首领化只由 boss 的上一阶触发**
+      （2026-08-30 拍板：一阶进化，多分支只有迪莫/魔力猫，其余与地区形态一一对应）；
+    - 链 id 按 path 排序后递增——与记录顺序无关，数据文件重排不漂移。
+    """
+    is_boss_by_name = {r["name"]: bool(r.get("isBoss")) for r in records}
+    paths: set[tuple[str, ...]] = set()
+    for r in records:
+        for chain in r.get("evolution") or []:
+            if chain:
+                paths.add(tuple(chain))
+    chains = []
+    for i, path in enumerate(sorted(paths), 1):
+        end = path[-1]
+        chains.append({
+            "id": f"evo-{i:03d}",
+            "path": list(path),
+            "boss": end if is_boss_by_name.get(end) else None,
+        })
+    return {"chains": chains}
+
+
+@lru_cache(maxsize=4)
+def load_evolution_chains(source: DataSource = DEFAULT_SOURCE) -> tuple[dict, ...]:
+    """进化链列表（`(path, boss)` 元组字典）。FULL/VALID：从 evolution_chains.json 直接查。"""
+    doc = json.loads(EVOLUTION_CHAINS_FILE.read_text(encoding="utf-8"))
+    return tuple(doc["chains"])
+
+
 @lru_cache(maxsize=4)
 def load_skills(source: DataSource = DEFAULT_SOURCE) -> dict[str, RawSkill]:
-    """技能表，按 name 索引。`source` 作缓存键；默认 E0，FULL/VALID 显式指定。
+    """技能表，按 name 索引。`source` 作缓存键；默认 FULL，VALID 显式指定。
 
     VALID = E3 的可对战技能子集（已实装效果的 P1∪P2）。lru_cache(maxsize=4)：
     同进程混用多个 source 时不被互相顶掉、反复读盘。
     """
-    if source is DataSource.E0:
-        file = E0_SKILLS_FILE
-    elif source is DataSource.VALID:
-        file = VALID_SKILLS_FILE
-    else:
-        file = FULL_SKILLS_FILE
+    file = VALID_SKILLS_FILE if source is DataSource.VALID else FULL_SKILLS_FILE
     raw = json.loads(file.read_text(encoding="utf-8"))
     return {item["name"]: RawSkill.from_dict(item) for item in raw}
 
@@ -258,9 +276,6 @@ def load_spirits(source: DataSource = DEFAULT_SOURCE) -> dict[str, RawSpirit]:
     形态字段在加载时派生。**家族从 `families.json` 直接查**（scripts/build_families.py
     已把推导固化成数据），不再每次从 evolution 现场推导。
     """
-    if source is DataSource.E0:
-        raw = json.loads(E0_SPIRITS_FILE.read_text(encoding="utf-8"))
-        return {item["name"]: RawSpirit.from_dict(item) for item in raw}
     raw = json.loads(FULL_SPIRITS_FILE.read_text(encoding="utf-8"))
     doc = _load_families_doc(source)
     name_to_fam = {
@@ -275,7 +290,7 @@ def load_spirits(source: DataSource = DEFAULT_SOURCE) -> dict[str, RawSpirit]:
             continue
         key, lowest = name_to_fam.get(item["name"], (None, ()))
         sp = RawSpirit.from_dict(
-            item, full=True,
+            item,
             family_key=key,
             family_lowest=item["name"] in lowest,
         )
@@ -285,9 +300,7 @@ def load_spirits(source: DataSource = DEFAULT_SOURCE) -> dict[str, RawSpirit]:
 
 @lru_cache(maxsize=4)
 def load_skipped_spirits(source: DataSource = DEFAULT_SOURCE) -> tuple[tuple[str, str], ...]:
-    """FULL/VALID：被跳过的脏记录 `(名字, 原因)`。E0：空。`--data-report` 用。"""
-    if source is DataSource.E0:
-        return ()
+    """FULL/VALID：被跳过的脏记录 `(名字, 原因)`。`--data-report` 用。"""
     raw = json.loads(FULL_SPIRITS_FILE.read_text(encoding="utf-8"))
     return tuple(
         (item["name"], _should_skip(item))
@@ -299,16 +312,12 @@ def load_skipped_spirits(source: DataSource = DEFAULT_SOURCE) -> tuple[tuple[str
 @lru_cache(maxsize=4)
 def _load_families_doc(source: DataSource = DEFAULT_SOURCE) -> dict[str, dict]:
     """families.json：{family_key: {"lowest": [链首名...], "members": [成员名...]}}。"""
-    if source is DataSource.E0:
-        return {}
     return json.loads(FAMILIES_FILE.read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=4)
 def load_families(source: DataSource = DEFAULT_SOURCE) -> dict[str, tuple[str, ...]]:
-    """家族 key（链首编号）→ 家族成员名。FULL/VALID：从 families.json 直接查；E0：空。"""
-    if source is DataSource.E0:
-        return {}
+    """家族 key（链首编号）→ 家族成员名。FULL/VALID：从 families.json 直接查。"""
     return {k: tuple(v["members"]) for k, v in _load_families_doc(source).items()}
 
 

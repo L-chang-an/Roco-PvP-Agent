@@ -1,197 +1,589 @@
 # Rock PVP Agent
 
-人机协作从零重建的自对战 LLM agent（参考 `~/workspace/SelfPlayAgent` 的成熟形态，目前实现 **chat mode**，team / battle 等模式留待后续扩展）。
+<!--
+正式发布前请替换 OWNER/REPOSITORY，并根据实际 CI、许可证和发布渠道启用徽章。
 
-本项目是 **human-in-the-loop（人机协作）** 方法论的产物：每个里程碑由项目负责人亲自验收，一个里程碑一个 Gate，可随时回退。协作方法论见 [docs/collaboration-protocol.md](docs/collaboration-protocol.md)，完整重建路线图（项目"宪法"）见 [mydocs/rebuild-plan.md](mydocs/rebuild-plan.md)。
+[![Tests](https://github.com/OWNER/REPOSITORY/actions/workflows/tests.yml/badge.svg)](https://github.com/OWNER/REPOSITORY/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/badge/Python-3.10--3.13-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-TBD-lightgrey.svg)](#开源协议)
+-->
 
-## 功能特性
+Rock PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化构建的实验性 Agent 项目。项目包含可独立运行的确定性对战引擎、组队顾问（Chat Agent）、Web 界面、人类与 Agent 对战、Agent 自博弈、轨迹重放，以及带评测门禁的策略进化管线。
 
-- **CLI 对话**：单发 `-q` + 交互 REPL，`--debug` 打印思考/工具/token 明细
-- **Web UI**：SSE 流式对话，原生 JS 前端（零构建、内网可用），会话历史/重置
-- **组队页**：`/team` 精灵搜索选将 + 可学技能池（非全局）+ 血脉/个体值/性格配置 + 校验 + 队伍持久化（为 battle 模式打基础）
-- **工具循环（ReAct）**：`calculator`（ast 白名单安全求值）+ `final_answer`（显式终稿协议）
-- **思考过程可见**：模型链式思考（`reasoning_content`）与工具调用收进可折叠卡片，默认隐藏
-- **token 统计**：整轮对话输入/输出/总计 token 用量
-- **Markdown 双视图**：终稿默认 Markdown 渲染，可一键切"原文 + 复制"
-- **离线降级**：未配置 `LLM_API_KEY` 时返回确定性回复，绝不崩溃
+> [!IMPORTANT]
+> 本项目目前处于研究与开发阶段。自进化、价值评估和长期记忆等功能应视为实验能力；任何“策略提升”结论都需要在真实模型、独立数据集和完整评测上下文下复验。
 
-## 架构
+## 目录
 
+- [项目简介](#项目简介)
+- [核心功能](#核心功能)
+- [系统架构](#系统架构)
+- [快速开始](#快速开始)
+- [使用方法](#使用方法)
+- [配置说明](#配置说明)
+- [数据与输出](#数据与输出)
+- [项目结构](#项目结构)
+- [开发与测试](#开发与测试)
+- [版本信息](#版本信息)
+- [未来规划](#未来规划)
+- [贡献指南](#贡献指南)
+- [安全与隐私](#安全与隐私)
+- [常见问题](#常见问题)
+- [特别鸣谢](#特别鸣谢)
+- [开源协议](#开源协议)
+- [免责声明](#免责声明)
+
+## 项目简介
+
+本项目希望为精灵对战场景提供一套可运行、可重放、可评测、可扩展的 Agent 基础设施。它由三线 + UI 组成，共享同一套引擎与数据指纹：
+
+- `environment`：负责精灵数据、队伍校验、战斗规则、状态转移、迷雾视角和确定性重放（纯 Python、零引擎依赖）；
+- `rock_pvp_agent`：负责 Chat Agent、LLM 接入、组队顾问、对战玩家、自博弈和策略进化；
+- `ui`：提供聊天、组队、对战和观战页面，以及对应的 REST/SSE 接口。
+
+项目既可以在没有 API Key 的情况下运行确定性离线模式，也可以连接兼容 OpenAI Chat Completions API 的模型服务。
+
+### 适用场景
+
+- 查询和讨论精灵、技能、阵容及对战策略；
+- 构建并校验合法队伍，获取可溯源、可回归的组队建议；
+- 与随机、测试 Agent 或真实 LLM 玩家对战；
+- 运行 Agent 自博弈并保存可重放轨迹；
+- 分析关键回合、反事实动作和策略弱点；
+- 研究 Playbook、经验记忆、策略池和长期策略进化。
+
+### 项目状态
+
+| 能力 | 当前状态 | 说明 |
+|---|---|---|
+| Chat CLI / Web | 可用 | 支持多轮历史、SSE、工具调用和离线降级 |
+| 组队顾问 | 可用 | catalog 查询 DSL + validate 硬闸 + 轨迹证据 + 结构化终结 + 越界拒答 |
+| 精灵组队 | 可用 | 支持精灵、技能、血脉、性格和个体值配置与校验 |
+| 对战引擎 | 可用 | 支持状态推进、迷雾视角、事件过滤和确定性重放 |
+| 人类与 Agent 对战 | 可用 | 支持 Random、FakeLLM 和真实 LLM 对手 |
+| Agent 自博弈 | 可用 | 支持轨迹保存和重放自检 |
+| 策略进化 | 实验性 | 已交付 R0–R6（评测/记忆/信度/反思编辑/池门禁/慢更新/记忆注入） |
+| 长期记忆 | 实验性 | 默认关闭，部分运行闭环仍需继续完善 |
+| 生产级公网部署 | 尚未支持 | 当前默认面向本地运行，缺少完整认证和多租户隔离 |
+
+## 核心功能
+
+### 组队顾问（Chat Agent）
+
+- CLI 单轮问答和交互式会话；
+- Web 端 SSE 流式输出；
+- 基于工具调用的 Agent 循环；
+- 白名单查询 DSL（`search_spirits`）+ 精灵/技能档案 + 合法构筑项；
+- `validate_team` 结构化硬闸（未过校验的阵容绝不输出为推荐）；
+- 轨迹证据（版本闸/重放闸，人机与自博弈分开统计）；
+- `analyze_team` / `simulate_matchups` 确定性分析；
+- `submit_team_advice` 结构化终结（含证据溯源）+ `final_answer` 闲聊终结；
+- ScopeGate 越界拒答（注入/越界/模糊/问候走固定模板，不进 LLM）；
+- 会话历史、重置和 token 使用统计；
+- 未配置 API Key 时自动进入离线模式。
+
+### 精灵与组队
+
+- 按名称、编号和系别搜索精灵；
+- 选择精灵可学习的技能；
+- 配置血脉、性格和个体值；
+- 校验队伍规模、技能合法性、家族冲突和战斗规则；
+- 保存、加载和删除本地队伍；
+- 保存前使用服务端规则重新校验。
+
+### 对战与重放
+
+- 支持人类与 Random、FakeLLM 或真实 LLM 对战；
+- 双方玩家使用隔离的观测视角（迷雾）；
+- 支持技能、换人、道具和阵亡补位；
+- 对局按回合保存动作、事件和状态哈希；
+- 可从初始规则、队伍、seed 和动作序列确定性重放；
+- 提供观战页面查看 Agent 对战过程。
+
+### 自博弈与策略进化
+
+- 多局 Agent 自博弈和轨迹落盘；
+- 配对评测（d_sel / d_test）+ 95% CI；
+- 关键回合识别、价值落差和反事实评估；
+- 轨迹反思、候选规则生成和有界 Playbook 编辑；
+- Pareto 策略池 + 两级门禁 + 剥削者 + 历史回归门；
+- 慢更新（Meta Playbook + 价值函数）与 D_test 汇报；
+- 情境记忆注入与采纳归因（Q 值更新）。
+
+> Build Oracle、PSRO 元游戏和关键回合 SMC 属后续规划（阶段 2），尚未实装。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    U[用户] --> CLI[CLI]
+    U --> WEB[Web UI]
+
+    CLI --> AGENT[Chat / Battle Agent]
+    WEB --> API[FastAPI REST / SSE]
+    API --> AGENT
+
+    AGENT --> LLM[兼容 OpenAI API 的 LLM]
+    AGENT --> TOOLS[工具与数据查询]
+    AGENT --> ENV[对战环境]
+
+    ENV --> TRAJ[对战轨迹]
+    TRAJ --> REPLAY[重放与分析]
+    REPLAY --> EVO[策略进化]
+    EVO --> PLAYBOOK[Playbook / 策略池]
+    PLAYBOOK --> AGENT
 ```
-┌────────────────────────────── CLI / Web 两层入口 ──────────────────────────────┐
-│                                                                               │
-│  python -m rock_pvp_agent            Web UI (uvicorn 127.0.0.1:8001)          │
-│   ├─ -q 单发 / REPL                   ├─ GET  /              (index.html)     │
-│   └─ --debug 思考/工具/token           ├─ GET  /team           (team.html)     │
-│                                       ├─ GET  /api/chat/stream  (SSE)         │
-│                                       ├─ POST /api/chat          (同步兜底)     │
-│                                       ├─ GET  /api/team/*        (组队 REST)  │
-│                                       ├─ GET  /api/chat/history / reset       │
-│                                       └─ GET  /api/config        (无 key)      │
-└──────────────────────────────┬────────────────────────────────────────────────┘
-                               │
-                    ┌──────────▼───────────┐
-                    │   ChatAgent (无状态)  │  ← 一个实例可服务任意多会话
-                    │  在线工具循环 ≤3 轮     │  ← 历史由调用方持有并传回
-                    │  离线确定性降级        │
-                    └──────────┬───────────┘
-            ┌──────────────────┼───────────────────┐
-            │                  │                   │
-     ┌──────▼─────┐    ┌──────▼──────┐    ┌───────▼──────┐
-     │   tools.py │    │  llm.py     │    │  config.py   │
-     │ calculator │    │ ChatOpenAI  │    │ Settings     │
-     │ final_answer│   │ +bind_tools │    │ +load_dotenv │
-     └────────────┘    │ Reasoning   │    └──────────────┘
-                       │ 子类捞 reasoning_content
-                       └─────────────┘
 
-事件协议（前后端契约）: meta → thinking* → tool* → reply → done
+关键数据流：
+
+```text
+用户输入 → 组队顾问 → ScopeGate / 工具 / LLM → 结构化建议或闲聊回复
+队伍配置 → 规则校验 → BattleSession → 回合事件 → 轨迹 → 重放
+自博弈轨迹 → 分析与反事实 → 候选 Playbook → 评测门禁 → 注册/回滚
 ```
-
-**数据流**：用户消息 → `ChatAgent.chat()` → 系统提示词 + 历史拼装 → LLM 工具循环（中间思考记为 `thinking`，工具结果记为 `tool`）→ `final_answer` 终结 → `ChatReply`（终稿/思考/工具/token/历史）→ CLI 打印或 SSE 推送。
 
 ## 快速开始
 
 ### 环境要求
 
-- macOS / Linux / Windows（WSL），本机已装 [uv](https://docs.astral.sh/uv/)
-- Python 3.10–3.13（`.python-version` 锁定 3.12，uv 自动下载）
+- Python 3.10–3.13；
+- 推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 和依赖；
+- macOS、Linux 或 Windows WSL；
+- 真实 LLM 功能需要兼容 OpenAI Chat Completions API 的服务。
 
-### 1. 安装依赖
+### 1. 获取项目
 
 ```bash
-cd ~/workspace/MySelfPlayAgent
-uv sync --all-extras     # 装全部依赖（含 ui 与 dev）
+git clone <REPOSITORY_URL>
+cd MySelfPlayAgent
 ```
 
-### 2. 配置 `.env`
+### 2. 安装依赖
 
 ```bash
-cp .env.example .env     # 再编辑 .env 填入以下内容
+uv sync --all-extras
 ```
 
-| 变量 | 说明 | 默认 |
-|---|---|---|
-| `LLM_API_KEY` | 网关 API Key（缺失时回退 `OPENAI_API_KEY`） | 空 → 离线降级 |
-| `LLM_MODEL` | 模型名 | `deepseek-chat` |
-| `LLM_BASE_URL` | OpenAI 兼容网关地址（自动补 `/v1`，可写完整 `/chat/completions`） | 空 → OpenAI 官方 |
-| `LLM_TIMEOUT` | 请求超时秒数 | `60` |
-| `DEBUG` | 调试模式（`1`/`true`） | `false` |
-
-> 安全：`.env` 已被 `.gitignore` 忽略、绝不入库；`/api/config` 接口已脱敏，绝不返回 key。
-
-### 3. 跑起来
+### 3. 配置环境变量
 
 ```bash
-# 单发提问（含工具调用）
-uv run python -m rock_pvp_agent -q "请计算 3.5 * 4 再 + 2 的结果"
+cp .env.example .env
+```
 
-# 交互 REPL（exit / quit / q 退出）
+编辑 `.env`：
+
+```env
+LLM_API_KEY=your-api-key
+LLM_MODEL=deepseek-chat
+LLM_BASE_URL=https://your-compatible-api.example.com/v1
+LLM_TIMEOUT=60
+DEBUG=false
+```
+
+没有 API Key 也可以启动项目，但 Chat 和 LLM 对战会进入离线或 FakeLLM 降级路径。
+
+### 4. 运行一次验证
+
+```bash
+uv run python -m rock_pvp_agent --version
+uv run pytest -q
+```
+
+## 使用方法
+
+### CLI Chat
+
+单轮提问：
+
+```bash
+uv run python -m rock_pvp_agent -q "帮我组个克制水系的三精灵队"
+```
+
+进入交互模式：
+
+```bash
+uv run python -m rock_pvp_agent
+```
+
+显示调试信息：
+
+```bash
 uv run python -m rock_pvp_agent --debug
+```
 
-# Web UI → 浏览器打开 http://127.0.0.1:8001（聊天 `/`，组队 `/team`）
+### Web UI
+
+```bash
 uv run python -m rock_pvp_agent --serve
-# 或直接起 UI 包（等效，`python -m ui`）
+```
+
+也可以直接启动 UI 包：
+
+```bash
 uv run python -m ui
 ```
 
-## 命令速查
+默认地址：
 
-| 命令 | 作用 |
-|---|---|
-| `uv run python -m rock_pvp_agent -q "你好"` | 单发提问 |
-| `uv run python -m rock_pvp_agent --debug` | REPL + 打印思考/工具/token |
-| `uv run python -m rock_pvp_agent --serve` | 启动 Web UI（`ROCK_UI_HOST`/`ROCK_UI_PORT` 可覆盖，默认 `127.0.0.1:8001`） |
-| `uv run python -m ui` | 直接启动 UI 包（聊天 + 组队） |
-| `uv run python -m rock_pvp_agent --version` | 打印版本 |
-| `uv run pytest -q` | 跑全部测试 |
-| `uv run pytest --cov=rock_pvp_agent -q` | 跑测试 + 覆盖率 |
-| `curl -N "http://127.0.0.1:8001/api/chat/stream?message=你好&session_id=test1"` | 直接看 SSE 事件流 |
+| 页面 | 地址 | 功能 |
+|---|---|---|
+| Chat | <http://127.0.0.1:8001/> | 与组队顾问对话 |
+| 组队 | <http://127.0.0.1:8001/team> | 搜索精灵、配置并保存队伍 |
+| 对战 | <http://127.0.0.1:8001/battle> | 人类与 Agent 对战 |
+| 观战 | <http://127.0.0.1:8001/spectate> | 查看 Agent 对战过程 |
+| 健康检查 | <http://127.0.0.1:8001/api/health> | 检查服务状态 |
 
-## Web UI
+默认只监听 `127.0.0.1`。如需修改：
 
-- **流式**：SSE 推送 `meta → thinking* → tool* → reply → done`，回复打字机逐字显示
-- **思考卡片**：🧠 思考与工具调用默认折叠，点"显示思考过程 ▾"展开；卡头实时统计次数
-- **Markdown 双视图**：终稿默认渲染，工具栏可切"查看原文"并复制
-- **token 统计**：回复底部显示 `⚡ tokens 输入/输出/总计`
-- **会话管理**：`sessionStorage` 记住 session，刷新不丢上下文；`reset` 一键清空
-- **离线降级**：无 key 时仍可聊，回复带"离线模式"提示
-- **网络兜底**：SSE 断流自动回退同步 POST
-
-### 组队页（/team，2026-08-25）
-
-- **精灵搜索**：按 名称/编号/系别 客户端过滤；BOSS 形态禁选；同家族冲突标黄拦截
-- **队伍规模**：管理员规则 3–6（`battle_config`），切换即重排槽位
-- **技能池**：选中精灵后显示**该精灵的可学池**（默认∪技能石∪传说∪血脉技能，非全局池），
-  可搜索技能名；**未实装效果**的技能置灰「未实装」不可选 → 保存的队伍永远能开战
-- **血脉 / 个体值 / 性格**：血脉（18 系，决定可携带的血脉技能）、IV（0–10，最多 3 维）、
-  性格（31 种），属性预览逐字节复刻 `calc_combat_stats`
-- **校验**：`POST /api/team/validate` 一次报全部错误（规模/技能/血脉/家族/首领/IV）
-- **持久化**：保存到绝对路径或 `teams/` 下相对路径（`.json`、原子写、路径逃逸拦截），
-  可列表加载/删除；加载后自动重校验（历史队伍可能因技能白名单变化失效）
-- **为 battle 打基础**：保存前强制通过 `validate_team(picks, [], rules, VALID)`——
-  存下的队伍即合法对战队伍，后续 battle 模式直接吃这份 roster
-
-## 测试
-
-```bash
-uv run pytest -q            # 84 passed / 94% 覆盖率
-uv run pytest tests/test_agent.py -k history -v
+```env
+ROCK_UI_HOST=127.0.0.1
+ROCK_UI_PORT=8001
 ```
 
-测试全部走 **fake LLM（鸭子类型）**，零网络、可离线跑。核心覆盖：离线降级、显式终稿、工具循环、错误吞掉、轮次兜底、历史可重放、事件契约、token 统计、思维链捕获、REST/SSE 契约。
+### Agent 自博弈
+
+运行两局确定性测试对战：
+
+```bash
+uv run python -m rock_pvp_agent selfplay \
+  --games 2 --seed 7 --a fake_llm --b random --out runs
+```
+
+使用真实 LLM：
+
+```bash
+uv run python -m rock_pvp_agent selfplay \
+  --games 2 --a llm --b llm --out runs
+```
+
+如果没有配置 API Key，`llm` 会自动降级为 FakeLLM。分析实验结果时必须检查轨迹中的实际玩家类型。
+
+### 轨迹分析与策略进化
+
+查看所有进化子命令：
+
+```bash
+uv run python -m rock_pvp_agent evolve --help
+```
+
+常用示例：
+
+```bash
+# 配对评测
+uv run python -m rock_pvp_agent evolve eval --bench d_sel --games 8
+
+# 从轨迹提取反馈与经验
+uv run python -m rock_pvp_agent evolve reflect \
+  --traj runs/example.json --out artifacts/memory
+
+# 识别关键回合并运行反事实分析
+uv run python -m rock_pvp_agent evolve credit \
+  --traj runs/example.json --out artifacts/critical-cards.jsonl
+
+# 单步进化：rollout → credit → reflect → edit
+uv run python -m rock_pvp_agent evolve step --seed 7 --out artifacts
+
+# 多步进化（R4：池 + 两级门 + 剥削者 + 回归门）
+uv run python -m rock_pvp_agent evolve steps --n 4 --seed 7 --out artifacts
+
+# 长期 epoch 调度（R5：慢更新 + D_test 汇报）
+uv run python -m rock_pvp_agent evolve epoch --n 8 --e 8 --seed 7 --out artifacts
+
+# 记忆健康度
+uv run python -m rock_pvp_agent evolve health --memory artifacts/memory
+```
+
+使用真实 LLM 参与策略评测或优化时，根据子命令增加 `--llm`。未配置 API Key 时的确定性代理结果只能用于验证流程，不能单独证明 LLM 策略提升。
+
+## 配置说明
+
+### LLM 配置
+
+| 环境变量 | 默认值 | 说明 |
+|---|---:|---|
+| `LLM_API_KEY` | 空 | LLM 服务密钥；缺失时回退读取 `OPENAI_API_KEY` |
+| `OPENAI_API_KEY` | 空 | `LLM_API_KEY` 缺失时的兼容变量 |
+| `LLM_MODEL` | `deepseek-chat` | 模型名称 |
+| `LLM_BASE_URL` | 空 | OpenAI 兼容接口地址；空值使用客户端默认地址 |
+| `LLM_TIMEOUT` | `60` | 请求超时时间，单位为秒 |
+| `DEBUG` | `false` | 是否开启调试模式 |
+| `ROCK_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
+| `ROCK_UI_PORT` | `8001` | Web UI 监听端口 |
+
+### 实验性记忆配置
+
+长期记忆默认关闭：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---:|---|
+| `MEMORY_ENABLED` | `false` | 是否启用记忆功能 |
+| `MEMORY_DIR` | `artifacts/memory` | 记忆文件目录 |
+| `MEMORY_EMBEDDER` | `keyword` | 记忆检索器 |
+| `MEMORY_DELTA` | `0.5` | 第一阶段检索阈值 |
+| `MEMORY_K1` | `10` | 第一阶段候选数 |
+| `MEMORY_LAM` | `0.5` | 相似度和 Q 值融合权重 |
+| `MEMORY_K2` | `3` | 最终返回经验数 |
+| `MEMORY_ALPHA` | `0.3` | Q 值 EMA 更新系数 |
+| `MEMORY_COUNTERFACTUAL_M` | `24` | 反事实回放次数 |
+
+其余高级参数可参考 `src/rock_pvp_agent/config.py`。修改实验参数时，应在结果中同时记录配置、模型、规则、数据和 Playbook 版本。
+
+## 数据与输出
+
+项目运行过程中可能产生以下本地目录：
+
+| 目录 | 内容 | 是否建议提交 Git |
+|---|---|---|
+| `teams/` | 用户保存的队伍配置 | 通常否 |
+| `battles/` | 人类与 Agent 的对战记录 | 否 |
+| `runs/` | 自博弈轨迹和索引 | 否 |
+| `artifacts/` | 反思、关键回合、策略池、注册表和评测报告 | 否 |
+| `src/environment/data/` | 项目内置精灵、技能和家族数据 | 是 |
+
+注意事项：
+
+- 对局轨迹可能包含队伍配置、模型输出和用户行为，应按敏感数据处理；
+- 对外分享实验结果前应移除 API Key、用户标识和本地绝对路径；
+- 不同规则、数据或模型版本产生的胜率不能直接比较；
+- 修改数据文件后应重新生成 `data_digest`，并重新运行相关测试和评测。
 
 ## 项目结构
 
+```text
+MySelfPlayAgent/
+├── src/
+│   ├── environment/                 # E 线：对战数据、规则、状态机、迷雾和重放（纯 Python）
+│   ├── rock_pvp_agent/
+│   │   ├── agent.py                 # ChatAgent 工具循环（基类）
+│   │   ├── config.py                # 环境变量与运行配置
+│   │   ├── llm.py                   # LLM 客户端构造
+│   │   ├── tools.py                 # 基础工具
+│   │   ├── advisor/                 # 组队顾问底座（catalog/validate/轨迹/分析/模拟/终结/ScopeGate/评测）
+│   │   └── battle/
+│   │       ├── player.py            # Random/FakeLLM/LLM/Playbook 玩家
+│   │       ├── selfplay.py          # 自博弈编排
+│   │       ├── store.py             # 轨迹保存
+│   │       └── evolution/           # R 线：评测、反思、记忆、门禁和运行管理
+│   └── ui/                          # FastAPI、REST/SSE 和静态页面
+├── tests/                           # pytest 测试套件
+├── tmpdocs/                         # 项目文档归档（路线图/里程碑/引擎设计/进化方案/审计/参考）
+├── scripts/                         # 数据生成脚本（家族/进化链/技能批次/特性批次/克制表/白名单）
+├── pyproject.toml                   # 项目元数据和依赖
+└── uv.lock                          # 锁定依赖
 ```
-src/
-├─ rock_pvp_agent/     LLM agent 核心包
-│  ├─ __main__.py     CLI 入口（-q / REPL / --serve / --debug）
-│  ├─ config.py       Settings + 环境变量加载（单例）
-│  ├─ prompts.py      CHAT_SYSTEM_PROMPT（显式终稿协议）
-│  ├─ llm.py          build_chat_llm 工厂 + ReasoningChatOpenAI（捞回 thinking）+ 缓存
-│  ├─ tools.py        calculator + final_answer（实例级闭包工具）
-│  ├─ agent.py        ChatAgent 无状态核心 + 事件发射 + 离线降级
-├─ environment/       对战引擎（E0a–E3：数据/组队/规则/效果，独立包）
-└─ ui/                Web UI（2026-08-25 从 rock_pvp_agent 提级，顶层包）
-   ├─ __main__.py     run_ui()（uvicorn 启动）
-   ├─ server.py       create_chat_app 应用工厂 + REST/SSE 路由
-   ├─ context.py      ChatContext 会话管理（LRU 上限 64，线程安全）
-   ├─ routes_team.py  组队 REST（/api/team/*：精灵/技能池/校验/保存/加载）
-   └─ static/         index.html / team.html / chat.js / team.js / app.js / style.css
 
-docs/                协作协议 + 扩展手册 + checkpoints 检查点
-mydocs/rebuild-plan.md  项目宪法（完整重建路线图，gitignored 本地专用）
-tests/               pytest 套件 + fake LLM 夹具
+各目录的详细说明见各自的 `README.md`（`src/*/README.md`）。
+
+## 开发与测试
+
+### 运行测试
+
+```bash
+uv run pytest -q
 ```
 
-## 文档索引
+运行覆盖率：
 
-| 文档 | 内容 |
-|---|---|
-| [docs/collaboration-protocol.md](docs/collaboration-protocol.md) | 人机协作方法论（Gate 流程 / 检查点模板 / 验收原则） |
-| [docs/extension-cookbook.md](docs/extension-cookbook.md) | 扩展手册（加工具 / 换 LLM / 持久化 / battle 模式 / 前端） |
-| [mydocs/rebuild-plan.md](mydocs/rebuild-plan.md) | 项目宪法：M0–M4 重建路线图 + 验收记录 |
-| [docs/checkpoints/](docs/checkpoints/) | 每里程碑检查点（通过记录 + 复盘） |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
+```bash
+uv run pytest \
+  --cov=rock_pvp_agent \
+  --cov=environment \
+  --cov=ui \
+  --cov-report=term-missing
+```
 
-## FAQ
+运行指定模块：
 
-**Q: 未配置 API Key 能跑吗？**
-能。进入离线模式，返回确定性模板回复，CLI/Web UI 都不会崩溃。配置 `.env` 后重启即可。
+```bash
+uv run pytest tests/test_environment_replay.py -v
+uv run pytest tests/test_advisor_scope.py -v
+uv run pytest tests/test_evolution_r3.py -v
+```
 
-**Q: 模型为什么不会算数 / 乱调工具？**
-agent 采用**显式终稿协议**：模型必须调用 `final_answer` 输出终稿，中间输出一律视为思考。若模型不守协议，`ChatAgent` 有兜底（无工具调用且带文本 → 当终稿），保证不卡死。调节提示词可改善行为。
+### 构建发行包
 
-**Q: 换一家大模型（网关）怎么配？**
-只要网关兼容 OpenAI Chat Completions API，改 `.env` 的 `LLM_BASE_URL` + `LLM_MODEL` + `LLM_API_KEY` 即可。详见 [docs/extension-cookbook.md](docs/extension-cookbook.md#换-llm-后端)。
+```bash
+uv build
+```
 
-**Q: 我的思维链为什么看不到？**
-模型中间推理存在网关的 `reasoning_content` 字段，通用 `ChatOpenAI` 会丢弃它。本项目通过 `ReasoningChatOpenAI` 子类捞回，已自动处理，无需配置。
+正式发布前应在全新虚拟环境中安装生成的 wheel，并确认内置数据和 UI 静态文件均已包含。
 
-**Q: 想加一个新工具？**
-在 `tools.py` 的 `build_agent_tools()` 加一个闭包函数即可，agent 核心零改动，详见扩展手册。
+### 代码审计
 
-## License
+项目的完整审计流程见：
 
-v0.1.0 · 内部学习项目，无开源 License。
+- [tmpdocs/roadmap/project-audit-plan.md](tmpdocs/roadmap/project-audit-plan.md)
+- [tmpdocs/audit/final-audit-report.md](tmpdocs/audit/final-audit-report.md)
+
+## 版本信息
+
+### 当前版本状态
+
+| 来源 | 当前值 | 备注 |
+|---|---|---|
+| `pyproject.toml` | `0.1.0` | 项目元数据版本 |
+| 包内 `__version__` | `0.1.0` | 与 `pyproject.toml` 一致 |
+
+> [!WARNING]
+> 正式发布前需要统一 Git 标签、`pyproject.toml` 和 `rock_pvp_agent.__version__`，并补充 CHANGELOG。在统一之前，不建议发布新的安装包或对外声明确定版本号。
+
+### 版本策略模板
+
+建议采用[语义化版本](https://semver.org/lang/zh-CN/)：
+
+- `MAJOR`：存在不兼容的 API、轨迹格式或规则变更；
+- `MINOR`：增加向后兼容的新功能；
+- `PATCH`：修复错误，不改变公开契约。
+
+每个版本至少记录：功能变化、兼容性、数据迁移、已知限制和升级方法。
+
+## 未来规划
+
+### 近期
+
+- [ ] 统一包版本、Git 标签和 Changelog；
+- [ ] 完善 README、API、轨迹 schema 和数据版本文档；
+- [ ] 补全人机对战轨迹的模型、Playbook 和数据来源信息；
+- [ ] 增加浏览器端 XSS、并发会话和路径安全测试。
+
+### 中期（阶段 1 引擎保真度）
+
+- [ ] 逐批实装剩余技能效果（P3–P6）与特性批次；
+- [ ] 补全状态/天气/道具/萌化/首领化/进化链等剩余机制；
+- [ ] 归一化双回合循环（AUD-E-004 结构债）。
+
+### 长期（阶段 2/3）
+
+- [ ] R 线完整：Build Oracle + α-rank 构筑元游戏、SMC 关键回合后验采样、持续运行；
+- [ ] 真实数据回灌，校准组队建议与评测基线；
+- [ ] 提供结构化组队建议的 held-out 验证与 Skill 晋级运营；
+- [ ] 建立稳定的插件、工具和 Skill 扩展协议；
+- [ ] 完善身份认证、权限控制、速率限制和多用户隔离。
+
+## 贡献指南
+
+<!-- 正式开源后可将本节迁移到 CONTRIBUTING.md。 -->
+
+欢迎通过 Issue 和 Pull Request 参与项目。在提交修改前，请遵循以下流程：
+
+1. 先描述问题、目标和影响范围；
+2. 一次提交只解决一个清晰问题；
+3. 为行为变化增加测试，包括至少一个失败或边界场景；
+4. 执行相关模块测试和全量测试；
+5. 更新 README、Changelog 或相应文档；
+6. 不提交 `.env`、API Key、真实用户轨迹和大体积运行产物。
+
+提交信息建议采用：
+
+```text
+feat: add ...
+fix: prevent ...
+docs: update ...
+test: cover ...
+refactor: simplify ...
+```
+
+正式公开仓库后，请补充：
+
+- Issue 模板；
+- Pull Request 模板；
+- 行为准则；
+- 贡献者许可约定；
+- 维护者和代码审查规则。
+
+## 安全与隐私
+
+- 默认仅在本机 `127.0.0.1` 运行 Web 服务；
+- 不要将 `.env`、API Key 或包含密钥的日志提交到 Git；
+- 对局轨迹、聊天历史和模型输出可能包含敏感数据；
+- 在缺少认证、权限控制和速率限制时，不要直接暴露到公网；
+- 不要将不可信网页、轨迹或 Skill 内容直接拼接为高权限系统指令；
+- 对任何可写文件、删除、回滚或外部访问工具增加代码级参数校验和授权；
+- 发现安全问题时，不要在公开 Issue 中披露可直接利用的细节。
+
+## 常见问题
+
+### 没有 API Key 可以运行吗？
+
+可以。Chat 会返回离线提示，对战中的 `llm` 玩家会降级为 FakeLLM。该模式适合功能验证，但不能代表真实 LLM 能力。
+
+### 支持哪些模型？
+
+当前主要支持兼容 OpenAI Chat Completions API 和工具调用格式的模型或网关。不同提供商对 `reasoning_content`、工具调用和 token 统计的支持可能不同，需要单独验证。
+
+### 为什么相同 seed 的真实 LLM 对局仍可能不同？
+
+引擎随机数可以固定，但远程模型本身可能存在采样、服务端版本和调度差异。实验报告必须同时记录模型参数并进行重复评测。
+
+### 自进化功能是否已经证明 Agent 会持续变强？
+
+尚不能做普遍保证。当前项目提供了策略生成、评测门禁和回滚 Harness，但真实提升仍取决于模型、数据、对手分布、评测隔离和统计有效性。
+
+### 如何查看全部命令？
+
+```bash
+uv run python -m rock_pvp_agent --help
+uv run python -m rock_pvp_agent selfplay --help
+uv run python -m rock_pvp_agent evolve --help
+```
+
+## 特别鸣谢
+
+本项目的开发和运行依赖以下开源项目与生态：
+
+- [Python](https://www.python.org/)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Pydantic](https://docs.pydantic.dev/)
+- [LangChain](https://python.langchain.com/)
+- [Rich](https://rich.readthedocs.io/)
+- [uv](https://docs.astral.sh/uv/)
+- [pytest](https://pytest.org/)
+
+策略进化、Agent 记忆和对局搜索部分参考了相关强化学习、Agentic RL、Skill Optimization、Monte Carlo 搜索和多智能体博弈研究。相关论文见 [tmpdocs/reference/](tmpdocs/reference/)。正式发布时，应在此处补充完整论文名称、作者、链接和引用格式。
+
+## 开源协议
+
+当前仓库尚未提供 `LICENSE` 文件，因此目前不能默认视为 MIT、Apache-2.0 或其他开源协议项目。
+
+正式开源前，请由项目所有者选择并添加许可证：
+
+| 许可证 | 适合情况 | 主要特点 |
+|---|---|---|
+| MIT | 希望限制较少、便于复用 | 简短宽松，保留版权和许可声明 |
+| Apache-2.0 | 希望加入明确专利授权 | 宽松，包含专利条款和 NOTICE 机制 |
+| GPL-3.0 | 希望衍生项目继续开源 | 强 Copyleft |
+| AGPL-3.0 | 希望网络服务修改也公开源码 | 比 GPL 更强调网络部署 |
+| Proprietary | 暂不开放复制和再分发 | 需要自行编写授权条款 |
+
+选定后应完成三项工作：
+
+1. 在项目根目录添加标准 `LICENSE` 文件；
+2. 将本节替换为明确的许可证名称和链接；
+3. 核对精灵数据、图片、名称、论文和第三方代码是否拥有兼容的使用权。
+
+许可证确定后的推荐写法：
+
+```text
+本项目基于 [LICENSE_NAME] 许可证发布，详情见 [LICENSE](LICENSE)。
+```
+
+## 免责声明
+
+本项目用于软件开发、Agent 系统和回合制对战研究。项目中涉及的第三方游戏名称、角色、商标及相关知识产权归其各自权利人所有；本项目与相关权利人不存在官方隶属或背书关系。
+
+项目按现状提供，不保证策略建议、模拟结果或实验指标适用于所有规则、版本和真实对局。使用者应自行核验数据来源、模型输出和实验结论。
+
+---
+
+<!--
+发布前最终检查：
+
+- [ ] 替换 REPOSITORY_URL、OWNER/REPOSITORY 和安全联系地址
+- [ ] 添加项目 Logo 和真实截图
+- [ ] 统一 Git tag、pyproject.toml、__version__ 和 CHANGELOG
+- [ ] 确认安装、CLI、Web、自博弈和 evolve 示例均可运行
+- [ ] 添加 LICENSE、CONTRIBUTING.md、SECURITY.md 和 CODE_OF_CONDUCT.md
+- [ ] 核对所有第三方数据、论文、图像和商标的引用与授权
+- [ ] 更新测试数量、覆盖率和 CI 徽章
+- [ ] 明确标识稳定功能、实验功能和未来规划
+-->

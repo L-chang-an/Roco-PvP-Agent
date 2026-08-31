@@ -69,6 +69,10 @@ class FakeLLMPlayer:
         """随机选一个存活后备——走自己的独立 RNG 流。"""
         return self._random.choose_replacement(observation, bench)
 
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """随机选一个首发——走自己的独立 RNG 流。"""
+        return self._random.choose_starter(observation, options)
+
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束回调：假模型无动作。输入：观测 + 事件流；输出：无。"""
 
@@ -78,9 +82,66 @@ class FakeLLMPlayer:
         return self._last_reply
 
 
+def policy_seed(playbook, seed: int) -> int:
+    """Playbook → 确定性策略种子：手册全文 SHA-256（**不用内置 hash**——PYTHONHASHSEED
+    随机化会让同文本两次进程产出不同种子，破坏确定性）。不同手册 = 不同策略。"""
+    import hashlib
+    digest = hashlib.sha256(playbook.text().encode("utf-8")).digest()
+    return (int(seed) & 0xFFFFFFFF) ^ (int.from_bytes(digest[:8], "big") & 0xFFFFFFFF)
+
+
+class PlaybookPlayer:
+    """确定性「读手册」对战玩家（R4 离线路径）。
+
+    真实路径：`LLMPlayer(strategy=playbook.text())` 让 LLM 读 `[战术手册]`；
+    离线路径（无 key / 测试 / CLI 冒烟）用本类把手册文本 hash 成策略种子——
+    同 seed 同手册两次逐位相同（确定性）、不同手册策略不同（Pareto 池/门禁在确定性
+    玩家上也能产生可复现的分数向量差异，让 R4 闭环离线可验）。
+
+    实现：委托 `RandomPlayer`（自带独立 RNG 流，不碰引擎流），策略种子 = 手册指纹。
+    """
+
+    kind = "playbook"
+
+    def __init__(self, side: str, playbook, *, seed: int) -> None:
+        self.side = side
+        self.playbook = playbook
+        self._seed = seed
+        self.kind = f"playbook:{playbook.version}"
+        self._random = RandomPlayer(side, seed=policy_seed(playbook, seed))
+
+    def on_match_start(self, observation: dict) -> None:
+        """开局回调：策略已固定。输入：观测；输出：无。"""
+
+    def decide(self, observation: dict, legal: list[dict], items: list[str]) -> Decision:
+        """按手册指纹策略选一个合法主动作（委托 RandomPlayer 的确定性流）。"""
+        return self._random.decide(observation, legal, items)
+
+    def choose_replacement(self, observation: dict, bench: list[int]) -> int:
+        """按手册指纹策略选补位（同上）。"""
+        return self._random.choose_replacement(observation, bench)
+
+    def on_turn_result(self, observation: dict, events: list[dict]) -> None:
+        """回合结束回调：无动作。输入：观测 + 事件流；输出：无。"""
+
+    @property
+    def last_reply(self) -> str:
+        return f"（playbook {self.playbook.version}）按手册策略行动"
+
+
 # ---------------------------------------------------------------------------
 # E6.5：真实 LLM 对战玩家
 # ---------------------------------------------------------------------------
+
+
+def _render_memories(memories: list[dict]) -> str:
+    """检索到的 top-k 记忆 → `[记忆]` 块（注入 LLM 决策上下文，强制标注非当前局面）。"""
+    parts = ["[记忆] 历史经验，非当前局面（仅供参考）："]
+    for m in memories:
+        sit = m.get("situation_text", "") or m.get("situation_key", "")
+        exp = m.get("experience_text", "")
+        parts.append(f"- {sit}：{exp}")
+    return "\n".join(parts)
 
 
 def build_side_tools(side: str):
@@ -93,8 +154,9 @@ def build_side_tools(side: str):
     name = f"battle_act_{side}"
 
     @tool
-    def battle_act(action_type: str, target: int | None = None, item: str = "") -> str:
-        """提交你本回合的行动。action_type ∈ {skill, switch, recharge}；skill/switch 的 target 是槽位下标（从 0 开始）；recharge 不需要 target；item 是道具名（不用则留空）。"""
+    def battle_act(action_type: str, target: int | None = None, item: str = "",
+                   prediction: str = "") -> str:
+        """提交你本回合的行动。action_type ∈ {skill, switch, recharge}；skill/switch 的 target 是槽位下标（从 0 开始）；recharge 不需要 target；item 是道具名（不用则留空）；prediction 是可选的预期结果一句话（离线校准用，不用则留空）。"""
         return "行动已接收。"   # 拦截：真提交由编排器完成，这里不被调用
 
     battle_act.name = name
@@ -114,30 +176,52 @@ class LLMPlayer:
     kind = "llm"
 
     def __init__(self, side: str, *, settings: Settings, seed: int,
-                 llm=None, max_retries: int = 3) -> None:
+                 strategy: str = "", memory=None, llm=None, max_retries: int = 3) -> None:
         self.side = side
         self._settings = settings
         self._seed = seed
+        self._strategy = strategy          # R4：Playbook 文本（注入系统提示 `[战术手册]`）
+        self._memory = memory              # 记忆检索器 callable (side, situation_key) -> list[dict]（None=不注入）
         self._max_retries = max_retries
         self._act_name = f"battle_act_{side}"
         self._random = RandomPlayer(side, seed=seed)      # 兜底（独立 RNG 流，不碰引擎流）
         self._tools = build_side_tools(side)
         self._llm = build_chat_llm(settings, self._tools, llm=llm)   # llm= 为测试注入缝
         self._history: list = []
+        self._turn_log: list[dict] = []   # R2：逐回合 (turn/situation_key/action/prediction)
 
     # ── Player Protocol ──
     def on_match_start(self, observation: dict) -> None:
-        """开局：重置私有 history 为系统提示（首回合观测由 decide 渲染追加）。"""
-        self._history = [SystemMessage(content=BATTLE_PLAYER_SYSTEM_PROMPT)]
+        """开局：重置私有 history 与 _turn_log（R2 校准信号——防止同一实例跨局累积）。
+
+        R4：`strategy`（战术手册文本）以 `[战术手册]` 块追加进系统提示——SkillOpt
+        的 skill-as-trainable-state：手册是训练目标，LLM 是执行器。无 strategy 时
+        行为与 R3 完全一致（向后兼容）。
+        """
+        prompt = BATTLE_PLAYER_SYSTEM_PROMPT
+        if self._strategy:
+            prompt += "\n\n[战术手册]\n" + self._strategy
+        self._history = [SystemMessage(content=prompt)]
+        self._turn_log = []
 
     def decide(self, observation: dict, legal: list[dict], items: list[str]) -> Decision:
-        """渲染观测 → tool-call 循环 → 解析 battle_act → 合法则返回 Decision。"""
+        """渲染观测 → tool-call 循环 → 解析 battle_act → 合法则返回 Decision。
+
+        成功与兜底都记录 `_turn_log`（R2 校准信号原料）——兜底 prediction=""。
+        """
         self._history.append(HumanMessage(content=render_observation(observation, legal, items)))
+        if self._memory is not None:
+            from environment.evaluate import situation_key
+            memories = self._memory(self.side, situation_key(observation))
+            if memories:
+                self._history.append(HumanMessage(content=_render_memories(memories)))
         for _attempt in range(self._max_retries + 1):
             try:
                 resp = self._llm.invoke(self._history)
             except Exception:
-                return self._random.decide(observation, legal, items)   # 异常直接兜底
+                dec = self._random.decide(observation, legal, items)   # 异常直接兜底
+                self._record_turn(observation, dec, "")
+                return dec
             self._history.append(resp)
             calls = getattr(resp, "tool_calls", None) or []
             acted = next((c for c in calls if c.get("name") == self._act_name), None)
@@ -157,9 +241,24 @@ class LLMPlayer:
                     content = "（多余的调用已忽略）"
                 self._history.append(ToolMessage(content=content, tool_call_id=c.get("id", "")))
             if dec is not None:
+                prediction = str((acted.get("args") or {}).get("prediction", "") or "").strip()
+                self._record_turn(observation, dec, prediction)
                 return dec
             # 非法：原因已在 ToolMessage 里，下一轮 LLM 看到后修正重试
-        return self._random.decide(observation, legal, items)            # 重试耗尽兜底
+        dec = self._random.decide(observation, legal, items)            # 重试耗尽兜底
+        self._record_turn(observation, dec, "")
+        return dec
+
+    def _record_turn(self, observation: dict, dec: Decision, prediction: str) -> None:
+        """R2：记录本回合 (turn / situation_key / 实际提交 action / prediction)。"""
+        from environment.evaluate import situation_key
+        self._turn_log.append({
+            "turn": observation.get("turn"),
+            "situation_key": situation_key(observation),
+            "action": dict(dec.action),
+            "item": dec.item,
+            "prediction": prediction,
+        })
 
     def choose_replacement(self, observation: dict, bench: list[int]) -> int:
         """渲染补位提示 → LLM 调 battle_act(action_type='replace', target=…) → 返回选中槽位。"""
@@ -194,6 +293,10 @@ class LLMPlayer:
             if ok:
                 return idx
         return self._random.choose_replacement(observation, bench)       # 重试耗尽兜底
+
+    def choose_starter(self, observation: dict, options: list[int]) -> int:
+        """首发选择：简化实现，随机选一个首发（走独立 RNG 流兜底）。"""
+        return self._random.choose_starter(observation, options)
 
     def on_turn_result(self, observation: dict, events: list[dict]) -> None:
         """回合结束：把**过滤后**的事件摘要追加进私有 history（LLM 学到结果）。"""

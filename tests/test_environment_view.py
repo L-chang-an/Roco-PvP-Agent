@@ -11,7 +11,7 @@ import pytest
 
 from environment.actions import Decision, recharge_action, skill_action
 from environment.engine import execute_turn
-from environment.models import BattleState
+from environment.models import BattleState, StatModifier
 from environment.session import BattleSession
 from environment.view import observe
 from environment.visibility import filter_events_for
@@ -30,13 +30,14 @@ def test_own_full_foe_masked() -> None:
     me = view["me"]
     foe = view["opponent"]
     # 己方全量
-    assert set(me["units"][0]) >= {"name", "types", "stats", "skills", "nature", "bloodline",
+    assert set(me["units"][0]) >= {"id", "name", "types", "base_stats", "stats", "skills",
+                                   "current_skills", "nature", "bloodline",
                                    "iv", "max_hp", "current_hp", "energy", "fainted",
-                                   "stat_mods", "energy_cost_mods", "trait"}
+                                   "stat_mods", "trait"}
     assert "item_uses" in me                     # 己方道具可见
-    # 敌方只留白名单（E4 修正：增减益可见 → 含 stat_mods / energy_cost_mods）
-    assert set(foe["units"][0]) == {"name", "types", "hp_pct", "energy", "fainted",
-                                    "trait", "skills", "stat_mods", "energy_cost_mods"}
+    # 敌方只留白名单（E4 修正：增减益可见 → 含 stat_mods）
+    assert set(foe["units"][0]) == {"id", "name", "types", "hp_pct", "energy", "fainted",
+                                    "trait", "skills", "stat_mods"}
     assert "item_uses" not in foe                # 敌方道具次数隐藏
     assert foe["lives"] is not None              # 敌方命数可见
     assert foe["active"] is not None             # 敌方在场下标可见
@@ -70,10 +71,10 @@ def test_skills_hidden_until_revealed() -> None:
     s = _session()
     # 起始：敌方技能全未知
     assert s.view("a")["opponent"]["units"][0]["skills"] == []
-    # b 使用技能（撞击1）→ a 视角该技能揭示（含详情描述）
+    # b 使用技能（拍击）→ a 视角该技能揭示（含详情描述）
     execute_turn(s.state, Decision(recharge_action()), Decision(skill_action(0)))
     foe_skills = s.view("a")["opponent"]["units"][0]["skills"]
-    assert [x["name"] for x in foe_skills] == ["撞击1"]
+    assert [x["name"] for x in foe_skills] == ["拍击"]
     assert foe_skills[0]["power"] > 0 and foe_skills[0]["desc"] and "energy_cost" in foe_skills[0]
 
 
@@ -100,9 +101,38 @@ def test_foe_trait_shows_real_desc() -> None:
     """特性描述：图鉴公开数据（真实特性名+描述，不是白板 default）。"""
     from environment.dataset import DataSource, load_spirits
     s = BattleSession.start(*mirror_pair(), seed=1)      # 真实 E0 精灵
-    sp = load_spirits(DataSource.E0)["迪莫"]
+    sp = load_spirits(DataSource.FULL)["迪莫"]
     foe_trait = s.view("a")["opponent"]["units"][0]["trait"]
     assert foe_trait["name"] == sp.trait_name and foe_trait["desc"] == sp.trait_desc
+
+
+def test_foe_trait_gains_visible() -> None:
+    """E4 增减益口径：敌方**特性层数**（trait.gains）可见——特性运行时增益不再藏。
+
+    图鉴名+描述仍保留；gains 是特性产生的增益层（trait=True，与 stat_mods 分开）。
+    """
+    s = BattleSession.start(*mirror_pair(), seed=1)
+    foe = s.state.side("b").active_unit
+    foe.trait.gains.append(StatModifier(stat="atk", mode="pct", layers=2,
+                                        permanent=False, source="最好的伙伴", trait=True))
+    foe_trait = s.view("a")["opponent"]["units"][0]["trait"]
+    assert foe_trait["name"] and foe_trait["desc"]            # 图鉴名+描述仍保留
+    gains = foe_trait["gains"]
+    assert gains and gains[0]["stat"] == "atk" and gains[0]["layers"] == 2
+    assert gains[0]["trait"] is True                          # 特性层数标记保留
+
+
+def test_skill_current_cost_in_view() -> None:
+    """技能卡片带 current_cost（当前回合实付能耗）；能耗层变化 → 同步（前端据此显示）。"""
+    from environment.primitives import apply_energy_cost_mod
+    s = _session()
+    me_unit = s.state.side("a").active_unit
+    sk = me_unit.skills[1]                    # 力量增效（能耗 1）；抓挠能耗 0 会夹 0
+    base = sk.energy_cost
+    assert base > 0
+    assert s.view("a")["me"]["units"][0]["skills"][1]["current_cost"] == base
+    apply_energy_cost_mod(me_unit, layers=1, source="测试")
+    assert s.view("a")["me"]["units"][0]["skills"][1]["current_cost"] == base + 1
 
 
 # ── visibility：事件过滤 ────────────────────────────────────────────────────

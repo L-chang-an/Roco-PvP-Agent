@@ -3,6 +3,12 @@
 引擎在固定时机 emit(hook, ctx, sources)，分发器收集来源（特性/技能/印记）中
 匹配该时机的绑定，条件通过后逐个执行效果原语。来源互不感知，只声明绑定。
 
+**v3 骨架 Phase 3.1**：`emit` 是 `pipeline.run` 的兼容 shim——构造 SkillResolved →
+collect_reactions（事件 → 新 Atom）→ reduce_all（Atom → 状态），特性效果不再由
+Hook 直接改状态。对外行为与旧直写路径逐位等价（`tests/test_v3_sentinel.py` 把关）。
+引擎主路径已直调 pipeline.run（engine.resolve_skill），emit 保留给测试与未来
+其他 hook 的直调场景。
+
 S1 只实现机制与三个钩子（SKILL_RESOLVE / STAT_CALC / EXIT），枚举预留全集——
 后续特性/印记按需接入，不改分发器形状。
 """
@@ -12,7 +18,7 @@ from __future__ import annotations
 from enum import Enum
 
 from .effects import Effect
-from .primitives import apply_energy_cost_mod, apply_energy_gain, apply_stat_mod, heal_pct
+from .models import StatModifier
 
 
 class Hook(str, Enum):
@@ -24,6 +30,7 @@ class Hook(str, Enum):
     ENTER = "enter"            # 精灵入场（补位/换人/返场/开战）
     EXIT = "exit"              # 精灵离场（换人/脱离）——清非永久增益
     SKILL_RESOLVE = "skill_resolve"   # 技能结算后（一次技能恰好一次，聚合全部命中）
+    STATUS_APPLIED = "status_applied"  # 状态层数变化（获得冻结等，2026-08-30；source 守卫防循环）
     DEAL_DAMAGE = "deal_damage"
     TAKE_DAMAGE = "take_damage"
     KO = "ko"                  # 击杀
@@ -49,7 +56,31 @@ _CONDITIONS: dict[str, object] = {
     "used_fire": lambda ctx: _skill_type_is(ctx, "火"),
     "used_grass": lambda ctx: _skill_type_is(ctx, "草"),
     "used_water": lambda ctx: _skill_type_is(ctx, "水"),
+    "used_ice": lambda ctx: _skill_type_is(ctx, "冰"),
+    "used_attack": lambda ctx: _skill_kind_is(ctx, ("物攻", "魔攻")),
+    "defense_countered": lambda ctx: _skill_kind_is(ctx, ("防御",))
+    and bool(getattr(ctx, "countered", False)),
+    "freeze_applied": lambda ctx: _freeze_applied(ctx),
 }
+
+
+def _skill_kind_is(ctx, kinds: tuple[str, ...]) -> bool:
+    """SKILL_RESOLVE：施放技能类别 ∈ kinds（从 unit.current_skills 按名查）。"""
+    unit = getattr(ctx, "unit", None)
+    ev = getattr(ctx, "event", None)
+    if unit is None or ev is None:
+        return False
+    for s in unit.current_skills:
+        if s.name == ev.skill:
+            return s.kind in kinds
+    return False
+
+
+def _freeze_applied(ctx) -> bool:
+    """STATUS_APPLIED：敌方获得冻结层（layers > 0）。source 守卫在收集层做。"""
+    ev = getattr(ctx, "event", None)
+    return (ev is not None and getattr(ev, "stat", "") == "冻结"
+            and getattr(ev, "layers", 0) > 0)
 
 
 def _cond_matches(cond: str, ctx) -> bool:
@@ -57,36 +88,30 @@ def _cond_matches(cond: str, ctx) -> bool:
     return bool(fn(ctx)) if callable(fn) else False
 
 
-def _apply_effect(state, ctx, effect: Effect, source: str) -> None:
-    """把一条 Effect 分发到对应原语。target="self" 用 ctx.unit（特性绑定单位）。"""
-    if effect.target != "self":
-        raise ValueError(f"S1 只支持 target='self'，实际 {effect.target!r}（效果 {effect.op}）")
+def emit(state, hook: str, ctx, trait_defs) -> None:
+    """兼容 shim（v3 骨架 Phase 3.1）：委托 pipeline.run 的反应循环。
+
+    - 构造 `SkillResolved` 事件（skill 名 / dealt_counter 从 ctx 取）；
+    - `pipeline.run`：collect_reactions 按绑定条件返回新 Atom（TraitGain / 资源即时），
+      reduce_all 执行（写 trait.gains，trait=True，免疫常规驱散）。
+
+    对外行为与旧「直接改 trait.gains」逐位等价（哨兵把关）。`state` 可为 None（测试直调）。
+    引擎主路径（engine.resolve_skill）已直调 pipeline.run，本 shim 保留给测试与直调场景。
+    """
+    if hook != Hook.SKILL_RESOLVE.value:
+        return
     unit = getattr(ctx, "unit", None)
     if unit is None:
-        raise ValueError(f"ctx 缺少 unit（效果 {effect.op}）")
-    if effect.op == "stat_mod":
-        apply_stat_mod(unit, stat=effect.stat, mode=effect.mode, layers=effect.layers,
-                       permanent=effect.permanent, trait=effect.trait, source=source)
-    elif effect.op == "energy_gain":
-        apply_energy_gain(unit, effect.value, energy_max=getattr(ctx, "energy_max", 10))
-    elif effect.op == "energy_cost_mod":
-        apply_energy_cost_mod(unit, layers=effect.layers, permanent=effect.permanent,
-                              trait=effect.trait, source=source)
-    elif effect.op == "heal_pct":
-        heal_pct(state, unit, int(effect.value), source=source)
-    else:
-        raise ValueError(f"未知效果原语：{effect.op}")
+        return
+    from .domain import SkillResolved
+    from .pipeline import run
+    from .reducer import Frame
 
+    event = SkillResolved(unit_id=getattr(unit, "id", ""),
+                          skill=getattr(getattr(ctx, "skill", None), "name", ""),
+                          dealt_counter=bool(getattr(ctx, "dealt_counter", False)),
+                          skill_type=getattr(getattr(ctx, "skill", None), "type", ""))
+    run(state, [], Frame(), unit=unit, trait_defs=trait_defs,
+        energy_max=getattr(ctx, "energy_max", 10), after=lambda f: [event])
+    return None
 
-def emit(state, hook: str, ctx, trait_defs) -> None:
-    """在给定时机执行来源（特性）的全部命中绑定。
-
-    S1 提供机制；S2 由引擎在关键点调用（resolve_skill 结算后 / 离场 / 属性计算）。
-    trait_defs：本轮需要执行的特征静态定义列表（含 cond 匹配失败返回）。
-    """
-    for tdef in trait_defs:
-        for binding in tdef.bindings:
-            if binding.hook != hook or not _cond_matches(binding.cond, ctx):
-                continue
-            for effect in binding.effects:
-                _apply_effect(state, ctx, effect, source=tdef.name)

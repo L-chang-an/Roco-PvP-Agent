@@ -799,6 +799,7 @@ footer button:disabled {
 .unit-card.active { border-color: var(--accent); }
 .unit-card.fainted { opacity: 0.45; }
 .unit-card.foe { border-color: #5a3a4a; }
+.unit-card.foe.active { border-color: var(--accent); }   /* 高亮敌方在场精灵（同己方口径） */
 
 .unit-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .hpbar {

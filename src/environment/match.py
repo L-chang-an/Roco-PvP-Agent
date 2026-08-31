@@ -42,6 +42,7 @@ class MatchResult:
     winner: str | None
     done: bool
     turns: list[TurnRecord] = field(default_factory=list)
+    starters: dict[str, int] = field(default_factory=dict)  # 第 0 回合首发（side → 槽位）
 
     @property
     def turn_count(self) -> int:
@@ -123,6 +124,15 @@ def run_match(session, players: dict[str, Player]) -> MatchResult:
                          winner=None, done=False)
     for s in SIDES:
         players[s].on_match_start(session.view(s))
+    # 第 0 回合（2026-08-30）：双方选首发 → 首发触发入场效果 → 进入第 1 回合。
+    for s in SIDES:
+        options = session.starter_options(s)
+        chooser = getattr(players[s], "choose_starter", None)
+        idx = chooser(session.view(s), options) if chooser else options[0]
+        if not session.choose_starter(s, idx)["ok"]:          # 防御：玩家写错 → 首个存活兜底
+            session.choose_starter(s, options[0])
+    session.start_entry()
+    result.starters = session.starters
     while not session.state.done:
         out = drive_turn(session, players)
         result.turns.append(TurnRecord(turn=out.turn, decision_a=out.decisions["a"],

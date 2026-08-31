@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from environment.actions import Decision, skill_action
+from environment.actions import Decision, recharge_action, skill_action
 from environment.match import run_match
 from environment.players import ScriptedPlayer
 from environment.replay import replay_record
@@ -38,10 +38,10 @@ def _ko_record() -> dict:
     ScriptedPlayer 脚本 [skill_action(0)] 耗尽后回落聚能，纯确定；battle_id 固定 "ko"。
     """
     rules = dataclasses.replace(DEFAULT_RULES, team_size=2)
-    roster_a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["撞击"]),
-                spec("弱乙", 500, 100, 100, 100, 100, 100, ["撞击"])]
-    roster_b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠1"]),
-                spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠1"])]
+    roster_a = [spec("弱甲", 1, 1, 1, 1, 1, 1, ["抓挠"]),
+                spec("弱乙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    roster_b = [spec("强乙", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+                spec("强丙", 500, 100, 100, 100, 100, 100, ["抓挠"])]
     session = BattleSession.start(roster_a, roster_b, seed=1, rules=rules, battle_id="ko")
     players = {"a": ScriptedPlayer("a", script=[Decision(skill_action(0))]),
                "b": ScriptedPlayer("b", script=[Decision(skill_action(0))])}
@@ -91,6 +91,40 @@ def test_replay_battle_id_in_state_hash() -> None:
     out = replay_record(rec)
     assert not out["all_match"]
     assert out["turns"][0]["match"] is False
+
+
+def test_replay_preserves_items_loadout() -> None:
+    """非默认道具栏进重放：重放按同一 items_a/items_b 重建，否则初始 item_uses 失配。
+
+    若 replay_record 忽略 items、回落到 DEFAULT_ITEMS（草魔法），side_a 初始 item_uses
+    就从 {"首领进化":1} 漂成 {"草魔法":1} → 逐回合 state_hash 失配。
+    """
+    rules = dataclasses.replace(DEFAULT_RULES, team_size=2, lives=1)
+    roster_a = [spec("强攻", 500, 100, 100, 100, 100, 100, ["抓挠"]),
+                spec("强攻2", 500, 100, 100, 100, 100, 100, ["抓挠"])]
+    roster_b = [spec("弱靶", 50, 20, 20, 20, 20, 50, ["拍击"]),
+                spec("弱靶2", 50, 20, 20, 20, 20, 50, ["拍击"])]
+    session = BattleSession.start(roster_a, roster_b, seed=1, items_a=["首领进化"],
+                                  items_b=["草魔法"], rules=rules, battle_id="items")
+    players = {"a": ScriptedPlayer("a", script=[Decision(skill_action(0))]),
+               "b": ScriptedPlayer("b", script=[Decision(recharge_action())])}
+    result = run_match(session, players)
+    rec = {
+        "version": 1, "battle_id": "items", "saved_at": "t", "seed": 1,
+        "players": {"a": "scripted", "b": "scripted"},
+        "rules": _rules_dict(rules), "team_a": roster_a, "team_b": roster_b,
+        "items_a": ["首领进化"], "items_b": ["草魔法"],
+        "winner": result.winner, "done": result.done,
+        "turns": [{"turn": t.turn, "decision_a": asdict(t.decision_a),
+                   "decision_b": asdict(t.decision_b),
+                   "replace_a": t.replace_a, "replace_b": t.replace_b,
+                   "state_hash": t.state_hash} for t in result.turns],
+    }
+    out = replay_record(rec)
+    assert out["ok"] and out["all_match"]
+    # 反向验证：篡改 items_a → 重放失配（证明 items 确实参与重建）
+    rec_bad = {**rec, "items_a": ["草魔法"]}
+    assert not replay_record(rec_bad)["all_match"]
 
 
 def test_replay_rejects_missing_keys() -> None:

@@ -60,8 +60,8 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
         name="浸润",
         bindings=(
             EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_water", effects=(
-                # 使用水系技能后，全技能能耗 −1（可叠层，非永久离场清除）
-                Effect("energy_cost_mod", layers=1, trait=True, permanent=False),
+                # 使用水系技能后，全技能能耗 −1（层数 = 能耗修正值 -1，可叠层，非永久离场清除）
+                Effect("energy_cost_mod", layers=-1, trait=True, permanent=False),
             )),
         ),
     ),
@@ -81,6 +81,101 @@ TRAIT_CATALOG: dict[str, TraitDef] = {
             )),
         ),
     ),
+    # S4：里拉鳐「吟游之弦」——赋予的印记不会替换其他印记（进 exclusive_marks 独立空间）。
+    # 路由在 compiler._mark_space 读本名判定；此处注册名以阻止 resolve_trait_name
+    # 落到 default 白板。零绑定（效果是印记施加时的路由规则，非事件反应）。
+    "吟游之弦": TraitDef(name="吟游之弦", bindings=()),
+    # 冻结批 L1（2026-08-30）：灵魂灼伤——冰系技能使敌方+4层灼烧，火系技能使敌方+2层冻结。
+    # foe_status op（triggers._effect_to_atoms）：对敌方在场施状态（属性免疫同漏斗拦截）。
+    "灵魂灼伤": TraitDef(
+        name="灵魂灼伤",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_ice", effects=(
+                Effect("foe_status", stat="灼烧", layers=4),
+            )),
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_fire", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+        ),
+    ),
+    # 冻结批 L2（2026-08-30）：使敌方获得冻结时附加效果——监听 STATUS_APPLIED
+    # （StatModChanged 冻结正层），source 守卫在 triggers 收集层防循环。
+    "加个雪球": TraitDef(
+        name="加个雪球",
+        bindings=(
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+        ),
+    ),
+    "捉迷藏": TraitDef(
+        name="捉迷藏",
+        bindings=(
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_energy_cost_mod", layers=1),
+            )),
+        ),
+    ),
+    # 冰钻：读钩子（敌方技能栏总能耗 → 自己攻击威力 +10%×总能耗，见 damage.build_damage_terms）
+    "冰钻": TraitDef(name="冰钻", bindings=()),
+    # 冻结批 L3（2026-08-30）
+    "抓到你了": TraitDef(
+        name="抓到你了",
+        bindings=(
+            EffectBinding(hook=Hook.ENTER, cond="", effects=(
+                Effect("foe_status", stat="冻结", layers=2),
+            )),
+            EffectBinding(hook=Hook.STATUS_APPLIED, cond="freeze_applied", effects=(
+                Effect("foe_energy_cost_mod", layers=1),
+            )),
+        ),
+    ),
+    "大雪球": TraitDef(
+        name="大雪球",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_ice", effects=(
+                Effect("snowball_record"),   # kwargs 计数：2 次不同冰系技能 → 敌方 +4 冻结并重置
+            )),
+        ),
+    ),
+    "月牙雪糕": TraitDef(
+        name="月牙雪糕",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="used_attack", effects=(
+                Effect("star_meteor_mark"),   # 敌方每有 1 层冻结 → 施 1 层星陨印记
+            )),
+        ),
+    ),
+    "吉利丁片": TraitDef(
+        name="吉利丁片",
+        bindings=(
+            EffectBinding(hook=Hook.EXIT, cond="", effects=(
+                Effect("enter_stat_mod", stat="def", mode="pct", layers=2, permanent=True),
+                Effect("enter_stat_mod", stat="sp_def", mode="pct", layers=2, permanent=True),
+                Effect("enter_stat_mod", stat="免疫冻结", mode="special", layers=1,
+                       permanent=True),
+            )),
+        ),
+    ),
+    # 冰雪魂魄 / 结晶水：读钩子与特殊结算（见 damage.build_damage_terms /
+    # triggers._crystal_water_gain / models.build_unit 初始能量覆写），零绑定注册名。
+    "冰雪魂魄": TraitDef(name="冰雪魂魄", bindings=()),
+    "结晶水": TraitDef(name="结晶水", bindings=()),
+    # 萌化批（2026-08-30）
+    "无忧无虑": TraitDef(name="无忧无虑", bindings=()),   # 层数上限豁免（reducer._morph_max_layers）
+    "自由飘": TraitDef(name="自由飘", bindings=()),       # 每层萌化连击+3（primitives.combo_bonus）
+    "守望者": TraitDef(
+        name="守望者",
+        bindings=(
+            EffectBinding(hook=Hook.SKILL_RESOLVE, cond="defense_countered", effects=(
+                Effect("foe_status", stat="萌化", layers=1),
+            )),
+        ),
+    ),
+    "拉拉队长": TraitDef(name="拉拉队长", bindings=()),   # 施加漏斗转化（reducer._reduce_add_modifier）
+    "守护者": TraitDef(name="守护者", bindings=()),       # 入场能耗减（triggers._guardian_cost）
+    "迎宾": TraitDef(name="迎宾", bindings=()),           # 离场施萌化（triggers._welcome_morph）
+    "化茧": TraitDef(name="化茧", bindings=()),           # 致命免伤（reducer._reduce_damage，kwargs 计数 2 次）
 }
 
 

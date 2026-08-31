@@ -46,11 +46,11 @@ def test_probe_errors_full_cli(monkeypatch, capsys) -> None:
     assert "首领形态不可入队" in out
     assert "同一家族只能入队一只" in out
     assert "需要先选择血脉系别" in out
-    assert "共 8 条错误" in out
+    assert "共 9 条错误" in out
 
 
-def test_e0_cli_unchanged(monkeypatch, capsys) -> None:
-    """不传 --data（默认 E0）行为不变。"""
+def test_default_cli_is_full(monkeypatch, capsys) -> None:
+    """不传 --data（默认 FULL）行为：FULL 数据自检。"""
     monkeypatch.setattr(sys, "argv", ["environment", "--data-report"])
     assert main_mod.main() == 0
-    assert "技能 14 条" in capsys.readouterr().out
+    assert "FULL 数据自检" in capsys.readouterr().out

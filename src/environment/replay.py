@@ -4,8 +4,8 @@
 只依赖环境包内纯函数；不读 UI / 网络 / 玩家。重放消费的记录格式（store.py / 自博弈自检
 共用同一来源）：
     {rules: {…可 BattleRules(**d)}, team_a: [roster spec], team_b: [roster spec],
-     seed: int, battle_id: str,
-     turns: [{turn, decision_a: {action, item}, decision_b: {action, item},
+     seed: int, battle_id: str, items_a: [道具名]|None, items_b: [道具名]|None,
+     turns: [{turn, decision_a: {action, item, item_arg}, decision_b: {action, item, item_arg},
               replace_a: int|None, replace_b: int|None, state_hash: str}]}
 
 team_a/team_b 存 **roster spec**（build_roster 的产物，`BattleSession.start` 直吃）——
@@ -36,12 +36,23 @@ def replay_record(record: dict) -> dict:
         raise ValueError(f"轨迹记录缺少必需键：{missing}（应有 {list(_REQUIRED)}）。")
     rules = BattleRules(**record["rules"])
     session = BattleSession.start(record["team_a"], record["team_b"], seed=record["seed"],
+                                  items_a=record.get("items_a"), items_b=record.get("items_b"),
                                   rules=rules, battle_id=record["battle_id"])
+
+    # 第 0 回合（2026-08-30）：重建首发选择 + 入场效果（旧记录无 starters → 缺省 0）。
+    starters = record.get("starters", {})
+    for s in ("a", "b"):
+        idx = starters.get(s, 0)
+        if not session.choose_starter(s, idx)["ok"]:
+            session.choose_starter(s, session.starter_options(s)[0])
+    session.start_entry()
 
     results: list[dict] = []
     for tr in record["turns"]:
-        da = Decision(action=tr["decision_a"]["action"], item=tr["decision_a"].get("item", ""))
-        db = Decision(action=tr["decision_b"]["action"], item=tr["decision_b"].get("item", ""))
+        da = Decision(action=tr["decision_a"]["action"], item=tr["decision_a"].get("item", ""),
+                      item_arg=tr["decision_a"].get("item_arg", ""))
+        db = Decision(action=tr["decision_b"]["action"], item=tr["decision_b"].get("item", ""),
+                      item_arg=tr["decision_b"].get("item_arg", ""))
         ok = bool(session.submit("a", da)["ok"])
         ok &= bool(session.submit("b", db)["ok"])
         res = session.resolve()

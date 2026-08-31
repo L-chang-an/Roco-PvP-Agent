@@ -82,24 +82,27 @@ def _dimo_trait() -> TraitDef:
 
 def test_emit_fires_on_matching_hook_and_cond() -> None:
     u = _unit(energy=8)
+    u.trait = TraitState(name="最好的伙伴")        # 数据协议 v2：特性增益写 trait.gains
     ctx = SimpleNamespace(unit=u, dealt_counter=True, energy_max=10)
     emit(None, Hook.SKILL_RESOLVE, ctx, [_dimo_trait()])
-    assert u.stat_mods[0].trait is True and u.stat_mods[0].layers == 1
+    assert u.trait.gains[0].trait is True and u.trait.gains[0].layers == 1
     assert u.energy == 10                                  # 能量 +2
 
 
 def test_emit_skips_when_cond_not_met() -> None:
     u = _unit(energy=8)
+    u.trait = TraitState(name="最好的伙伴")
     ctx = SimpleNamespace(unit=u, dealt_counter=False, energy_max=10)
     emit(None, Hook.SKILL_RESOLVE, ctx, [_dimo_trait()])
-    assert u.stat_mods == [] and u.energy == 8             # 未造成克制，不触发
+    assert u.trait.gains == [] and u.energy == 8           # 未造成克制，不触发
 
 
 def test_emit_ignores_other_hooks() -> None:
     u = _unit()
+    u.trait = TraitState(name="最好的伙伴")
     ctx = SimpleNamespace(unit=u, dealt_counter=True, energy_max=10)
     emit(None, Hook.EXIT, ctx, [_dimo_trait()])            # 绑定挂在 SKILL_RESOLVE
-    assert u.stat_mods == [] and u.energy == 10
+    assert u.trait.gains == [] and u.energy == 10
 
 
 # ── trait 序列化往返 ──

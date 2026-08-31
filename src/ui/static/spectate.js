@@ -26,7 +26,7 @@
       show(sk, host) {
         el.innerHTML =
           `<b>${escapeHtml(sk.name)}</b> <span class="tag">${escapeHtml(sk.type)}系</span> ${escapeHtml(sk.kind)}` +
-          `<br>威力 ${sk.power} · 能耗 ⚡${sk.energy_cost}` +
+          `<br>威力 ${sk.power} · 能耗 ⚡${costText(sk)}` +
           (sk.priority ? ` · 先手 ${sk.priority}` : '') +
           `<br>${escapeHtml(sk.desc)}`;
         el.classList.remove('hidden');
@@ -47,20 +47,32 @@
   const STAT_CN = { hp: '生命', atk: '物攻', sp_atk: '魔攻', def: '物防', sp_def: '魔防', speed: '速度' };
 
   function modText(m) {
-    const unit = m.mode === 'flat' ? '+10' : '10%';
-    return (m.trait ? '特性·' : '') + `${STAT_CN[m.stat] || m.stat}${unit} * ${m.layers}`;
+    const prefix = m.trait ? '特性·' : '';
+    if (m.stat === 'energy_cost') return prefix + `全技能能耗${m.layers > 0 ? '+' : ''}${m.layers}`;
+    const name = STAT_CN[m.stat] || m.stat;
+    if (m.mode === 'flat') return prefix + `${name}+10 * ${m.layers}`;
+    if (m.mode === 'pct') return prefix + `${name}10% * ${m.layers}`;
+    return prefix + `${name} * ${m.layers}`;   // dot/special：层数直显
   }
 
   function statusBar(u) {
     const parts = [];
     for (const m of (u.stat_mods || [])) parts.push(`<span class="stat-chip">${escapeHtml(modText(m))}</span>`);
-    for (const m of (u.energy_cost_mods || [])) parts.push(`<span class="stat-chip">全技能能耗-1 * ${m.layers}</span>`);
+    const gains = (u.trait && u.trait.gains) || [];
+    for (const m of gains) parts.push(`<span class="stat-chip">${escapeHtml(modText(m))}</span>`);
     if (!parts.length) return '';
     return `<div class="status-bar">${parts.join('')}</div>`;
   }
 
+  function costText(s) {
+    if (s.current_cost == null) return String(s.energy_cost);
+    return s.current_cost === s.energy_cost
+      ? String(s.current_cost)
+      : `${s.current_cost}（原${s.energy_cost}）`;
+  }
+
   function chipFor(s, i) {
-    return `<span class="skill-chip" data-tip-idx="${i}">${escapeHtml(s.name)} <small>⚡${s.energy_cost}</small></span>`;
+    return `<span class="skill-chip" data-tip-idx="${i}">${escapeHtml(s.name)} <small>⚡${costText(s)}</small></span>`;
   }
 
   function attachChips(card, skills) {
@@ -110,6 +122,10 @@
   function applyState(st) {
     renderSide('a', st.a);
     renderSide('b', st.b);
+    const w = st.weather;
+    $('#spectate-weather').innerHTML = w
+      ? `🌦 ${escapeHtml(w.kind)} · 剩 ${w.turns_left} 回合`
+      : '';
   }
 
   // ── 全量事件行（观战者视角：绝对数值） ──────────────────────────────

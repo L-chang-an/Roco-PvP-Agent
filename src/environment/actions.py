@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .evolution import boss_targets_of
 from .models import ActionType
 from .primitives import skill_energy_cost
-from .rules import E0_ITEMS
+from .rules import BOSS_EVOLUTION_ITEM, ITEMS
+from .statuses import morph_layers
+from .teambuilder import BOSS_BLOODLINE
 
 _ACTION_TYPES: frozenset[str] = frozenset(a.value for a in ActionType)
 
@@ -33,23 +36,47 @@ def recharge_action() -> dict:
 @dataclass(frozen=True)
 class Decision:
     """一方一回合的完整提交：一个主动作 + 可选一个道具（附赠动作）。
-    道具**不占用**主动作，两者同回合生效、各自入队。"""
+    道具**不占用**主动作，两者同回合生效、各自入队。
+
+    `item_arg`：道具参数（2026-08-30）——首领进化多分支（迪莫/魔力猫）时的分支
+    精灵名；单分支可空（自动取唯一分支）。"""
 
     action: dict
     item: str = ""     # "" = 本回合不用道具
+    item_arg: str = "" # 首领化分支精灵名（多分支时必填）
 
 
-def skill_block_reason(state, unit, index) -> str | None:
+def boss_evolution_options(state, side: str) -> list[str]:
+    """首领化分支列表（玩家 `item_arg` 从这里选）；空 = 当前不可首领化。
+
+    已拍板（2026-08-30）：首领化 = 一阶进化，只有 boss 的上一阶可触发；萌化层数 > 0
+    → 不可首领化（资质已退化）；多分支只有迪莫（4）/魔力猫（2）。
+    **血脉门控（2026-08-30）**：血脉必须是「首领」（非系别血脉）才能首领化——
+    组队时选「首领」血脉标记，选「光」等系别血脉则不能首领化。
+    """
+    unit = state.side(side).active_unit
+    if unit.fainted or morph_layers(unit) > 0:
+        return []
+    if unit.bloodline != BOSS_BLOODLINE:
+        return []
+    return list(boss_targets_of(unit.name))
+
+
+def skill_block_reason(state, side: str, unit, index) -> str | None:
     """唯一的技能门控谓词：可用 → None，否则中文原因。
     `legal_actions` 与 `validate_decision` **只能**通过它判断技能可用性。
-    E0 的门只有两道：① 槽位越界（含非 int）② 能量不足。
-    将来的冷却 / 禁足 / 蓄力锁 / 号位锁全部只加进本函数。"""
+    三道门：① 槽位越界（含非 int）② 冷却中（防御冷却 2026-08-30）③ 能量不足。
+    将来的禁足 / 蓄力锁 / 号位锁全部只加进本函数。
+    数据协议 v2：读 `current_skills`（当前生效视图，能耗/冷却以 current_skills 为准）；
+    印记/天气批（2026-08-30）：能耗含湿润/蓄势印记与沙暴修正。"""
     if isinstance(index, bool) or not isinstance(index, int):
         return f"技能槽位必须是整数，实际 {index!r}。"
-    if index < 0 or index >= len(unit.skills):
-        return f"技能槽位 {index} 越界（该单位有 {len(unit.skills)} 个技能）。"
-    skill = unit.skills[index]
-    cost = skill_energy_cost(unit, skill.energy_cost)   # 能耗减益（水蓝蓝·浸润）也让门槛降低
+    if index < 0 or index >= len(unit.current_skills):
+        return f"技能槽位 {index} 越界（该单位有 {len(unit.current_skills)} 个技能）。"
+    skill = unit.current_skills[index]
+    if skill.cooldown > 0:
+        return f"技能「{skill.name}」冷却中（剩余 {skill.cooldown} 回合）。"
+    cost = skill_energy_cost(state, side, unit, skill.energy_cost, skill)
     if unit.energy < cost:
         return f"能量不足（技能「{skill.name}」需 {cost}，现有 {unit.energy}）。"
     return None
@@ -62,8 +89,8 @@ def legal_actions(state, side: str) -> list[dict]:
     side_state = state.side(side)
     unit = side_state.active_unit
     actions: list[dict] = []
-    for idx in range(len(unit.skills)):
-        if skill_block_reason(state, unit, idx) is None:
+    for idx in range(len(unit.current_skills)):
+        if skill_block_reason(state, side, unit, idx) is None:
             actions.append(skill_action(idx))
     for idx, bench in enumerate(side_state.units):
         if idx != side_state.active and not bench.fainted:
@@ -100,6 +127,22 @@ def validate_replacement(state, side: str, bench_idx) -> str | None:
     return None
 
 
+def validate_starter(state, side: str, bench_idx) -> str | None:
+    """首发合法性（第 0 回合，2026-08-30）：合法 → None，否则中文原因。
+
+    与补位类似，但首发无「当前在场」概念——任意存活单位都可选作首发。"""
+    if state.done:
+        return "对局已结束。"
+    side_state = state.side(side)
+    if isinstance(bench_idx, bool) or not isinstance(bench_idx, int):
+        return f"首发槽位必须是整数，实际 {bench_idx!r}。"
+    if not 0 <= bench_idx < len(side_state.units):
+        return f"首发槽位 {bench_idx} 越界。"
+    if side_state.units[bench_idx].fainted:
+        return "目标精灵已倒下，不能首发。"
+    return None
+
+
 def validate_decision(state, side: str, dec: Decision) -> str | None:
     """合法 → None；非法 → 原因字符串（调用方据此拒绝且**不消耗回合**）。
 
@@ -114,7 +157,7 @@ def validate_decision(state, side: str, dec: Decision) -> str | None:
         return f"未知 action type「{atype}」。"
     side_state = state.side(side)
     if atype == ActionType.SKILL.value:
-        reason = skill_block_reason(state, side_state.active_unit, action.get("value"))
+        reason = skill_block_reason(state, side, side_state.active_unit, action.get("value"))
         if reason is not None:
             return reason
     elif atype == ActionType.SWITCH.value:
@@ -130,8 +173,32 @@ def validate_decision(state, side: str, dec: Decision) -> str | None:
     # RECHARGE 恒合法
 
     if dec.item:
-        if dec.item not in E0_ITEMS:
+        if dec.item not in ITEMS:
             return f"道具「{dec.item}」不存在。"
         if side_state.item_uses.get(dec.item, 0) <= 0:
             return f"道具「{dec.item}」次数已尽。"
+        if dec.item == BOSS_EVOLUTION_ITEM:
+            reason = _boss_item_reason(state, side, dec)
+            if reason is not None:
+                return reason
+    return None
+
+
+def _boss_item_reason(state, side: str, dec: Decision) -> str | None:
+    """首领进化道具门控（2026-08-30 拍板）：合法 → None，否则中文原因。
+
+    ① 场上精灵须是 boss 的上一阶（首领血脉，一阶进化）；
+    ② 萌化层数 == 0（资质已退化则不再是 boss 上一阶）；
+    ③ 多分支（迪莫/魔力猫）时 item_arg 必须给出合法分支；单分支可空。
+    """
+    unit = state.side(side).active_unit
+    targets = boss_targets_of(unit.name)
+    if not targets:
+        return f"「{unit.name}」无首领血脉，无法使用首领进化。"
+    if unit.bloodline != BOSS_BLOODLINE:
+        return f"「{unit.name}」血脉不是「首领」，无法首领化。"
+    if morph_layers(unit) > 0:
+        return f"「{unit.name}」处于萌化状态，无法首领化。"
+    if len(targets) > 1 and dec.item_arg not in targets:
+        return f"首领化分支必须从 {list(targets)} 中选择。"
     return None

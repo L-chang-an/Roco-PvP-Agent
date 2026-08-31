@@ -59,7 +59,7 @@ def test_static_files_served():
 # ---------- 同步 POST 兜底 ----------
 
 def test_sync_chat_returns_reply_and_session():
-    res = _client(_final_llm("你好世界")).post("/api/chat", json={"message": "hi"})
+    res = _client(_final_llm("你好世界")).post("/api/chat", json={"message": "帮我组队"})
     assert res.status_code == 200
     body = res.json()
     assert body["reply"] == "你好世界"
@@ -68,7 +68,7 @@ def test_sync_chat_returns_reply_and_session():
 
 def test_sync_chat_rejects_extra_field():
     """extra='forbid'：前端发了未定义字段直接 422，早暴露契约漂移。"""
-    res = _client(_final_llm()).post("/api/chat", json={"message": "hi", "unexpected": 1})
+    res = _client(_final_llm()).post("/api/chat", json={"message": "帮我组队", "unexpected": 1})
     assert res.status_code == 422
 
 
@@ -91,22 +91,22 @@ def _stream_events(client, url):
 
 def test_stream_event_sequence_final():
     """在线单轮：meta → reply → done。"""
-    events = _stream_events(_client(_final_llm("你好")), "/api/chat/stream?message=hi")
+    events = _stream_events(_client(_final_llm("你好")), "/api/chat/stream?message=帮我组队")
     assert [e["event"] for e in events] == ["meta", "reply", "done"]
     assert events[0]["session_id"]
     assert events[1]["text"] == "你好"
 
 
 def test_stream_event_sequence_with_tool():
-    """工具循环：meta → thinking → tool → reply → done。"""
+    """工具循环：meta → tool → reply → done（顾问不发射思维链）。"""
     llm = lambda settings: ScriptedLLM([
-        AIMessage(content="先算一下", tool_calls=[tool_call("calculator", {"expression": "3.5*4"}, "c1")]),
+        AIMessage(content="先查一下", tool_calls=[tool_call("get_catalog_version", {}, "c1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "14.0"}, "c2")]),
     ])
-    events = _stream_events(_client(llm), "/api/chat/stream?message=计算")
-    assert [e["event"] for e in events] == ["meta", "thinking", "tool", "reply", "done"]
-    assert events[2]["name"] == "calculator"
-    assert events[3]["text"] == "14.0"
+    events = _stream_events(_client(llm), "/api/chat/stream?message=组队")
+    assert [e["event"] for e in events] == ["meta", "tool", "reply", "done"]
+    assert events[1]["name"] == "get_catalog_version"
+    assert events[2]["text"] == "14.0"
 
 
 def test_stream_requires_message():
@@ -127,12 +127,12 @@ def _usage_llm():
 
 
 def test_sync_chat_includes_usage():
-    body = _client(_usage_llm()).post("/api/chat", json={"message": "hi"}).json()
+    body = _client(_usage_llm()).post("/api/chat", json={"message": "帮我组队"}).json()
     assert body["usage"] == {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
 
 
 def test_stream_reply_event_includes_usage():
-    events = _stream_events(_client(_usage_llm()), "/api/chat/stream?message=hi")
+    events = _stream_events(_client(_usage_llm()), "/api/chat/stream?message=帮我组队")
     reply_event = next(e for e in events if e["event"] == "reply")
     assert reply_event["usage"] == {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
 
@@ -141,7 +141,7 @@ def test_stream_reply_event_includes_usage():
 
 def test_reset_clears_history():
     client = _client(_final_llm("第一轮"))
-    sid = client.post("/api/chat", json={"message": "hi"}).json()["session_id"]
+    sid = client.post("/api/chat", json={"message": "帮我组队"}).json()["session_id"]
     assert len(client.get(f"/api/chat/history?session_id={sid}").json()["history"]) >= 2
     client.post("/api/chat/reset", json={"session_id": sid})
     assert client.get(f"/api/chat/history?session_id={sid}").json()["history"] == []
@@ -154,8 +154,8 @@ def test_history_threading_across_requests():
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "第二轮"}, "c2")]),
     ])
     client = _client(llm)
-    sid = client.post("/api/chat", json={"message": "你好"}).json()["session_id"]
-    client.post("/api/chat", json={"message": "继续", "session_id": sid})
+    sid = client.post("/api/chat", json={"message": "帮我组队"}).json()["session_id"]
+    client.post("/api/chat", json={"message": "帮我配招", "session_id": sid})
     history = client.get(f"/api/chat/history?session_id={sid}").json()["history"]
     assert len(history) == 6
     assert [h["type"] for h in history] == ["human", "ai", "tool", "human", "ai", "tool"]

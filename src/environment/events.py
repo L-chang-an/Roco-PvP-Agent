@@ -13,6 +13,12 @@ EVENT_TYPES: frozenset[str] = frozenset({
     "damage", "heal", "item_use", "stat_change", "reduce_arm", "recharge",
     "switch", "replace", "faint", "life_loss", "skipped", "battle_end", "error",
     "energy_gain", "steal",
+    # 印记/天气批（2026-08-30）
+    "mark", "weather", "energy_loss",
+    # 防御冷却（2026-08-30）
+    "cooldown",
+    # 首领化（2026-08-30）
+    "boss_evolution",
 })
 
 

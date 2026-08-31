@@ -35,7 +35,7 @@ def test_block_reason_is_single_truth() -> None:
     s = _battle()
     unit = s.active("a")
     for idx in range(len(unit.skills)):
-        reason = skill_block_reason(s, unit, idx)
+        reason = skill_block_reason(s, "a", unit, idx)
         in_pool = any(a.get("type") == "skill" and a.get("value") == idx
                       for a in legal_actions(s, "a"))
         verdict = validate_decision(s, "a", Decision(skill_action(idx)))

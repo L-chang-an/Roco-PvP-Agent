@@ -54,7 +54,7 @@
       show(sk, host) {
         el.innerHTML =
           `<b>${escapeHtml(sk.name)}</b> <span class="tag">${escapeHtml(sk.type)}系</span> ${escapeHtml(sk.kind)}` +
-          `<br>威力 ${sk.power} · 能耗 ⚡${sk.energy_cost}` +
+          `<br>威力 ${sk.power} · 能耗 ⚡${costText(sk)}` +
           (sk.priority ? ` · 先手 ${sk.priority}` : '') +
           `<br>${escapeHtml(sk.desc)}`;
         el.classList.remove('hidden');
@@ -75,21 +75,33 @@
   const STAT_CN = { hp: '生命', atk: '物攻', sp_atk: '魔攻', def: '物防', sp_def: '魔防', speed: '速度' };
 
   function modText(m) {
-    // 显示规范：单位加成 * 层数（例：攻击 +100% = 10 层 × 10% → 物攻10% * 10）
-    const unit = m.mode === 'flat' ? '+10' : '10%';
-    return (m.trait ? '特性·' : '') + `${STAT_CN[m.stat] || m.stat}${unit} * ${m.layers}`;
+    const prefix = m.trait ? '特性·' : '';
+    if (m.stat === 'energy_cost') return prefix + `全技能能耗${m.layers > 0 ? '+' : ''}${m.layers}`;
+    const name = STAT_CN[m.stat] || m.stat;
+    if (m.mode === 'flat') return prefix + `${name}+10 * ${m.layers}`;
+    if (m.mode === 'pct') return prefix + `${name}10% * ${m.layers}`;
+    return prefix + `${name} * ${m.layers}`;   // dot/special：中毒/灼烧/寄生/冻结/萌化/引电 层数直显
   }
 
   function statusBar(u) {
     const parts = [];
     for (const m of (u.stat_mods || [])) parts.push(`<span class="stat-chip">${escapeHtml(modText(m))}</span>`);
-    for (const m of (u.energy_cost_mods || [])) parts.push(`<span class="stat-chip">全技能能耗-1 * ${m.layers}</span>`);
+    const gains = (u.trait && u.trait.gains) || [];
+    for (const m of gains) parts.push(`<span class="stat-chip">${escapeHtml(modText(m))}</span>`);
     if (!parts.length) return '';
     return `<div class="status-bar" title="状态栏：常规增减益 / 特性层数（单位加成 × 层数）">${parts.join('')}</div>`;
   }
 
+  // 技能能耗显示：优先当前回合实付能耗（current_cost），与基础值不同则标注（原值）。
+  function costText(s) {
+    if (s.current_cost == null) return String(s.energy_cost);
+    return s.current_cost === s.energy_cost
+      ? String(s.current_cost)
+      : `${s.current_cost}（原${s.energy_cost}）`;
+  }
+
   function chipFor(s, i) {
-    return `<span class="skill-chip" data-tip-idx="${i}">${escapeHtml(s.name)} <small>⚡${s.energy_cost}</small></span>`;
+    return `<span class="skill-chip" data-tip-idx="${i}">${escapeHtml(s.name)} <small>⚡${costText(s)}</small></span>`;
   }
 
   function attachChips(card, skills) {
@@ -117,12 +129,27 @@
     else $('#team-a-preview').innerHTML = '<div class="empty">暂无已存队伍，请先到组队页保存。</div>';
   }
 
+  // 加载的已存队伍可能是 v2 富化格式（技能 {name,type,desc}、带 trait 字段）——
+  // /api/battle/start 只吃「最简形状」（技能字符串数组），这里归一化后开局才不会 422。
+  function normalizePick(p) {
+    if (!p || typeof p !== 'object') return p;
+    return {
+      spirit: typeof p.spirit === 'string' ? p.spirit : '',
+      skills: (Array.isArray(p.skills) ? p.skills : []).map(
+        (x) => (typeof x === 'string' ? x : (x && x.name) || '')).filter(Boolean),
+      bloodline: typeof p.bloodline === 'string' ? p.bloodline : '',
+      nature: typeof p.nature === 'string' ? p.nature : '坦率',
+      iv: p.iv && typeof p.iv === 'object' ? p.iv : {},
+    };
+  }
+
   async function pickTeam(side, name) {
     const r = await api('/api/team/load?path=' + encodeURIComponent(name));
     if (!r.ok) { flash('队伍加载失败：' + (r.j && r.j.detail || ''), 'warn'); return; }
     if (side === 'a') {
       S.teamA = r.j;
-      renderTeamPreview('#team-a-preview', r.j);
+      S.teamA.team = (r.j.team || []).map(normalizePick);
+      renderTeamPreview('#team-a-preview', S.teamA);
       const sizeSel = $('#team-size-select');
       if (sizeSel.value !== String(r.j.team_size)) {
         sizeSel.value = String(r.j.team_size);
@@ -130,7 +157,8 @@
       }
     } else {
       S.teamB = r.j;
-      renderTeamPreview('#team-b-preview', r.j);
+      S.teamB.team = (r.j.team || []).map(normalizePick);
+      renderTeamPreview('#team-b-preview', S.teamB);
     }
   }
 
@@ -142,15 +170,16 @@
   }
 
   function fillTeamSize() {
-    const cfg = S.teamConfig || { team_size: { min: 3, max: 6 } };
+    const cfg = S.teamConfig || { team_size: { allowed: [3, 6], default: 3 } };
     const sel = $('#team-size-select');
     sel.innerHTML = '';
-    for (let n = cfg.team_size.min; n <= cfg.team_size.max; n++) {
+    const allowed = Array.isArray(cfg.team_size.allowed) ? cfg.team_size.allowed : [3, 6];
+    for (const n of allowed) {
       const opt = document.createElement('option');
       opt.value = String(n); opt.textContent = `${n} 对 ${n}（${n} 只）`;
       sel.appendChild(opt);
     }
-    sel.value = String(cfg.team_size.default || cfg.team_size.min);
+    sel.value = String(cfg.team_size.default || allowed[0]);
     fillLives();
   }
 
@@ -173,14 +202,18 @@
     if (!S.teamA) { flash('请先选择我方队伍', 'warn'); return; }
     const opp = document.querySelector('input[name="opp"]:checked').value;
     let teamB = null;
+    let itemsB = [];
     if (opp === 'saved') {
       if (!S.teamB) { flash('请选择对手队伍', 'warn'); return; }
       teamB = S.teamB.team;
+      itemsB = S.teamB.items || [];
     }
     const seedInput = $('#seed-input').value.trim();
     const body = {
       team_a: S.teamA.team,
       team_b: teamB,
+      items_a: S.teamA.items || [],
+      items_b: itemsB,
       team_size: parseInt($('#team-size-select').value, 10),
       lives: parseInt($('#lives-select').value, 10),
       max_turns: parseInt($('#max-turns-input').value, 10) || 20,
@@ -208,13 +241,21 @@
   }
 
   // ── 战斗渲染 ─────────────────────────────────────────────────────────────
+  // 天气栏（全局，双方共享）：当前天气 + 剩余回合。
+  function weatherText(w) {
+    if (!w) return '';
+    return ` · <span class="badge">🌦 ${escapeHtml(w.kind)} <b>剩 ${w.turns_left} 回合</b></span>`;
+  }
+
   function renderBattle() {
     const b = S.battle;
     $('#battle-meta').innerHTML =
       `第 <b>${b.turn}</b> 回合 · seed <code>${b.seed}</code> · ` +
-      `<code class="muted">${escapeHtml(b.battle_id)}</code>`;
+      `<code class="muted">${escapeHtml(b.battle_id)}</code>` +
+      weatherText(b.observation && b.observation.weather);
     $('#phase-badge').textContent =
-      b.phase === 'replacement' ? '⏳ 等待补位' : (b.done ? '🏁 已结束' : '出招中');
+      b.phase === 'starter' ? '第 0 回合 · 选首发'
+        : (b.phase === 'replacement' ? '⏳ 等待补位' : (b.done ? '🏁 已结束' : '出招中'));
     renderSideInfo('a', b.observation.me);
     renderSideInfo('b', b.observation.opponent);
     renderUnits('a', b.observation.me);
@@ -224,11 +265,21 @@
     if (b.events && b.events.length) appendLog(b.events, b.llm_reply, b.events_turn);
   }
 
+  function markChip(m) {
+    return `<span class="stat-chip mark" title="印记来源：${escapeHtml(m.source || '')}">🔮 ${escapeHtml(m.name)} ×${m.layers}</span>`;
+  }
+
   function renderSideInfo(side, sideView) {
+    const marks = [
+      ...(sideView.positive_marks || []),
+      ...(sideView.negative_marks || []),
+      ...(sideView.exclusive_marks || []),
+    ].map(markChip).join('');
     $(`#side-info-${side}`).innerHTML =
       `<span class="badge">命数 ×${sideView.lives}</span>` +
       (side === 'a' ? ` <span class="badge">道具</span> ${Object.entries(sideView.item_uses || {})
-        .map(([k, v]) => `${escapeHtml(k)} ×${v}`).join(' ')}` : '');
+        .map(([k, v]) => `${escapeHtml(k)} ×${v}`).join(' ')}` : '') +
+      (marks ? ` <span class="badge">印记</span> ${marks}` : '');
   }
 
   function renderUnits(side, sideView) {
@@ -294,6 +345,7 @@
   function renderActionPanel() {
     const b = S.battle;
     const el = $('#action-panel');
+    if (b.phase === 'starter') { renderStarterPanel(); return; }
     if (b.phase === 'replacement') { renderReplacePanel(); return; }
     if (b.done) { el.innerHTML = ''; return; }
     const me = b.observation.me;
@@ -308,7 +360,7 @@
       const sk = act.skills[i];
       const enabled = legalSkillIdx.has(i);
       html += `<button class="act-btn skill" data-idx="${i}" ${enabled ? '' : 'disabled'} ` +
-        `title="${enabled ? '' : '能量不足，本回合无法释放'}">${escapeHtml(sk.name)} <small>⚡${sk.energy_cost}</small></button>`;
+        `title="${enabled ? '' : '能量不足，本回合无法释放'}">${escapeHtml(sk.name)} <small>⚡${costText(sk)}</small></button>`;
     }
     // 换人：单个按钮 → 点击弹出可选名单
     html += `<span class="switch-wrap"><button id="switch-btn" class="act-btn switch" ${switchActs.length ? '' : 'disabled'}>⇄ 换人</button>` +
@@ -319,8 +371,23 @@
       }).join('') + `</span></span>`;
     if (canRecharge) html += `<button class="act-btn recharge" data-act='${JSON.stringify({ type: 'recharge' })}'>↻ 聚能（回复能量）</button>`;
     html += `</div><div class="item-row">`;
+    const bossOpts = b.boss_options || [];
     for (const it of b.legal_items) {
-      html += `<label class="item-cb-label"><input type="checkbox" class="item-cb" value="${escapeHtml(it)}"> 道具：${escapeHtml(it)}</label>`;
+      if (it === '首领进化') {
+        // 首领化可用性：当前在场精灵必须是 boss 上一阶（非首领血脉 / 萌化中 → 不可用）
+        const usable = bossOpts.length > 0;
+        html += `<label class="item-cb-label" title="${usable ? '' : '当前在场精灵非首领血脉或无首领形态进化阶段，无法首领化'}">` +
+          `<input type="checkbox" class="item-cb" value="首领进化"${usable ? '' : ' disabled'}> ` +
+          `道具：首领进化${usable ? '' : ' <span class="dim">（不可用）</span>'}</label>`;
+      } else {
+        html += `<label class="item-cb-label"><input type="checkbox" class="item-cb" value="${escapeHtml(it)}"> 道具：${escapeHtml(it)}</label>`;
+      }
+    }
+    const hasBossItem = b.legal_items.includes('首领进化');
+    if (hasBossItem && bossOpts.length > 1) {
+      html += `<label class="item-cb-label">首领化分支：<select id="boss-branch">` +
+        bossOpts.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('') +
+        `</select></label>`;
     }
     html += `<button id="act-submit" class="primary">出招</button></div></div>`;
     el.innerHTML = html;
@@ -362,7 +429,35 @@
     $('#act-submit').addEventListener('click', async () => {
       if (!S.chosen) { flash('请先选择一个行动', 'warn'); return; }
       const itemCb = el.querySelector('.item-cb:checked');
-      await doAct(S.chosen, itemCb ? itemCb.value : '');
+      const item = itemCb ? itemCb.value : '';
+      const branchSel = $('#boss-branch');
+      const itemArg = (item === '首领进化' && branchSel) ? branchSel.value : '';
+      await doAct(S.chosen, item, itemArg);
+    });
+  }
+
+  function renderStarterPanel() {
+    const b = S.battle;
+    const me = b.observation.me;
+    const options = Array.isArray(b.starter_options) ? b.starter_options : [];
+    const el = $('#action-panel');
+    el.innerHTML = `<div class="action-bar"><h4>第 0 回合：选择首发精灵</h4><div class="skill-buttons">` +
+      options.map((idx) => {
+        const u = me.units[idx];
+        return `<button class="act-btn" data-idx="${idx}">⇄ ${escapeHtml(u && u.name)}</button>`;
+      }).join('') +
+      `</div></div>`;
+    el.querySelectorAll('.act-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const r = await api(`/api/battle/${b.battle_id}/starter`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bench_idx: parseInt(btn.dataset.idx, 10) }),
+        });
+        if (!r.ok || !r.j.ok) { flash((r.j && r.j.error) || '选首发失败', 'warn'); return; }
+        S.battle = r.j;
+        renderBattle();
+      });
     });
   }
 
@@ -390,14 +485,14 @@
     });
   }
 
-  async function doAct(action, item) {
+  async function doAct(action, item, itemArg) {
     if (S.lock) return;
     S.lock = true;
     const b = S.battle;
     const r = await api(`/api/battle/${b.battle_id}/act`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, item }),
+      body: JSON.stringify({ action, item, item_arg: itemArg || '' }),
     });
     S.lock = false;
     if (!r.ok || !r.j.ok) { flash((r.j && r.j.error) || '出招失败', 'warn'); return; }

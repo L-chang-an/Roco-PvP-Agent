@@ -1,7 +1,7 @@
 """管理员对局配置：对局规模（team_size / lives / skill_slots）的唯一入口，为 Web UI 做准备。
 
-规则（负责人 2026-08-25）：
-- 每方可携带精灵数（team_size）：**最少 3、最多 6**（3V3 / 4V4 / 5V5 / 6V6）。
+规则（负责人 2026-08-25 定 3–6，2026-08-29 收窄为 {3, 6}）：
+- 每方可携带精灵数（team_size）：**只能 3 或 6**（3V3 / 6V6）。
 - 每方命数（lives）：**≥ 1 且 < team_size**。
 
 本模块是**纯函数、无全局状态**——Web UI 端持有配置值，调 `validate_*` 校验输入、
@@ -19,17 +19,20 @@ from .rules import DEFAULT_RULES, BattleRules
 MIN_TEAM_SIZE = 3
 MAX_TEAM_SIZE = 6
 
+# 允许的对局规模（负责人 2026-08-29 拍板：只允许 3 或 6）。
+ALLOWED_TEAM_SIZES = (MIN_TEAM_SIZE, MAX_TEAM_SIZE)
+
 DEFAULT_TEAM_SIZE = 3
 DEFAULT_LIVES = 2
 DEFAULT_SKILL_SLOTS = 4
 
 
 def validate_team_size(n) -> str | None:
-    """每方精灵数是否合法（整数且 3 ≤ n ≤ 6）。合法 → None，否则中文原因。"""
+    """每方精灵数是否合法（整数且 ∈ {3, 6}）。合法 → None，否则中文原因。"""
     if isinstance(n, bool) or not isinstance(n, int):
         return f"对局精灵数必须是整数，实际 {n!r}。"
-    if not MIN_TEAM_SIZE <= n <= MAX_TEAM_SIZE:
-        return f"对局精灵数必须在 {MIN_TEAM_SIZE}–{MAX_TEAM_SIZE} 之间（3V3/4V4/5V5/6V6），实际 {n}。"
+    if n not in ALLOWED_TEAM_SIZES:
+        return f"对局精灵数必须是 3 或 6（3V3/6V6），实际 {n}。"
     return None
 
 

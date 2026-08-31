@@ -1,13 +1,13 @@
-"""14 个技能的**显式效果表**（`SkillEffect`）+ **P1 效果编译器**（batch-P1.json 125 技能）。
+"""技能效果表（`SkillEffect`）+ **P1/P2 效果编译器**（batch-P1 125 / batch-P2 技能）。
 
 引擎永不读 `desc`。两条效果来源：
-- `E0_EFFECTS`：14 条手写教学效果（`SkillEffect`）。
 - `P1_EFFECTS`：由 `compile_p1_effect` 从 P1 批次技能 desc 的**固定模式**编译生成——
   纯伤害 / 纯防御 / 纯六维状态（P1 全部 125 条都应命中）。
-`battle_ready(name)` = 教学 ∪ P1（可对战白名单）。
+- `P2_EFFECTS`：P2 扩展（连击/先手/吸血/能量/每连击状态…）。
+`battle_ready(name)` = P1 ∪ P2（可对战白名单）。
 
-这是「不做 DSL 编译器」的代价与边界：教学 14 条手写，P1 125 条用固定模式编译，
-553 条时的任意 desc 仍不支持（`compile_p1_effect` 返回 None，battle_ready=False）。
+这是「不做 DSL 编译器」的代价与边界：P1/P2 用固定模式编译，
+553 条时的任意 desc 仍不支持（`compile_effect` 返回 None，battle_ready=False）。
 效果参数**只**从效果表读——引擎里出现正则就是设计事故（参考项目的
 `re.search(r"(\\d+)%")` 写进了 engine.py，减伤比例从 power 反推）。
 
@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
 from .dataset import DataSource, RawSkill, load_skills
+from .statuses import STATUS_TABLE, status_kwargs
 
 
 class SkillCategory(str, Enum):
@@ -56,12 +57,27 @@ class SkillStatEffect:
       - "combo"：连击数buff（flat 1 层 = +1 连击；pct 1 层 = +10%）
       - "lifesteal"：吸血buff（flat 1 层 = +100% 吸血）
       - "energy_cost"：全技能能耗（正值 = 能耗+N → 内部 EnergyCostMod 层 -N）
+      - 纯负面中文名（中毒/灼烧/寄生/冻结/引电/萌化）：mode = dot/special，
+        kwargs 从 statuses.STATUS_TABLE 取（DOT 批 2026-08-30）
     """
 
     target: str        # "self" | "foe"
-    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost
-    mode: str          # "pct" | "flat"
+    stat: str          # atk/sp_atk/def/sp_def/speed/combo/lifesteal/energy_cost/中毒/…
+    mode: str          # "pct" | "flat" | "dot" | "special"
     layers: int        # 有符号（-6 = -60% 等）
+    kwargs: dict = field(default_factory=dict)   # 纯负面 buff 扩展参数
+
+
+@dataclass(frozen=True)
+class SkillMarkEffect:
+    """状态/防御系一条印记效果（印记/天气批 2026-08-30）：目标 + 印记名 + 层数。
+
+    印记名在编译时查 `marks.MARK_CATALOG`（未知名 → 不编译）。
+    """
+
+    target: str        # "self" | "foe"
+    name: str          # 印记名（MARK_CATALOG 键）
+    layers: int
 
 
 @dataclass(frozen=True)
@@ -107,66 +123,30 @@ class SkillEffect:
     counter_extra_layers: int = 0            # 状态系应对成功时的额外层数
     stat_effects: tuple[SkillStatEffect, ...] = ()   # 状态系每连击应用
     buff_effects: tuple[SkillStatEffect, ...] = ()   # 一次性目标效果（连击/吸血/能耗）
-
-
-E0_EFFECTS: dict[str, SkillEffect] = {
-    # ── 攻击（6）：物攻走 atk/def，魔攻走 sp_atk/sp_def ──
-    "抓挠": SkillEffect(category=SkillCategory.ATTACK, self_energy_gain=1),
-    "抓挠1": SkillEffect(
-        category=SkillCategory.ATTACK, self_energy_gain=1,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "抓挠2": SkillEffect(
-        category=SkillCategory.ATTACK, self_energy_gain=1,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击1": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    "撞击2": SkillEffect(
-        category=SkillCategory.ATTACK,
-        counter_vs=SkillCategory.STATUS, counter_damage_mult=1.5,
-    ),
-    # ── 防御（3）：减伤只在应对攻击时武装（E0b 的 build_turn_context 负责武装）──
-    "防御": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.70,
-    ),
-    "防御1": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.80,
-    ),
-    "防御2": SkillEffect(
-        category=SkillCategory.DEFENSE,
-        counter_vs=SkillCategory.ATTACK, reduction_pct=0.85,
-    ),
-    # ── 状态（5）：属性增益层，1 层 = 10%(pct) 或 +10(flat) ──
-    "加物攻": SkillEffect(
-        category=SkillCategory.STATUS, stat="atk", mode="pct", layers=9,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-    "加魔攻": SkillEffect(
-        category=SkillCategory.STATUS, stat="sp_atk", mode="pct", layers=9,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-    "加魔防": SkillEffect(
-        category=SkillCategory.STATUS, stat="sp_def", mode="pct", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=1,
-    ),
-    "加物防": SkillEffect(
-        category=SkillCategory.STATUS, stat="def", mode="pct", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=1,
-    ),
-    "加速度": SkillEffect(
-        category=SkillCategory.STATUS, stat="speed", mode="flat", layers=8,
-        counter_vs=SkillCategory.DEFENSE, counter_extra_layers=2,
-    ),
-}
+    # 印记/天气批（2026-08-30）
+    mark_effects: tuple[SkillMarkEffect, ...] = ()          # 状态系每连击应用（普通施加以 hits=1）
+    counter_mark_effects: tuple[SkillMarkEffect, ...] = ()  # 防御系应对命中时施加
+    set_weather: str = ""       # 天气名（雨天/沙暴/暴风雪/雷鸣；"" = 无）
+    weather_turns: int = 0      # 天气持续回合
+    # 冻结批（2026-08-30）
+    freeze_power_per_layer: int = 0         # 碎冰冰：敌方每层冻结 → 本次威力 +N
+    freeze_energy_gain_per_layer: int = 0   # 冷凝：敌方每层冻结 → 自己回 N 能量
+    freeze_cost_per_foe_layer: int = 0      # 霜天：敌方每层冻结 → 敌方全技能能耗 +N（读钩子）
+    counter_status_effects: tuple[SkillStatEffect, ...] = ()   # 应对命中施状态（冰墙/冰点）
+    freeze_power_if_frozen: int = 0         # 极寒领域：敌方有冻结 → 本次威力 +N
+    freeze_double_on_counter: bool = False  # 极寒领域：应对状态 → 敌方冻结层翻倍
+    # 萌化批（2026-08-30）
+    morph_power_if_foe: int = 0             # 拆礼物：敌方有萌化 → 本次威力 +N
+    morph_apply: bool = False               # 「获得萌化：」→ 自己施萌化 +1（成功才附加）
+    morph_apply_foe: bool = False           # 甜心续航：敌方也施萌化 +1（独立判定）
+    morph_apply_bonus_power: int = 0        # 超级糖果：施萌化成功 → 本次威力 +N
+    morph_apply_bonus_speed: int = 0        # 示弱：施萌化成功 → 速度永久 +N（flat 值）
+    morph_apply_bonus_cost: int = 0         # 赤子之心：施萌化成功 → 能耗永久 +N（负 = 减）
+    morph_apply_bonus_power_perm: int = 0   # 撒娇：施萌化成功 → 威力永久 +N（attack_power flat）
+    morph_apply_bonus_heal: int = 0         # 甜心续航：施萌化成功 → 回 N% 生命
+    morph_combo_per_team_layer: int = 0     # 月光合奏：双方队伍每层萌化 → 连击 +N
+    morph_if_foe_switched: int = 0          # 转圈圈：敌方本回合换人 → 敌方获得萌化 N 层
+    morph_transfer: bool = False            # 反弹：将自己的萌化转移给敌方
 
 
 def category_of(skill) -> SkillCategory:
@@ -244,7 +224,7 @@ def compile_p1_effect(skill: RawSkill) -> SkillEffect | None:
       - 纯六维状态：「自己获得 / 敌方获得 …」（多目标/多维度经 stat_effects）
     desc 推得的类别与 kind 矛盾（数据异常）→ None，不编译。
     """
-    desc = skill.desc.strip().rstrip("。")
+    desc = skill.desc.strip().rstrip("。").strip()
     if desc in ("对敌方精灵造成物理伤害", "对敌方精灵造成魔法伤害"):
         effect = SkillEffect(category=SkillCategory.ATTACK)
     elif re.fullmatch(r"减伤\d+%，应对攻击", desc) is not None:
@@ -288,6 +268,24 @@ def _status(skill: RawSkill, **kw) -> SkillEffect | None:
 
 def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
     """处理所有含「连击」描述的技能：连击伤害 / 连击buff / 每连击状态 / 虫鸣；歧义 → None。"""
+    # 连击 + 印记（印记/天气批 2026-08-30）：N连击，每次连击使?敌方获得M层X印记（星链）
+    m = re.fullmatch(r"(\d+)连击，每次连击使?敌方获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(3)
+        if mark not in _mark_names():
+            return None
+        return _status(skill, hits=int(m.group(1)), combo_eligible=True,
+                       mark_effects=(SkillMarkEffect("foe", mark, int(m.group(2))),))
+    # 连击 + 状态（DOT 批 2026-08-30）：N连击，每次连击(使?敌方)获得M层X
+    m = re.fullmatch(r"(\d+)连击，每次连击使?敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _status(skill, hits=int(m.group(1)), combo_eligible=True,
+                       stat_effects=tuple(_status_effect("foe", m.group(3), int(m.group(2)))))
+    # 连击伤害 + 状态（DOT 批）：造成X，N连击，每次连击使?敌方获得M层X（易燃物质/连续毒针）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击，每次连击使?敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       stat_effects=tuple(_status_effect("foe", m.group(3), int(m.group(2)))))
     # 虫鸣：队伍中每携带 1 个 X，本次技能连击数 +1
     m = re.fullmatch(rf"造成{_DMG}，队伍中的精灵每携带1个(.+?)，本次技能连击数\+1", desc)
     if m is not None:
@@ -336,6 +334,16 @@ def _compile_combo_effect(skill: RawSkill, desc: str) -> SkillEffect | None:
     if m is not None:
         return _status(skill, hits=int(m.group(2)), combo_eligible=True,
                        stat_effects=tuple(_parse_stat_specs(m.group(1), "foe")))
+    # 造成(物|魔)伤，N连击。自己获得萌化：威力永久+M（撒娇，萌化批 2026-08-30）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击。自己获得萌化：威力永久\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       morph_apply=True, morph_apply_bonus_power_perm=int(m.group(2)))
+    # 造成(物|魔)伤，N连击，双方携带的所有精灵每有1层萌化，本次技能连击数+M（月光合奏）
+    m = re.fullmatch(rf"造成{_DMG}，(\d+)连击，双方携带的所有精灵每有1层萌化，本次技能连击数\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, hits=int(m.group(1)), combo_eligible=True,
+                       morph_combo_per_team_layer=int(m.group(2)))
     return None
 
 
@@ -345,7 +353,7 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     含「连击」的 desc 走 P2 连击路径（含歧义拦截）；其余先试 P2 非连击模式（先手 /
     吸血 / 能量 / 场下 / 每连击…），再兜底 P1 模式（纯伤害 / 纯防御 / 纯六维状态）。
     """
-    desc = skill.desc.strip().rstrip("。")
+    desc = skill.desc.strip().rstrip("。").strip()
     if "连击" in desc:
         return _compile_combo_effect(skill, desc)
 
@@ -409,8 +417,137 @@ def compile_effect(skill: RawSkill) -> SkillEffect | None:
     if m is not None:
         return _status(skill, energy_foe_cost_ratio=0.5)
 
+    # ── 印记/天气模式（2026-08-30：施加类；驱散/偷取/转化/条件类不匹配 → 下批）──
+    # 获得 N 层 X 印记（主场优势/棘刺/光合作用/打湿/蓄势待发/速冻/龙威/增程电池/…）
+    m = re.fullmatch(r"(自己|敌方)获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(3)
+        if mark not in _mark_names():
+            return None
+        return _status(skill, mark_effects=(SkillMarkEffect(
+            "self" if m.group(1) == "自己" else "foe", mark, int(m.group(2))),))
+    # 减伤 + 应对攻击施加印记（潮汐/冰蛋壳/委屈/冥想）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：(.+?)获得(\d+)层(.+印记)", desc)
+    if m is not None:
+        mark = m.group(4)
+        if mark not in _mark_names():
+            return None
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_mark_effects=(SkillMarkEffect(
+                "self" if m.group(2) == "自己" else "foe", mark, int(m.group(3))),)),
+            skill)
+    # 将天气改为 X，持续 N 回合（落雨/沙涌/冬至/惊雷）
+    m = re.fullmatch(r"将天气改为(雨天|沙暴|暴风雪|雷鸣)，持续(\d+)回合", desc)
+    if m is not None:
+        return _status(skill, set_weather=m.group(1), weather_turns=int(m.group(2)))
+
+    # ── DOT 状态模式（2026-08-30：A 类施加；应对/条件/驱散/转化类不匹配 → 下批）──
+    # 敌方获得 N 层 X（退化/孢子/引燃/霜降/毒孢子）
+    m = re.fullmatch(r"敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _status(skill, stat_effects=tuple(_status_effect("foe", m.group(2), int(m.group(1)))))
+    # 造成(物|魔)伤，敌方获得 N 层 X（毒针/腐蚀酸液/烈焰风暴/花火/暴风雪/通电）
+    m = re.fullmatch(rf"造成{_DMG}，敌方获得(\d+)层(中毒|灼烧|寄生|冻结|引电|萌化)", desc)
+    if m is not None:
+        return _attack(skill, stat_effects=tuple(_status_effect("foe", m.group(2), int(m.group(1)))))
+
+    # ── 冻结批模式（2026-08-30：读钩子 / 应对施状态；寒潮含巧变不匹配）──
+    # 造成(物|魔)伤，敌方每有1层冻结，本次技能威力+N（碎冰冰）
+    m = re.fullmatch(rf"造成{_DMG}，敌方每有1层冻结，本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, freeze_power_per_layer=int(m.group(1)))
+    # 造成(物|魔)伤，敌方每有1层冻结，自己回复N能量（冷凝）
+    m = re.fullmatch(rf"造成{_DMG}，敌方每有1层冻结，自己回复(\d+)能量", desc)
+    if m is not None:
+        return _attack(skill, freeze_energy_gain_per_layer=int(m.group(1)))
+    # 敌方获得N层冻结，且每有1层冻结获得全技能能耗+M（霜天）
+    m = re.fullmatch(r"敌方获得(\d+)层冻结，且每有1层冻结获得全技能能耗\+(\d+)", desc)
+    if m is not None:
+        return _status(skill, stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       freeze_cost_per_foe_layer=int(m.group(2)))
+    # 敌方获得N层冻结，应对防御：额外获得M层（冰点）
+    m = re.fullmatch(r"敌方获得(\d+)层冻结，应对防御：额外获得(\d+)层", desc)
+    if m is not None:
+        return _status(skill, counter_vs=SkillCategory.DEFENSE,
+                       stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2)))))
+    # 减伤N%，应对攻击：敌方获得M层冻结（冰墙）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：敌方获得(\d+)层冻结", desc)
+    if m is not None:
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2))))),
+            skill)
+    # 造成(物|魔)伤，敌方获得N层冻结，应对状态：额外获得M层，本次技能威力翻倍（滚雪球）
+    m = re.fullmatch(rf"造成{_DMG}，敌方获得(\d+)层冻结，应对状态：额外获得(\d+)层，本次技能威力翻倍", desc)
+    if m is not None:
+        return _attack(skill, counter_vs=SkillCategory.STATUS, counter_damage_mult=2.0,
+                       stat_effects=tuple(_status_effect("foe", "冻结", int(m.group(1)))),
+                       counter_status_effects=tuple(_status_effect("foe", "冻结", int(m.group(2)))))
+    # 造成(物|魔)伤，若敌方有冻结，本次技能威力+N，应对状态：使冻结翻倍（极寒领域）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方有冻结，本次技能威力\+(\d+)，应对状态：使冻结翻倍", desc)
+    if m is not None:
+        return _attack(skill, counter_vs=SkillCategory.STATUS,
+                       freeze_power_if_frozen=int(m.group(1)),
+                       freeze_double_on_counter=True)
+
+    # ── 萌化批模式（2026-08-30；蹦跶含「选择」不匹配）──
+    # 造成(物|魔)伤，若敌方有萌化，本次技能威力+N（拆礼物）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方有萌化，本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, morph_power_if_foe=int(m.group(1)))
+    # 减伤N%，应对攻击：敌方获得M层萌化（捧杀）
+    m = re.fullmatch(r"减伤(\d+)%，应对攻击：敌方获得(\d+)层萌化", desc)
+    if m is not None:
+        return _finalize(SkillEffect(
+            category=SkillCategory.DEFENSE, counter_vs=SkillCategory.ATTACK,
+            reduction_pct=int(m.group(1)) / 100,
+            counter_status_effects=tuple(_status_effect("foe", "萌化", int(m.group(2))))),
+            skill)
+    # 造成(物|魔)伤，自己获得萌化：本次技能威力+N（超级糖果）
+    m = re.fullmatch(rf"造成{_DMG}，自己获得萌化：本次技能威力\+(\d+)", desc)
+    if m is not None:
+        return _attack(skill, morph_apply=True, morph_apply_bonus_power=int(m.group(1)))
+    # 自己获得萌化：全技能能耗永久-N（赤子之心）
+    m = re.fullmatch(r"自己获得萌化：全技能能耗永久([+-]\d+)", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_bonus_cost=int(m.group(1)))
+    # 自己获得萌化：速度永久+N（示弱）
+    m = re.fullmatch(r"自己获得萌化：速度永久\+(\d+)", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_bonus_speed=int(m.group(1)))
+    # 自己和敌方获得萌化：回复N%生命（甜心续航，双方独立判定）
+    m = re.fullmatch(r"自己和敌方获得萌化：回复(\d+)%生命", desc)
+    if m is not None:
+        return _status(skill, morph_apply=True, morph_apply_foe=True,
+                       morph_apply_bonus_heal=int(m.group(1)))
+    # 造成(物|魔)伤，若敌方本回合更换精灵，本次攻击使敌方获得萌化（转圈圈）
+    m = re.fullmatch(rf"造成{_DMG}，若敌方本回合更换精灵，本次攻击使敌方获得萌化", desc)
+    if m is not None:
+        return _attack(skill, morph_if_foe_switched=1)
+    # 将自己的萌化转移给敌方（反弹）
+    m = re.fullmatch(r"将自己的萌化转移给敌方", desc)
+    if m is not None:
+        return _status(skill, morph_transfer=True)
+
     # ── P1 兜底（纯伤害 / 纯防御 / 纯六维状态）──
     return compile_p1_effect(skill)
+
+
+def _status_effect(target: str, name: str, layers: int) -> tuple[SkillStatEffect, ...]:
+    """状态施加效果：mode/kwargs 从 statuses.STATUS_TABLE 取（单一事实源）。"""
+    mode, _ = STATUS_TABLE[name]
+    return (SkillStatEffect(target, name, mode, layers, kwargs=status_kwargs(name)),)
+
+
+def _mark_names() -> frozenset[str]:
+    """印记目录名集合（编译时校验：未知名印记 → 不编译）。"""
+    from .marks import MARK_CATALOG
+
+    return frozenset(MARK_CATALOG)
 
 
 def _load_p1_names() -> frozenset[str]:
@@ -449,6 +586,53 @@ for _name in sorted(_load_p2_names()):
         P2_EFFECTS[_name] = _effect
 
 
+# 印记/天气白名单（2026-08-30）：扫描 FULL 表，编译命中印记/天气模式的技能。
+# 施加类（获得N层印记 / 应对施印 / 连击施印 / 设置天气）；驱散/偷取/转化/条件类
+# 不匹配任何模式 → 自动排除（下批）。FULL 表存在「模式形状但数值不可解析」的描述
+# （如「自己获得全技能威力+10%」命中 P1 状态分支后 parse 失败）→ ValueError 视为
+# 未命中；批次锚定表（P1/P2）的严格校验由各自测试钉死，不受此容错影响。
+MW_EFFECTS: dict[str, SkillEffect] = {}
+for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
+    try:
+        _effect = compile_effect(_skill)
+    except ValueError:
+        _effect = None
+    if _effect is not None and (_effect.mark_effects or _effect.counter_mark_effects
+                                or _effect.set_weather):
+        MW_EFFECTS[_name] = _effect
+
+
+# DOT 状态白名单（2026-08-30）：扫描 FULL 表，编译命中且含状态类效果的技能。
+# A 类施加（获得N层X / 伤害+获得N层X / 连击逐击）+ 冻结批（读冻结层 / 应对施状态）；
+# 应对/条件/驱散/转化/巧变类不匹配 → 下批。
+def _has_status_effects(effect: SkillEffect) -> bool:
+    return any(se.stat in STATUS_TABLE for se in effect.stat_effects) \
+        or any(se.stat in STATUS_TABLE for se in effect.buff_effects) \
+        or any(se.stat in STATUS_TABLE for se in effect.counter_status_effects) \
+        or effect.freeze_power_per_layer > 0 \
+        or effect.freeze_energy_gain_per_layer > 0 \
+        or effect.freeze_cost_per_foe_layer > 0 \
+        or effect.freeze_power_if_frozen > 0 \
+        or effect.freeze_double_on_counter \
+        or effect.morph_power_if_foe > 0 \
+        or effect.morph_apply or effect.morph_apply_foe \
+        or effect.morph_apply_bonus_power > 0 or effect.morph_apply_bonus_speed > 0 \
+        or effect.morph_apply_bonus_cost != 0 or effect.morph_apply_bonus_power_perm > 0 \
+        or effect.morph_apply_bonus_heal > 0 \
+        or effect.morph_combo_per_team_layer > 0 \
+        or effect.morph_if_foe_switched > 0 or effect.morph_transfer
+
+
+ST_EFFECTS: dict[str, SkillEffect] = {}
+for _name, _skill in sorted(load_skills(DataSource.FULL).items()):
+    try:
+        _effect = compile_effect(_skill)
+    except ValueError:
+        _effect = None
+    if _effect is not None and _has_status_effects(_effect):
+        ST_EFFECTS[_name] = _effect
+
+
 def battle_ready(name: str) -> bool:
-    """可对战白名单：教学效果表 ∪ P1 效果表 ∪ P2 效果表都覆盖的技能名。"""
-    return name in E0_EFFECTS or name in P1_EFFECTS or name in P2_EFFECTS
+    """可对战白名单：P1 效果表 ∪ P2 效果表 ∪ 印记/天气（MW）∪ DOT 状态（ST）。"""
+    return name in P1_EFFECTS or name in P2_EFFECTS or name in MW_EFFECTS or name in ST_EFFECTS

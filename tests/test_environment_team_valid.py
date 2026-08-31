@@ -6,6 +6,7 @@ import pytest
 
 from environment.battle_config import build_battle_rules
 from environment.dataset import DataSource, load_skills, load_spirits
+from environment.presets import valid_spirit_candidates
 from environment.skillbook import battle_ready
 from environment.teambuilder import TeamPick, build_roster, learnable_skills, validate_team
 
@@ -84,18 +85,20 @@ def test_min_one_skill_enforced() -> None:
     assert any("1–4 个" in e for e in validate_team(picks, items=[], source=VALID))
 
 
-# ── build_roster：管理员 rules 透传（4v4）──
-def test_build_roster_with_admin_rules_4v4() -> None:
-    rules = build_battle_rules(team_size=4, lives=3)
-    picks = [_pick("迪莫", ["闪光"]), _pick("喵喵", ["抓挠"]),
-             _pick("火花", ["火苗"]), _pick("水蓝蓝", ["拍击"])]
+# ── build_roster：管理员 rules 透传（6v6）──
+def test_build_roster_with_admin_rules_6v6() -> None:
+    rules = build_battle_rules(team_size=6, lives=5)
+    cands = valid_spirit_candidates()
+    spirits = load_spirits(VALID)
+    picks = [_pick(n, [s for s in spirits[n].skills_default if battle_ready(s)][:1])
+             for n in cands[:6]]
     roster = build_roster(picks, source=VALID, rules=rules)
-    assert len(roster) == 4
+    assert len(roster) == 6
     assert roster[0]["trait"] == "最好的伙伴"      # roster 仍带真实特性名（build_unit 装白板）
 
 
 def test_build_roster_wrong_size_rejected() -> None:
-    rules = build_battle_rules(team_size=4, lives=3)
+    rules = build_battle_rules(team_size=6, lives=5)
     picks = [_pick("迪莫", ["闪光"]), _pick("喵喵", ["抓挠"]), _pick("火花", ["火苗"])]
-    with pytest.raises(ValueError, match="队伍规模必须为 4 只"):
+    with pytest.raises(ValueError, match="队伍规模必须为 6 只"):
         build_roster(picks, source=VALID, rules=rules)

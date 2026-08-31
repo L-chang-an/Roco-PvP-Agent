@@ -16,7 +16,8 @@ from __future__ import annotations
 import threading
 from dataclasses import asdict, fields
 
-from environment.actions import Decision, recharge_action
+from environment.actions import Decision, boss_evolution_options, recharge_action
+from environment.datafingerprint import data_digest, rules_digest
 from environment.rules import BattleRules
 from environment.session import BattleSession
 from environment.visibility import filter_events_for
@@ -32,13 +33,15 @@ def _rules_dict(r: BattleRules) -> dict:
 class BattleController:
     """一个进行中的对局。构造时已开局；`act`/`replace` 推进，`snapshot` 只读。"""
 
+    PHASE_STARTER = "starter"      # 第 0 回合：选首发（2026-08-30）
     PHASE_DECISION = "decision"
     PHASE_REPLACEMENT = "replacement"
     PHASE_DONE = "done"
 
     def __init__(self, battle_id: str, session: BattleSession, *, seed: int,
                  opponent: str, team_a: list[dict], team_b: list[dict],
-                 rules: BattleRules, saved_at: str, player=None) -> None:
+                 rules: BattleRules, saved_at: str, player=None,
+                 items_a: list[str] | None = None, items_b: list[str] | None = None) -> None:
         if opponent not in ("fake_llm", "random"):
             raise ValueError(f"未知对手类型「{opponent}」（fake_llm | random）。")
         self.battle_id = battle_id
@@ -49,10 +52,13 @@ class BattleController:
         self._team_b = team_b
         self._rules = rules
         self._saved_at = saved_at
+        self._items_a = items_a
+        self._items_b = items_b
         self._lock = threading.Lock()
-        self._phase = self.PHASE_DECISION
+        self._phase = self.PHASE_STARTER    # 第 0 回合：先选首发（2026-08-30）
         self._turns: list[dict] = []
         self._cur: dict | None = None        # 人类补位暂停中的本回合累积
+        self._starters: dict[str, int] = {}  # 第 0 回合首发（side → 槽位）
         # 对手玩家：独立 RNG 流（seed+1），绝不共用引擎的流；`player` 为测试注入缝
         if player is not None:
             self._player = player
@@ -86,15 +92,38 @@ class BattleController:
         with self._lock:
             return self._snapshot_locked([], "", None)
 
-    def act(self, action: dict, item: str = "") -> dict:
+    def choose_starter(self, bench_idx: int) -> dict:
+        """第 0 回合（2026-08-30）：人类选首发 → 假LLM 选首发 → 双方首发触发入场效果
+        → 进入出招阶段。非法 → `{"ok": False, "error": …}`，零状态变更。"""
+        with self._lock:
+            if self._phase != self.PHASE_STARTER:
+                return {"ok": False, "error": "当前不在首发选择阶段。"}
+            r = self._session.choose_starter("a", bench_idx)
+            if not r["ok"]:
+                return {"ok": False, "error": r["error"]}
+            # 假LLM 选首发（随机，独立 RNG 流，不碰引擎流）
+            options = self._session.starter_options("b")
+            idx = self._player.choose_starter(self._session.view("b"), options)
+            if not self._session.choose_starter("b", idx)["ok"]:
+                self._session.choose_starter("b", options[0])
+            entry = self._session.start_entry()
+            self._starters = dict(self._session.starters)
+            self._phase = self.PHASE_DECISION
+            return self._snapshot_locked(
+                filter_events_for("a", entry.get("events", []), self._session.state), "", 0)
+
+    def act(self, action: dict, item: str = "", item_arg: str = "") -> dict:
         """人类提交本回合行动 → 假LLM 决定 → 双方同时结算 → 返回人类视角快照。
-        非法行动 → `{"ok": False, "error": …}`，零状态变更。"""
+        非法行动 → `{"ok": False, "error": …}`，零状态变更。
+        `item_arg`：首领进化多分支时的分支精灵名（单分支可空）。"""
         with self._lock:
             if self._phase == self.PHASE_DONE:
                 return {"ok": False, "error": "对局已结束。"}
             if self._phase == self.PHASE_REPLACEMENT:
                 return {"ok": False, "error": "正在等待补位。"}
-            dec_a = Decision(action=action, item=item or "")
+            if self._phase == self.PHASE_STARTER:
+                return {"ok": False, "error": "请先选择首发。"}
+            dec_a = Decision(action=action, item=item or "", item_arg=item_arg or "")
             r = self._session.submit("a", dec_a)
             if not r["ok"]:
                 return {"ok": False, "error": r["error"]}
@@ -134,7 +163,10 @@ class BattleController:
                 cur["llm_reply"], cur["turn"])
 
     def record(self) -> dict:
-        """完整对局记录（落盘/重放用）：配置 + seed + 双方队伍 + 逐回合轨迹。"""
+        """完整对局记录（落盘/重放用）：配置 + seed + 双方队伍 + 道具 + 逐回合轨迹。
+
+        `items_a/items_b` 进记录：重放按同一道具栏重建，否则非默认道具的对局逐回合
+        state_hash 失配（初始 item_uses 不一致）。"""
         return {
             "version": 1,
             "battle_id": self.battle_id,
@@ -142,8 +174,13 @@ class BattleController:
             "seed": self._seed,
             "opponent": self._opponent,
             "rules": _rules_dict(self._rules),
+            "data_digest": data_digest(),
+            "rules_digest": rules_digest(),
             "team_a": self._team_a,
             "team_b": self._team_b,
+            "items_a": self._items_a,
+            "items_b": self._items_b,
+            "starters": self._starters,
             "winner": self.winner,
             "done": self.done,
             "turns": self._turns,
@@ -198,7 +235,8 @@ class BattleController:
             "events": cur["events"],
             "state_hash": self._session.state.state_hash(),
         })
-        self._player.on_turn_result(self._session.view("b"), cur["events"])
+        self._player.on_turn_result(
+            self._session.view("b"), filter_events_for("b", cur["events"], self._session.state))
 
     def _snapshot_locked(self, events: list[dict], llm_reply: str, events_turn: int | None) -> dict:
         """人类视角快照：观测（迷雾）+ 合法池 + 本回合事件（已过滤）。
@@ -222,6 +260,8 @@ class BattleController:
             "observation": s.view("a"),
             "legal": s.legal_actions("a") if decision_phase else [],
             "legal_items": s.legal_items("a") if decision_phase else [],
+            "boss_options": boss_evolution_options(s.state, "a") if decision_phase else [],
+            "starter_options": s.starter_options("a") if self._phase == self.PHASE_STARTER else [],
             "state_hash": s.state.state_hash(),
         }
 

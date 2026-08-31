@@ -111,10 +111,10 @@ def test_all_bosses_are_family_final_forms() -> None:
             assert not sp.family_lowest, sp.name
 
 
-# ── 双源隔离：E0 默认路径不受 FULL 影响 ──
-def test_default_source_stays_e0() -> None:
-    assert DEFAULT_SOURCE is DataSource.E0
-    assert len(load_skills()) == 14
-    assert len(load_spirits()) == 6
-    assert load_families() == {}
-    assert load_skipped_spirits() == ()
+# ── 默认源 = FULL ──
+def test_default_source_is_full() -> None:
+    assert DEFAULT_SOURCE is DataSource.FULL
+    assert len(load_skills()) == 553
+    assert len(load_spirits()) == 593
+    assert len(load_families()) == 178
+    assert len(load_skipped_spirits()) == 1

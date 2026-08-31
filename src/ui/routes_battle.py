@@ -33,7 +33,7 @@ from environment.battle_config import DEFAULT_LIVES, MIN_TEAM_SIZE, build_battle
 from environment.dataset import DataSource
 from environment.presets import fixed_team
 from environment.replay import replay_record
-from environment.rules import DEFAULT_RULES, BattleRules
+from environment.rules import DEFAULT_ITEMS, DEFAULT_RULES, BattleRules
 from environment.session import BattleSession
 from environment.teambuilder import TeamPick, build_roster, validate_team
 
@@ -52,9 +52,11 @@ BATTLES_DIR = Path(__file__).resolve().parents[2] / "battles"
 
 
 class StartBattleBody(BaseModel):
-    """开局请求：双方队伍（TeamPick 形状）+ 管理员对局配置。
+    """开局请求：双方队伍（TeamPick 形状）+ 对战道具 + 管理员对局配置。
 
     `team_b` 缺省 → 用 `fixed_team(team_size)` 固定预设（测试期 LLM 的固定队伍配置）。
+    `items_a`/`items_b`：双方携带的对战道具（`ITEMS` 子集）；空 → 缺省 `DEFAULT_ITEMS`
+    （草魔法）。由组队页已存队伍的 `items` 字段带过来。
     """
 
     team_a: list[PickBody]
@@ -64,15 +66,21 @@ class StartBattleBody(BaseModel):
     max_turns: int = DEFAULT_RULES.max_turns
     seed: int | None = None            # 缺省自动生成；显式给 → 可复现
     opponent: str = "fake_llm"         # fake_llm（测试：固定回复+随机动作）| random
+    items_a: list[str] = []
+    items_b: list[str] = []
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ActBody(BaseModel):
-    """人类出招：一个主动作 + 可选道具。"""
+    """人类出招：一个主动作 + 可选道具 + 道具参数。
+
+    `item_arg`：首领进化多分支（迪莫 4 / 魔力猫 2）时的分支精灵名；单分支可空。
+    """
 
     action: dict
     item: str = ""
+    item_arg: str = ""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -192,22 +200,27 @@ def start_battle(body: StartBattleBody) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    errors = (validate_team(picks_a, [], rules, DataSource.VALID)
-              + validate_team(picks_b, [], rules, DataSource.VALID))
+    errors = (validate_team(picks_a, body.items_a, rules, DataSource.VALID)
+              + validate_team(picks_b, body.items_b, rules, DataSource.VALID))
     if errors:
         raise HTTPException(status_code=422, detail={"message": "队伍不合法，无法开局。", "errors": errors})
 
     roster_a = build_roster(picks_a, DataSource.VALID, rules)
     roster_b = build_roster(picks_b, DataSource.VALID, rules)
+    # 空 items → 缺省 DEFAULT_ITEMS（草魔法）；非空 → 显式道具栏
+    items_a = body.items_a or list(DEFAULT_ITEMS)
+    items_b = body.items_b or list(DEFAULT_ITEMS)
     seed = body.seed if body.seed is not None else _auto_seed()
     saved_at = _now()
     battle_id = f"battle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-    session = BattleSession.start(roster_a, roster_b, seed=seed, rules=rules, battle_id=battle_id)
+    session = BattleSession.start(roster_a, roster_b, seed=seed, items_a=items_a,
+                                  items_b=items_b, rules=rules, battle_id=battle_id)
 
     team_a = [p.model_dump() for p in body.team_a]
     team_b = [p.model_dump() for p in body.team_b] if body.team_b is not None else [asdict(p) for p in picks_b]
     ctrl = BattleController(battle_id, session, seed=seed, opponent=body.opponent,
-                            team_a=team_a, team_b=team_b, rules=rules, saved_at=saved_at)
+                            team_a=team_a, team_b=team_b, rules=rules, saved_at=saved_at,
+                            items_a=items_a, items_b=items_b)
     register(ctrl)
     _save(ctrl)
     snap = ctrl.snapshot()
@@ -283,8 +296,10 @@ def replay_battle(body: PathBody) -> dict:
     roster_a = build_roster([TeamPick(**p) for p in data["team_a"]], DataSource.VALID, rules)
     roster_b = build_roster([TeamPick(**p) for p in data["team_b"]], DataSource.VALID, rules)
     # 归一成引擎重放消费的规格（roster spec）：记录里的 team 是 picks，重放用 build_roster 产物。
+    # items 一并回传（旧记录缺 → None → 缺省 DEFAULT_ITEMS，与旧开局一致）。
     try:
-        return replay_record({**data, "team_a": roster_a, "team_b": roster_b})
+        return replay_record({**data, "team_a": roster_a, "team_b": roster_b,
+                              "items_a": data.get("items_a"), "items_b": data.get("items_b")})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
@@ -317,12 +332,23 @@ def battle_state(battle_id: str) -> dict:
     return _require(battle_id).snapshot()
 
 
+@router.post("/{battle_id}/starter")
+def choose_starter(battle_id: str, body: ReplaceBody) -> dict:
+    """第 0 回合：人类选首发（bench_idx = 槽位下标）。选中后假LLM 也选首发，
+    双方首发触发入场效果，进入出招阶段。返回过滤后事件与新观测。"""
+    ctrl = _require(battle_id)
+    out = ctrl.choose_starter(body.bench_idx)
+    if out.get("ok"):
+        _save(ctrl)
+    return out
+
+
 @router.post("/{battle_id}/act")
 def act(battle_id: str, body: ActBody) -> dict:
     """人类出招：推进一整回合（含假LLM 决定 + 结算 + 补位），返回过滤后事件与新观测。
     非法行动 → `{"ok": False, "error": …}`（零状态变更，HTTP 200）。"""
     ctrl = _require(battle_id)
-    out = ctrl.act(body.action, body.item)
+    out = ctrl.act(body.action, body.item, body.item_arg)
     if out.get("ok"):
         _save(ctrl)
     return out

@@ -10,25 +10,28 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class Effect:
     """一条效果原语的参数。op 是原语名（封闭集合），其余是它的参数。"""
 
-    op: str              # "stat_mod" / "energy_gain" / …（primitives.py 实现）
+    op: str              # "stat_mod" / "energy_gain" / "lose_hp_pct" / "star_meteor" / …
     target: str = "self"   # self / foe / …（S1 只解析 self）
 
     # stat_mod 参数
     stat: str = ""
-    mode: str = ""       # pct / flat
+    mode: str = ""       # pct / flat / special
     layers: int = 1
     permanent: bool = False    # 离场是否保留（非永久离场消失）
     trait: bool = False        # True = 特性增益（免疫常规驱散）
 
     # 通用数值参数
     value: int | float = 0
+
+    # 扩展参数（纯负面 buff：冻结 {pct:5}、引电 {pct:25, at:2} 等）
+    kwargs: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
