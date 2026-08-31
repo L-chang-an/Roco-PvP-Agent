@@ -1,6 +1,6 @@
 """E2 属性克制与系别测试（修正版克制表）：完整矩阵 / 多系克制封顶 / 抵抗乘算 / STAB / 系别恒为自身系别。
 
-克制表一致性对照 `mydocs/type_chart.md` 原文（Markdown 表格）解析——转录必须与来源逐条一致。
+克制表一致性对照 `src/environment/data/type_chart.json` 权威矩阵解析——转录必须与来源逐条一致。
 多系别规则（负责人确认）：克制取乘积但**封顶 ×3**，抵抗**正常乘算**，一克制一抵抗互抵。
 本表**不对称**（例：武 克制 普通，普通 对 武 中性），并有互克对（光↔幽、地↔冰、萌↔恶）
 与自克/自抗（龙/幽 自克 ×2，毒 自抗 ×0.5）。
@@ -9,41 +9,27 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from environment.dataset import DataSource, load_spirits
+from environment.dataset import DataSource
 from environment.rules import DEFAULT_RULES
 from environment.teambuilder import TeamPick, build_roster
 from environment.types import (CHART, MAX_EFFECTIVENESS, STAB_MULT, TYPE_NAMES,
                                normalize_type, stab_multiplier, type_effectiveness)
 
-CHART_MD = Path(__file__).resolve().parents[1] / "mydocs" / "type_chart.md"
+CHART_JSON = Path(__file__).resolve().parents[1] / "src" / "environment" / "data" / "type_chart.json"
 
 
-def _parse_chart_md() -> dict[str, dict[str, float]]:
-    """解析 type_chart.md 的 Markdown 表格 → {防御方: {攻击方: 倍率}}（与 types.CHART 同形状）。"""
-    chart: dict[str, dict[str, float]] = {}
-    header: list[str] | None = None
-    for line in CHART_MD.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if header is None:
-            if "攻击方" in cells[0]:
-                header = cells[1:]
-            continue
-        defense = cells[0]
-        if defense.startswith("--"):
-            continue
-        chart[defense] = {a: float(v) for a, v in zip(header, cells[1:])}
-    return chart
+def _parse_chart_json() -> dict[str, dict[str, float]]:
+    """解析 type_chart.json → {防御方: {攻击方: 倍率}}（与 types.CHART 同形状）。"""
+    return json.loads(CHART_JSON.read_text(encoding="utf-8"))
 
 
 # ── 克制表：与来源一致 ──
-def test_chart_matches_source_md() -> None:
-    """CHART 转录必须与 type_chart.md 原文逐条一致。"""
-    assert CHART == _parse_chart_md()
+def test_chart_matches_source_json() -> None:
+    """CHART 转录必须与 data/type_chart.json 权威矩阵逐条一致。"""
+    assert CHART == _parse_chart_json()
 
 
 def test_chart_matrix_shape_and_values() -> None:

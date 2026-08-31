@@ -1,13 +1,12 @@
-"""P1 效果编译器测试：batch-P1.json 全部 125 技能都能编译成 SkillEffect。
+"""P1 效果编译器测试：batch-P1 全部 125 技能都能编译成 SkillEffect。
 
 覆盖：125 全命中 / 三类模式抽查（纯伤害/纯防御/纯六维状态含多目标多维度）/ battle_ready
-白名单边界 / data/p1_skills.json 与 mydocs 批次及 FULL 权威数据的一致性。
+白名单边界 / data/p1_skills.json 与 FULL 权威数据的一致性（原 mydocs 批次已并入 data/）。
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from environment.dataset import DataSource, load_skills
 from environment.skillbook import (
@@ -16,13 +15,12 @@ from environment.skillbook import (
     battle_ready, compile_p1_effect,
 )
 
-REPO = Path(__file__).resolve().parents[1]
-BATCH_MD = REPO / "mydocs" / "skill-batches" / "batch-P1.json"
 FULL = load_skills(DataSource.FULL)
 
 
 def _batch_names() -> frozenset[str]:
-    return frozenset(item["name"] for item in json.loads(BATCH_MD.read_text("utf-8"))["skills"])
+    """P1 批次权威源：data/p1_skills.json（原 mydocs/skill-batches/batch-P1.json 已并入 data/）。"""
+    return frozenset(item["name"] for item in json.loads(P1_SKILLS_FILE.read_text("utf-8"))["skills"])
 
 
 def _p1_batch() -> list[dict]:
@@ -132,11 +130,6 @@ def test_battle_ready_has_179() -> None:
 
 
 # ── 数据一致性 ──
-def test_data_copy_matches_mydocs_batch() -> None:
-    """data/p1_skills.json 与 mydocs/skill-batches/batch-P1.json 逐条一致。"""
-    assert json.loads(P1_SKILLS_FILE.read_text("utf-8"))["skills"] == _p1_batch()
-
-
 def test_batch_matches_full_authoritative() -> None:
     """批次的 type/kind/strong/energy/desc 与 FULL 权威表一致（同一技能）。"""
     for item in _p1_batch():
