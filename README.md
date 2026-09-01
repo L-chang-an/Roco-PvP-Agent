@@ -61,8 +61,8 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 | 对战引擎 | 可用 | 支持状态推进、迷雾视角、事件过滤和确定性重放 |
 | 人类与 Agent 对战 | 可用 | 支持 Random 与 FakeLLM 对手（真实 LLM 对手尚未接入 UI） |
 | Agent 自博弈 | 可用 | 支持轨迹保存和重放自检 |
-| 策略进化（Playbook 路线） | 实验性 | 已交付 S0 + R0–R5 + 记忆接线；R6–R8 为未来工作 |
-| 策略进化（GlobalMem 路线） | 实验性 | 已交付 G1/G2/G3/G5（全局经验检索/注入/复盘/编排闭环） |
+| Playbook | 实验性 | 通用对战经验手册 |
+| 策略进化（GlobalMem 路线） | 实验性 | 全局经验检索/注入/复盘/编排闭环 |
 | 长期记忆 | 实验性 | 默认关闭，需显式指定目录启用 |
 | 提示缓存观测 | 可用 | 跨网关提取缓存命中率；网关不上报时明确标注而非假装 0 |
 | 生产级公网部署 | 尚未支持 | 当前默认面向本地运行，缺少完整认证和多租户隔离 |
@@ -111,15 +111,9 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 
 进化载体目前有两条并行路线：
 
-**Playbook 路线（R 线，S0 + R0–R5）**
+**GlobalMem 路线**
 
-- 轨迹反思、候选规则生成和有界 Playbook 编辑；
-- Pareto 策略池 + 两级门禁 + 剥削者 + 历史回归门；
-- 慢更新（Meta Playbook + 价值函数）与 D_test 汇报。
-
-**GlobalMem 路线（G 线，G1/G2/G3/G5）**
-
-用「全局对局经验」取代 Playbook 的生态位——每场按双方阵容画像（`matchup_key`）检索 Top-1
+「全局对局经验」每场按双方阵容画像（`matchup_key`）检索 Top-1
 注入 system prompt，战后由分析型 LLM 分别从双方视角复盘并决定更新/新建/跳过：
 
 - 按阵容相似度检索 + 版本硬隔离（`data_digest`）；
@@ -128,10 +122,8 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 - 双视角复盘互不可见（迷雾口径，避免编码对手隐藏信息）；
 - 周期性 A/B（开/关 GlobalMem 对比）作为有效性证据。
 
-两条路线的成本差异显著：Playbook 路线每个候选要过全量门（默认 864 局），GlobalMem 路线一次学习迭代只需 1 局对战 + 2 次复盘调用。
-
-> Build Oracle、PSRO 元游戏、关键回合 SMC 与持续运行（R6–R8）属后续规划，尚未实装。
-> LLM 自选阵容（G4）同样列为未来工作，当前只从固定实例池取阵容。
+> Build Oracle、PSRO 元游戏、关键回合 SMC 与持续运行属后续规划，尚未实装。
+> LLM 自选阵容同样列为未来工作，当前只从固定实例池取阵容。
 
 ## 系统架构
 
@@ -305,13 +297,7 @@ uv run python -m roco_pvp_agent evolve credit \
 # 单步进化：rollout → credit → reflect → edit
 uv run python -m roco_pvp_agent evolve step --seed 7 --out artifacts
 
-# 多步进化（R4：池 + 两级门 + 剥削者 + 回归门）
-uv run python -m roco_pvp_agent evolve steps --n 4 --seed 7 --out artifacts
-
-# 长期 epoch 调度（R5：慢更新 + D_test 汇报）
-uv run python -m roco_pvp_agent evolve epoch --n 8 --e 8 --seed 7 --out artifacts
-
-# GlobalMem 闭环（G5：战斗 → 双视角复盘 → 经验库更新 → Q 更新 → 周期性 A/B）
+# GlobalMem 闭环（战斗 → 双视角复盘 → 经验库更新 → Q 更新 → 周期性 A/B）
 uv run python -m roco_pvp_agent evolve battles --n 10 \
   --instances 5 --globalmem-dir artifacts/gm --memory-dir artifacts/mem \
   --ab-every 5 --ab-instances 3 --out artifacts/gm_run --progress
@@ -501,12 +487,6 @@ uv build
 
 正式发布前应在全新虚拟环境中安装生成的 wheel，并确认内置数据和 UI 静态文件均已包含。
 
-### 代码审计
-
-项目的完整审计流程见：
-
-- [tmp/roadmap/project-audit-plan.md](tmp/roadmap/project-audit-plan.md)
-- [tmp/audit/final-audit-report.md](tmp/audit/final-audit-report.md)
 
 ## 版本信息
 
@@ -535,21 +515,21 @@ uv build
 ### 近期
 
 - [x] 统一包版本、Git 标签和 Changelog（v0.2.0）；
-- [ ] 完善 README、API、轨迹 schema 和数据版本文档；
+- [x] 完善 README、API、轨迹 schema 和数据版本文档；
+- [x] 真实 LLM 下验证 GlobalMem 的 A/B 效果（离线路径的 delta 恒约为 0，见下）；
 - [ ] 补全人机对战轨迹的模型、Playbook 和数据来源信息；
 - [ ] 增加浏览器端 XSS、并发会话和路径安全测试。
 
 ### 中期（阶段 1 引擎保真度）
 
-- [ ] 逐批实装剩余技能效果（P3–P6）与特性批次；
+- [ ] 逐批实装剩余技能效果与特性批次；
 - [ ] 补全状态/天气/道具/萌化/首领化/进化链等剩余机制；
-- [ ] 归一化双回合循环（AUD-E-004 结构债）。
+- [ ] 归一化双回合循环。
 
-### 长期（阶段 2/3）
+### 长期（阶段 2和3）
 
-- [ ] R 线完整：Build Oracle + α-rank 构筑元游戏（R6）、SMC 关键回合后验采样（R7）、持续运行与运维（R8）；
-- [ ] G 线扩展：LLM 自选阵容（G4，当前只用固定实例池）；
-- [ ] 真实 LLM 下验证 GlobalMem 的 A/B 效果（离线路径的 delta 恒约为 0，见下）；
+- [ ] Build Oracle + α-rank 构筑元游戏、SMC 关键回合后验采样、持续运行与运维；
+- [ ] LLM 自选阵容（当前只用固定实例池）；
 - [ ] 真实数据回灌，校准组队建议与评测基线；
 - [ ] 提供结构化组队建议的 held-out 验证与 Skill 晋级运营；
 - [ ] 建立稳定的插件、工具和 Skill 扩展协议；
@@ -596,13 +576,6 @@ uv build
 ### 自进化功能是否已经证明 Agent 会持续变强？
 
 尚不能做普遍保证。当前项目提供了策略生成、评测门禁和回滚 Harness，但真实提升仍取决于模型、数据、对手分布、评测隔离和统计有效性。特别注意：**离线（无 API Key）路径的玩家不读注入文本**，所以离线结果只能验证流程，不能作为提升证据。
-
-### 进化跑不完 / 太慢怎么办？
-
-默认参数下评测占绝大部分开销（`evolve steps --n 1` 约 1748 局）。用 `--instances` 与
-`--seeds-per-instance` 缩放（例如 `--instances 10 --seeds-per-instance 2` 把全量门从 864 局
-降到 36 局），加 `--progress` 观察进度，长跑加 `--resume` 以免中断后从头开始。
-若想以最低成本看到完整学习闭环，用 GlobalMem 路线的 `evolve battles`（一次迭代仅 1 局对战）。
 
 ### 如何确认提示缓存生效？
 
