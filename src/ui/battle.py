@@ -42,8 +42,8 @@ class BattleController:
                  opponent: str, team_a: list[dict], team_b: list[dict],
                  rules: BattleRules, saved_at: str, player=None,
                  items_a: list[str] | None = None, items_b: list[str] | None = None) -> None:
-        if opponent not in ("fake_llm", "random"):
-            raise ValueError(f"未知对手类型「{opponent}」（fake_llm | random）。")
+        if opponent not in ("fake_llm", "random", "llm"):
+            raise ValueError(f"未知对手类型「{opponent}」（fake_llm | random | llm）。")
         self.battle_id = battle_id
         self._session = session
         self._seed = seed
@@ -60,13 +60,17 @@ class BattleController:
         self._cur: dict | None = None        # 人类补位暂停中的本回合累积
         self._starters: dict[str, int] = {}  # 第 0 回合首发（side → 槽位）
         # 对手玩家：独立 RNG 流（seed+1），绝不共用引擎的流；`player` 为测试注入缝
+        # （opponent="llm" 时必须经 `player=` 注入真实 LLMPlayer——本类不构造它，
+        #  由路由层负责，避免 ui → evolution 的依赖上提）。
         if player is not None:
             self._player = player
         elif opponent == "fake_llm":
             self._player = FakeLLMPlayer("b", seed=seed + 1)
-        else:
+        elif opponent == "random":
             from environment.players import RandomPlayer
             self._player = RandomPlayer("b", seed=seed + 1)
+        else:
+            raise ValueError(f"对手类型「{opponent}」必须经 player= 注入（真实 LLM 由路由层构造）。")
         self._player.on_match_start(session.view("b"))
 
     # ── 只读属性 ──

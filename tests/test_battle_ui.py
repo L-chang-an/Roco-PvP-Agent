@@ -137,7 +137,8 @@ def test_start_rejects_invalid_team(client):
     assert r.status_code == 422 and "errors" in r.json()["detail"]
 
 
-def test_start_rejects_bad_config(client):
+def test_start_rejects_bad_config(client, monkeypatch):
+    monkeypatch.setattr(routes_battle, "get_settings", lambda: _settings())  # 无 key → llm 必须 422
     team = _valid_team()
     assert client.post("/api/battle/start", json={"team_a": team, "team_size": 7}).status_code == 422
     assert client.post("/api/battle/start", json={"team_a": team, "team_size": 3, "lives": 3}).status_code == 422
@@ -180,6 +181,64 @@ def test_replace_without_pending_rejected(client):
     b = _start(client)
     r = client.post(f"/api/battle/{b['battle_id']}/replace", json={"bench_idx": 1}).json()
     assert r["ok"] is False and "等待补位" in r["error"]
+
+
+# ---------- 真实 LLM 对手（opponent="llm"）+ 记忆开关 ----------
+
+
+def test_llm_opponent_requires_api_key(client, monkeypatch):
+    """opponent="llm" 但无 API Key → 422 明确拒绝（不静默降级成随机，避免误判）。"""
+    monkeypatch.setattr(routes_battle, "get_settings", lambda: _settings())  # api_key=""
+    r = client.post("/api/battle/start", json={"team_a": _valid_team(), "opponent": "llm"})
+    assert r.status_code == 422
+    assert "API Key" in r.json()["detail"]
+
+
+def test_llm_opponent_with_key_starts(client, monkeypatch):
+    """有 API Key → 真实 LLM 对手开局成功（构造不触发网络；实际出招才调 LLM）。"""
+    st = Settings(api_key="test-key", base_url="http://test.invalid", model="test-model")
+    monkeypatch.setattr(routes_battle, "get_settings", lambda: st)
+    r = client.post("/api/battle/start", json={"team_a": _valid_team(), "opponent": "llm"})
+    assert r.status_code == 200
+    assert r.json()["opponent"] == "llm"
+    assert r.json()["ok"] is True
+
+
+def test_llm_opponent_memory_flag_accepted(client, monkeypatch):
+    """memory=True 被接受（无记忆库目录时检索器为空命中，不报错）。"""
+    st = Settings(api_key="test-key", base_url="http://test.invalid", model="test-model")
+    monkeypatch.setattr(routes_battle, "get_settings", lambda: st)
+    r = client.post("/api/battle/start",
+                    json={"team_a": _valid_team(), "opponent": "llm", "memory": True})
+    assert r.status_code == 200 and r.json()["ok"] is True
+
+
+def test_controller_llm_requires_injected_player():
+    """opponent="llm" 但没注入 player → ValueError（真实 LLM 必须由路由层构造，不能落成随机）。"""
+    rules = dataclasses.replace(DEFAULT_RULES, team_size=1)
+    a = [spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("乙", 300, 100, 100, 100, 100, 90, ["抓挠"])]
+    session = BattleSession.start(a, b, seed=1, rules=rules, battle_id="t")
+    with pytest.raises(ValueError, match="必须经 player="):
+        BattleController("t", session, seed=1, opponent="llm",
+                         team_a=[], team_b=[], rules=rules, saved_at="x")
+
+
+def test_controller_llm_uses_injected_player():
+    """注入 ScriptedPlayer 当对手 → 能正常开局/出招，record 标记 opponent="llm"。"""
+    rules = dataclasses.replace(DEFAULT_RULES, team_size=1)
+    a = [spec("甲", 300, 100, 100, 100, 100, 100, ["抓挠"])]
+    b = [spec("乙", 300, 100, 100, 100, 100, 90, ["抓挠"])]
+    session = BattleSession.start(a, b, seed=1, rules=rules, battle_id="t")
+    ctrl = BattleController("t", session, seed=1, opponent="llm",
+                            team_a=a, team_b=b, rules=rules, saved_at="x",
+                            player=ScriptedPlayer("b", script=[Decision(skill_action(0))]))
+    ctrl.choose_starter(0)
+    out = ctrl.act(skill_action(0))
+    assert out["ok"] is True
+    rec = ctrl.record()
+    assert rec["opponent"] == "llm"
+    assert rec["data_digest"]                       # S0 stamp 仍在（重放契约不破）
 
 
 def test_controller_replacement_flow():

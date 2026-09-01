@@ -30,12 +30,16 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from environment.battle_config import DEFAULT_LIVES, MIN_TEAM_SIZE, build_battle_rules
+from environment.datafingerprint import data_digest
 from environment.dataset import DataSource
 from environment.presets import fixed_team
 from environment.replay import replay_record
 from environment.rules import DEFAULT_ITEMS, DEFAULT_RULES, BattleRules
 from environment.session import BattleSession
 from environment.teambuilder import TeamPick, build_roster, validate_team
+
+from roco_pvp_agent.battle.player import LLMPlayer
+from roco_pvp_agent.config import get_settings
 
 from .battle import BattleController, get_controller, register
 from .routes_team import PickBody, _pick_from
@@ -65,7 +69,8 @@ class StartBattleBody(BaseModel):
     lives: int = DEFAULT_LIVES
     max_turns: int = DEFAULT_RULES.max_turns
     seed: int | None = None            # 缺省自动生成；显式给 → 可复现
-    opponent: str = "fake_llm"         # fake_llm（测试：固定回复+随机动作）| random
+    opponent: str = "fake_llm"         # fake_llm（测试：固定回复+随机动作）| random | llm（真实 LLM）
+    memory: bool = False               # opponent="llm" 时：是否给对手 LLM 开启记忆增强（局部记忆 + GlobalMem）
     items_a: list[str] = []
     items_b: list[str] = []
 
@@ -182,8 +187,10 @@ def start_battle(body: StartBattleBody) -> dict:
 
     非法队伍 → 422 带全部错误（复用 validate_team 一次报全）。
     """
-    if body.opponent not in ("fake_llm", "random"):
-        raise HTTPException(status_code=422, detail=f"未知对手类型「{body.opponent}」（fake_llm | random）。")
+    if body.opponent not in ("fake_llm", "random", "llm"):
+        raise HTTPException(status_code=422, detail=f"未知对手类型「{body.opponent}」（fake_llm | random | llm）。")
+    if body.opponent == "llm" and not get_settings().has_api_key:
+        raise HTTPException(status_code=422, detail="未配置 API Key，无法使用真实 LLM 对手（请配置 LLM_API_KEY）。")
     if isinstance(body.max_turns, bool) or not isinstance(body.max_turns, int) or body.max_turns < 1:
         raise HTTPException(status_code=422, detail=f"回合上限必须是 ≥1 的整数，实际 {body.max_turns!r}。")
     try:
@@ -218,9 +225,36 @@ def start_battle(body: StartBattleBody) -> dict:
 
     team_a = [p.model_dump() for p in body.team_a]
     team_b = [p.model_dump() for p in body.team_b] if body.team_b is not None else [asdict(p) for p in picks_b]
+    player = None
+    if body.opponent == "llm":
+        # 真实 LLM 对手：路由层构造（battle.py 不 import evolution）。
+        # `memory=True` → 开启局部记忆 + GlobalMem 检索注入（Settings 的默认目录）；
+        # 记忆库目录不存在/为空 → 检索器为空命中（返回 []），不报错——与 rollout 路径一致。
+        settings = get_settings()
+        memory_retriever = None
+        globalmem_retriever = None
+        if body.memory:
+            from roco_pvp_agent.battle.evolution.globalmem import (
+                GlobalMemStore,
+                make_global_retriever,
+            )
+            from roco_pvp_agent.battle.evolution.memory import MemoryStore
+            from roco_pvp_agent.battle.evolution.run import _make_memory_retriever
+
+            memory_retriever = _make_memory_retriever(MemoryStore(settings.memory_dir))
+            globalmem_retriever = make_global_retriever(
+                GlobalMemStore(settings.globalmem_dir,
+                               max_strategy_tokens=settings.globalmem_max_tokens),
+                data_digest=data_digest(),
+                delta=settings.globalmem_delta,
+                lam=settings.globalmem_lam,
+                top_k=settings.globalmem_top_k,
+            )
+        player = LLMPlayer("b", settings=settings, seed=seed + 1,
+                           memory=memory_retriever, global_mem=globalmem_retriever)
     ctrl = BattleController(battle_id, session, seed=seed, opponent=body.opponent,
                             team_a=team_a, team_b=team_b, rules=rules, saved_at=saved_at,
-                            items_a=items_a, items_b=items_b)
+                            items_a=items_a, items_b=items_b, player=player)
     register(ctrl)
     _save(ctrl)
     snap = ctrl.snapshot()

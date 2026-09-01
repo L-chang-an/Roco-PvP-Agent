@@ -54,6 +54,17 @@
           <div class="cfg-row"><label>规模</label><select id="team-size-select" title="每方可携带精灵数 3–6"></select></div>
           <div class="cfg-row"><label>命数</label><select id="lives-select" title="每方命数 1..规模−1"></select></div>
           <div class="cfg-row"><label>回合上限</label><input id="max-turns-input" type="number" value="20" min="1"></div>
+          <div class="cfg-row"><label>对手类型</label>
+            <select id="opponent-type-select" title="对手 AI 类型">
+              <option value="fake_llm" selected>假 LLM（固定回复+随机动作）</option>
+              <option value="random">随机</option>
+              <option value="llm">真实 LLM（需配置 API Key）</option>
+            </select>
+          </div>
+          <div class="cfg-row"><label>记忆增强</label>
+            <label class="checkbox"><input type="checkbox" id="memory-enable" title="仅真实 LLM 对手生效：开启后对手会注入局部记忆与全局经验（GlobalMem）">
+              <span class="muted dim">对手记忆（局部+全局）</span></label>
+          </div>
           <div class="cfg-row"><label>种子</label><input id="seed-input" placeholder="留空自动生成" title="同种子同轨迹，可复现"></div>
           <button id="start-btn" class="primary">开始对战</button>
           <div id="start-error" class="validate-box"></div>

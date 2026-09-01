@@ -218,7 +218,8 @@
       lives: parseInt($('#lives-select').value, 10),
       max_turns: parseInt($('#max-turns-input').value, 10) || 20,
       seed: seedInput ? parseInt(seedInput, 10) : null,
-      opponent: 'fake_llm',
+      opponent: $('#opponent-type-select').value,
+      memory: $('#memory-enable').checked,
     };
     const r = await api('/api/battle/start', {
       method: 'POST',

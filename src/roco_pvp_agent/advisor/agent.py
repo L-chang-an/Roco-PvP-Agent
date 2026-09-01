@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from environment.battle_config import build_battle_rules
+from environment.datafingerprint import data_digest
 from environment.dataset import DataSource
 from environment.teambuilder import TeamPick, build_roster
 
@@ -56,8 +57,33 @@ def _picks_to_roster(picks: list[dict], source: DataSource = DataSource.VALID) -
     return build_roster([_to_team_pick(p) for p in picks], source, rules)
 
 
-def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
-    """顾问工具集（LangChain @tool，闭包捕获目录配置）。"""
+def _dump_mem(entry: dict) -> dict:
+    """记忆条目 → 给 LLM 的只读视图（去掉 provenance 内部字段，加"非当前局面"标注位）。
+
+    只暴露：entry_id / Q / n_used / n_wins / strategy_text（GlobalMem）
+    或 situation_text / experience_text / action（局部记忆）——全是可读证据，不含隐藏对局信息。
+    """
+    out = {"entry_id": entry.get("entry_id"), "Q": entry.get("Q", 0.0)}
+    if "strategy_text" in entry:
+        out["n_used"] = entry.get("n_used", 0)
+        out["n_wins"] = entry.get("n_wins", 0)
+        out["strategy_text"] = entry.get("strategy_text", "")
+    else:
+        out["situation_text"] = entry.get("situation_text", "")
+        out["experience_text"] = entry.get("experience_text", "")
+        out["action"] = entry.get("action", {})
+    out["is_history_not_fact"] = True     # 记忆是历史经验，非当前局面事实
+    return out
+
+
+def _build_advisor_tools(*, battles_dir=None, runs_dir=None,
+                         memory_dir: str | None = None,
+                         globalmem_dir: str | None = None) -> list:
+    """顾问工具集（LangChain @tool，闭包捕获目录配置）。
+
+    `memory_dir` / `globalmem_dir`：进化沉淀的记忆库目录。缺省 None → 对应检索工具返回
+    "未启用"，不报错（顾问在没跑过进化的环境里仍可用）。
+    """
 
     @tool
     def get_catalog_version() -> str:
@@ -118,6 +144,48 @@ def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
         return _dump(_retrieve_team_skill(query))
 
     @tool
+    def query_global_mem(my_team: list[dict], foe_team: list[dict], *,
+                         team_size: int = 3, lives: int = 2) -> str:
+        """查历史全局对战经验（GlobalMem）：给定我方/对手阵容（{spirit,skills,...}），返回最相似的
+        已沉淀经验（entry_id/Q/strategy_text）。**记忆是历史经验，非当前局面事实**，只作佐证，
+        不覆盖数据库与引擎计算。未配置 globalmem_dir → 返回"未启用"。"""
+        if globalmem_dir is None:
+            return "未启用（未配置 globalmem_dir）"
+        from roco_pvp_agent.battle.evolution.globalmem import (
+            GlobalMemStore,
+            MatchupQuery,
+            make_global_entry_id,
+            matchup_key,
+            search_global_mem,
+        )
+        store = GlobalMemStore(globalmem_dir)
+        roster_a = _picks_to_roster(my_team)
+        roster_b = _picks_to_roster(foe_team)
+        key = matchup_key(roster_a, roster_b, team_size=team_size, lives=lives)
+        hits = search_global_mem(
+            store, MatchupQuery(matchup_key=key, data_digest=data_digest()),
+            top_k=3)
+        return _dump({"matchup_key": key, "hits": [_dump_mem(h) for h in hits]})
+
+    @tool
+    def query_local_mem(situation_key: str) -> str:
+        """查历史局部局面记忆：给定 situation_key（形如 my2/foe2/迪莫/水蓝蓝/high/high/0/early/2/2），
+        返回相似局面的历史经验（entry_id/Q/experience_text）。**记忆是历史经验，非当前局面事实**。
+        未配置 memory_dir → 返回"未启用"。"""
+        if memory_dir is None:
+            return "未启用（未配置 memory_dir）"
+        from roco_pvp_agent.battle.evolution.memory import (
+            MemoryQuery,
+            MemoryStore,
+            two_phase_search,
+        )
+        store = MemoryStore(memory_dir)
+        hits = two_phase_search(
+            store, MemoryQuery(situation_key=situation_key, data_digest=data_digest()),
+            k1=10, k2=3)
+        return _dump({"hits": [_dump_mem(h) for h in hits]})
+
+    @tool
     def submit_team_advice(payload: dict) -> str:
         """提交结构化组队建议（终稿，必须调用）。payload 字段：
         rules_used{team_size,lives,source}, assumptions, data_digest,
@@ -129,7 +197,8 @@ def _build_advisor_tools(*, battles_dir=None, runs_dir=None) -> list:
     return [
         get_catalog_version, search_spirits, get_spirit_profile, get_skill_profile,
         get_build_options, validate_team, query_trajectory_evidence, analyze_team,
-        simulate_matchups, retrieve_team_skill, submit_team_advice, final_answer,
+        simulate_matchups, retrieve_team_skill, query_global_mem, query_local_mem,
+        submit_team_advice, final_answer,
     ]
 
 
@@ -146,16 +215,24 @@ def _degraded_answer(errors: list[dict]) -> str:
 class TeamAdvisorAgent(ChatAgent):
     """组队顾问：结构化终结 + EvidenceGate + 关闭思维链外显。"""
 
-    def __init__(self, settings, *, llm=None, max_llm_rounds: int = 6,
-                 battles_dir=None, runs_dir=None):
+    def __init__(self, settings, *, llm=None, max_llm_rounds: int = 8,
+                 battles_dir=None, runs_dir=None,
+                 memory_dir: str | None = None,
+                 globalmem_dir: str | None = None):
+        # 记忆目录：显式传参优先；缺省回退 settings 里的进化沉淀目录（跑过 evolve 就能用）。
+        memory_dir = memory_dir or getattr(settings, "memory_dir", None)
+        globalmem_dir = globalmem_dir or getattr(settings, "globalmem_dir", None)
         super().__init__(
             settings,
             llm=llm,
             system_prompt=ADVISOR_SYSTEM_PROMPT,
             max_llm_rounds=max_llm_rounds,
-            tools=_build_advisor_tools(battles_dir=battles_dir, runs_dir=runs_dir),
+            tools=_build_advisor_tools(battles_dir=battles_dir, runs_dir=runs_dir,
+                                       memory_dir=memory_dir,
+                                       globalmem_dir=globalmem_dir),
             terminal_tools={TERMINAL_TOOL, FINAL_ANSWER_TOOL},
             emit_thinking=False,
+            max_total_seconds=55.0,       # < 1 分钟兜底：超时强制终结
         )
         self._advice_failed = 0
 
@@ -187,3 +264,17 @@ class TeamAdvisorAgent(ChatAgent):
         if self._advice_failed >= 2:
             return _degraded_answer(result["errors"]), True
         return _dump({"ok": False, "errors": result["errors"]}), False
+
+    def _handle_exhausted(self, reason: str, tool_log: list[dict], thinking: list[str],
+                          event_sink) -> str:
+        """轮次耗尽 / 超时的有信息降级：列出已查了哪些工具 + 缺什么，而非一句空话。"""
+        names = [t["name"] for t in tool_log]
+        when = "时间预算（55s）内" if reason == "timeout" else "达到轮次上限"
+        body = {
+            "ok": False,
+            "degraded": True,
+            "reason": reason,
+            "message": f"抱歉，{when}未能生成通过校验的阵容终稿。已完成的检索：{names or '无'}。",
+            "hint": "请补充队伍规模、已有精灵或目标对手，我可以继续帮你配队。",
+        }
+        return _dump(body)

@@ -6,6 +6,7 @@ M1：-q/--query 单发 + 交互 REPL；--debug 打印思考与工具过程；--s
 import argparse
 import time
 from contextlib import contextmanager
+from typing import Callable
 
 from rich.console import Console
 
@@ -498,8 +499,29 @@ def _run_evolve_battles_cli(args) -> int:
     return 0
 
 
+def _cli_event_sink() -> Callable[[dict], None]:
+    """CLI 实时事件 sink：thinking / tool 一发生就打印，用户看到工作过程，不干等。
+
+    仅实时打印过程事件；最终答案仍由 _print_reply 统一输出（避免重复）。
+    """
+
+    def sink(event: dict) -> None:
+        kind = event.get("event")
+        if kind == "thinking":
+            console.print(f"[dim]💭 {event.get('text', '')}[/dim]")
+        elif kind == "progress":
+            console.print(f"[dim]⏳ {event.get('text', '')}[/dim]")
+        elif kind == "tool":
+            name = event.get("name", "")
+            args = event.get("args", {})
+            result = event.get("result", "")
+            console.print(f"[cyan]🔧 {name}({args}) → {result[:200]}{'…' if len(str(result)) > 200 else ''}[/cyan]")
+
+    return sink
+
+
 def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
-    reply = agent.chat(query)
+    reply = agent.chat(query, event_sink=_cli_event_sink())
     _print_reply(reply, debug)
     return 0
 
@@ -517,7 +539,7 @@ def _repl(agent: ChatAgent, debug: bool) -> int:
             continue
         if text.lower() in EXIT_WORDS:
             break
-        reply = agent.chat(text, history=history)
+        reply = agent.chat(text, history=history, event_sink=_cli_event_sink())
         _print_reply(reply, debug)
         history = reply.history
     return 0

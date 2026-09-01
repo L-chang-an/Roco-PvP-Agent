@@ -371,7 +371,7 @@ uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `memory_enabled` | `false` | 记忆总开关 |
-| `memory_dir` | `artifacts/memory` | 记忆文件目录 |
+| `memory_dir` | `artifacts/mem` | 记忆文件目录 |
 | `memory_embedder` | `keyword` | 记忆检索器（零依赖兜底） |
 | `memory_delta` | `0.5` | 第一阶段相似度门 |
 | `memory_k1` | `10` | 第一阶段候选数 |
@@ -384,7 +384,7 @@ uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `globalmem_dir` | `artifacts/globalmem` | 经验库目录 |
+| `globalmem_dir` | `artifacts/gm` | 经验库目录 |
 | `globalmem_max_tokens` | `400` | 单条策略文本 token 上限；**超限拒绝而非截断** |
 | `globalmem_delta` | `0.5` | 阵容相似度门 |
 | `globalmem_lam` | `0.5` | 相似度与 Q 值融合权重 |

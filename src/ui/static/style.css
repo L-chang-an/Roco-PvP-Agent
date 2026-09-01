@@ -245,6 +245,12 @@ header button:hover {
   font-style: italic;
 }
 
+.reason-progress {
+  color: var(--muted);
+  font-size: 13px;
+  opacity: 0.7;
+}
+
 .reason-tool {
   color: var(--muted);
   font-size: 13px;

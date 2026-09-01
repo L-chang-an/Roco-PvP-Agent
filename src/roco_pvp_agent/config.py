@@ -20,7 +20,7 @@ class Settings(BaseModel):
 
     # R1 记忆库配置（默认全关：memory_enabled=False 时检索/更新全链路 no-op）。
     memory_enabled: bool = False
-    memory_dir: str = "artifacts/memory"
+    memory_dir: str = "artifacts/mem"
     memory_embedder: str = "keyword"
     memory_delta: float = 0.5
     memory_k1: int = 10
@@ -33,7 +33,7 @@ class Settings(BaseModel):
     # GlobalMem 配置（G1）：全局对局经验（占据原 Playbook 生态位）。
     # `globalmem_max_tokens` 是唯一的膨胀约束——它注入 system prompt 并随每回合重发，
     # 单局额外输入 ≈ 该值 × 回合数（详见 evolution/globalmem.py 的常量注释）。
-    globalmem_dir: str = "artifacts/globalmem"
+    globalmem_dir: str = "artifacts/gm"
     globalmem_max_tokens: int = 400
     globalmem_delta: float = 0.5
     globalmem_lam: float = 0.5

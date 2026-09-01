@@ -3,9 +3,15 @@
 - 在线路径：显式终稿协议的工具循环（final_answer 终结），思考文本与工具事件经 event_sink 发射。
 - 离线路径（无 key）：确定性模板回复，保证"宁失败不抛"。
 - 历史由调用方持有并传回（stateless by design），一个实例可服务任意多会话。
+
+可靠性设计（Harness 侧，避免"模型不守协议 → 用户拿到空话"）：
+- `max_total_seconds`：整体时间预算，超时强制终结（防止用户在 LLM 调用慢时无限等待）。
+- 最后一轮注入"必须立即终结"引导，避免模型无限调非终结工具耗尽轮次。
+- 轮次耗尽/超时 → `_handle_exhausted`（子类可覆写成有信息的降级答案，而非空话）。
 """
 
 from dataclasses import dataclass, field
+import time
 from typing import Callable, Optional
 
 from langchain_core.messages import (
@@ -24,11 +30,19 @@ EMPTY_REPLY = "（模型未返回有效回复）"
 OFFLINE_HINT = "未配置 LLM_API_KEY，当前处于离线模式，仅返回确定性回复。请配置 .env 后重启以获得完整对话能力。"
 MAX_ROUNDS_FALLBACK = "（达到最大轮数仍未获得最终答案，请稍后再试或调整问题）"
 
+# 最后一轮的强制终结引导（Harness 注入，避免模型无限调非终结工具耗尽轮次）。
+# 只在最后一轮 invoke 前临时附加到消息列表，**不写入历史**（不污染后续对话）。
+LAST_ROUND_HINT = (
+    "（Harness 提示：这是最后一轮。你已收集足够信息，请立即调用终结工具"
+    "（submit_team_advice 或 final_answer）给出终稿，不要再调用其他工具。）"
+)
+
 # 事件类型：thinking / tool / reply / done（meta 由 SSE 服务端补发）
 EVENT_THINKING = "thinking"
 EVENT_TOOL = "tool"
 EVENT_REPLY = "reply"
 EVENT_DONE = "done"
+EVENT_PROGRESS = "progress"
 
 
 def _content_text(response) -> str:
@@ -88,6 +102,7 @@ class ChatAgent:
         tools=None,
         terminal_tools=None,
         emit_thinking: bool = True,
+        max_total_seconds: Optional[float] = None,
     ):
         self._settings = settings
         # 工具集注入缝：顾问用 advisor 工具集，默认仍是基础 [final_answer]。
@@ -99,6 +114,8 @@ class ChatAgent:
         self._terminal_tools = frozenset(terminal_tools) if terminal_tools is not None \
             else frozenset({FINAL_ANSWER_TOOL})
         self._emit_thinking = emit_thinking      # 思维链外显开关（顾问关闭）
+        # 整体时间预算（秒）：超时强制终结，防止用户无限等待（"1 分钟内给答案"的兜底）。
+        self._max_total_seconds = max_total_seconds
 
     @property
     def has_llm(self) -> bool:
@@ -160,9 +177,30 @@ class ChatAgent:
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         reply_text = EMPTY_REPLY
         rounds = 0
+        start_ts = time.monotonic()
 
         for rounds in range(1, self._max_llm_rounds + 1):
-            response = llm.invoke(working)
+            # 时间预算：超时立即终结，不再发起新一轮慢调用（"1 分钟内给答案"的兜底）。
+            if self._max_total_seconds is not None \
+                    and time.monotonic() - start_ts > self._max_total_seconds:
+                reply_text = self._handle_exhausted(
+                    "timeout", tool_log, thinking, event_sink)
+                break
+
+            # 进度事件：顾问关闭思维链（emit_thinking=False）时，仍发一条轻量"第几轮/正在调工具"
+            # 让 CLI/WebUI 在等待期也有反馈，不让用户干等（非原始思维链，无泄露）。
+            if not self._emit_thinking:
+                self._emit(event_sink, {
+                    "event": EVENT_PROGRESS,
+                    "text": f"第 {rounds}/{self._max_llm_rounds} 轮：正在调用工具分析…",
+                })
+
+            # 最后一轮：临时附加强制终结引导（不写入 working/历史，避免污染后续对话）。
+            invoke_messages = working
+            if rounds == self._max_llm_rounds:
+                invoke_messages = working + [SystemMessage(content=LAST_ROUND_HINT)]
+
+            response = llm.invoke(invoke_messages)
             working.append(response)
             self._accumulate_usage(usage, response)
 
@@ -210,13 +248,18 @@ class ChatAgent:
             if terminal:
                 break
         else:
-            # 轮次耗尽仍未获得终稿；补全最后一条 AI 消息未回填的 tool_result，保证历史可重放
-            last = working[-1]
-            for call in getattr(last, "tool_calls", None) or []:
-                working.append(
-                    ToolMessage(content="未执行（已达最大轮数）", tool_call_id=call.get("id", ""))
-                )
-            reply_text = MAX_ROUNDS_FALLBACK
+            # 轮次耗尽仍未获得终稿 → 交给 _handle_exhausted（默认 = MAX_ROUNDS_FALLBACK，
+            # 顾问覆写为有信息的降级答案）。
+            reply_text = self._handle_exhausted(
+                "rounds", tool_log, thinking, event_sink)
+
+        # 若最终走了"未终结"路径（timeout/rounds），最后一条 AI 消息可能带未回填的
+        # tool_result——补全保证历史可重放（OpenAI/Anthropic 网关 400 防护）。
+        last = working[-1]
+        for call in getattr(last, "tool_calls", None) or []:
+            working.append(
+                ToolMessage(content="未执行（已中止）", tool_call_id=call.get("id", ""))
+            )
 
         reply_obj = ChatReply(
             reply=reply_text,
@@ -243,6 +286,15 @@ class ChatAgent:
         顾问覆写为「必须走 submit_team_advice」的提示（拒绝自由文本终稿）。
         """
         return content or EMPTY_REPLY
+
+    def _handle_exhausted(self, reason: str, tool_log: list[dict], thinking: list[str],
+                          event_sink: Optional[Callable[[dict], None]]) -> str:
+        """轮次耗尽（reason="rounds"）或超时（reason="timeout"）的兜底钩子。
+
+        默认返回 MAX_ROUNDS_FALLBACK；顾问覆写为「列出已查了哪些工具 + 缺什么」的
+        有信息降级答案，避免用户拿到一句空话。
+        """
+        return MAX_ROUNDS_FALLBACK
 
     @staticmethod
     def _accumulate_usage(usage: dict, response) -> None:

@@ -15,7 +15,7 @@ class _FakeAgent:
     def __init__(self, settings):
         self.settings = settings
 
-    def chat(self, message, history=None):
+    def chat(self, message, history=None, event_sink=None):
         history = list(history or [])
         reply = f"[离线回复] 收到你的消息：{message}"
         return ChatReply(reply=reply, history=history + [message], offline=True)
@@ -24,7 +24,7 @@ class _FakeAgent:
 class _RichAgent:
     """在线风格 agent：带思考与工具调用（测 --debug 打印）。"""
 
-    def chat(self, message, history=None):
+    def chat(self, message, history=None, event_sink=None):
         return ChatReply(
             reply="答案是 14.0",
             tool_calls=[{"name": "echo", "args": {"expression": "3.5*4"}, "result": "14.0"}],

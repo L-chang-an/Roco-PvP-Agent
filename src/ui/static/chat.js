@@ -83,6 +83,16 @@ function addThinking(text) {
   scrollToBottom();
 }
 
+function addProgress(text) {
+  // 轻量进度行：等待期反馈（第几轮/正在调工具），非原始思维链。
+  const t = ensureTurn();
+  const el = document.createElement("div");
+  el.className = "reason-progress";
+  el.textContent = "⏳ " + text;
+  t.body.appendChild(el);
+  scrollToBottom();
+}
+
 function addTool(name, args, result) {
   const t = ensureTurn();
   t.tools.push({ name });
@@ -202,6 +212,9 @@ function onEvent(data) {
       break;
     case "thinking":
       addThinking(data.text);
+      break;
+    case "progress":
+      addProgress(data.text);
       break;
     case "tool":
       addTool(data.name, data.args, data.result);
