@@ -483,6 +483,17 @@ def _run_evolve_battles_cli(args) -> int:
     gm, mem = out["globalmem"], out["memory"]
     console.print(f"[bold]final[/bold] GlobalMem active={gm['active']} total={gm['total']} "
                   f"· 局部记忆 entries={mem['entries']}")
+    u, hit = out["usage"], out["cache_hit_rate"]
+    if u:
+        parts = [f"输入 {u.get('input_tokens', 0)}", f"输出 {u.get('output_tokens', 0)}"]
+        if hit is not None:
+            parts.append(f"提示缓存命中 {hit:.1%}"
+                         f"（读 {u.get('cache_read_tokens', 0)}"
+                         + (f" / 未命中 {u['cache_miss_tokens']}"
+                            if "cache_miss_tokens" in u else "") + "）")
+        else:
+            parts.append("提示缓存：网关未上报（无法判断是否生效）")
+        console.print("  token: " + " · ".join(parts))
     console.print(f"产物 → {out['out_dir']}")
     return 0
 

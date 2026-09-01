@@ -41,6 +41,7 @@ from roco_pvp_agent.battle.evolution.run import _make_memory_retriever
 from roco_pvp_agent.battle.player import FakeLLMPlayer, LLMPlayer
 from roco_pvp_agent.battle.selfplay import build_player, run_selfplay
 from roco_pvp_agent.config import get_settings
+from roco_pvp_agent.llm import cache_hit_rate
 
 
 class _OfflineGlobalMemPlayer:
@@ -225,11 +226,18 @@ def run_battles(*, n: int, seed: int = 7, out_dir: str = "artifacts/gm",
                            battle_id=f"gm-{bseed}-{i}", settings=settings)
         record = out["record"]
         analysis = analyze_record(record)
+        # 提示缓存观测：只有真实 LLMPlayer 有 usage（离线玩家无）。
+        battle_usage: dict[str, int] = {}
+        for p in players.values():
+            for k, v in (getattr(p, "usage", None) or {}).items():
+                battle_usage[k] = battle_usage.get(k, 0) + v
         row: dict = {"battle": i, "seed": bseed, "instance": inst.name,
                      "winner": record.get("winner"), "turns": out["turn_count"],
                      "replay_ok": out["replay_ok"],
                      "loaded": {s: record.get(f"global_mem_{s}") for s in ("a", "b")},
-                     "globalmem": {}, "memory": {}, "analyst": "skipped"}
+                     "globalmem": {}, "memory": {}, "analyst": "skipped",
+                     "usage": battle_usage,
+                     "cache_hit_rate": cache_hit_rate(battle_usage)}
 
         # ③④ 双视角分析 + GlobalMem 落库
         if analyst is not None:
@@ -270,8 +278,13 @@ def run_battles(*, n: int, seed: int = 7, out_dir: str = "artifacts/gm",
             row["ab"] = ab
         battles.append(row)
 
+    total_usage: dict[str, int] = {}
+    for r in battles:
+        for k, v in r["usage"].items():
+            total_usage[k] = total_usage.get(k, 0) + v
     return {
         "n": n, "seed": seed, "out_dir": str(out_path), "battles": battles, "ab": ab_runs,
+        "usage": total_usage, "cache_hit_rate": cache_hit_rate(total_usage),
         "globalmem": {"dir": globalmem_dir, "active": gstore.count() if gstore else 0,
                       "total": len(gstore.all()) if gstore else 0},
         "memory": {"dir": memory_dir, "entries": mstore.count() if mstore else 0},

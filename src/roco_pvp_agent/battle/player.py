@@ -23,7 +23,7 @@ from roco_pvp_agent.battle.prompts import (
     render_replacement,
 )
 from roco_pvp_agent.config import Settings
-from roco_pvp_agent.llm import build_chat_llm
+from roco_pvp_agent.llm import accumulate_usage, build_chat_llm
 
 # 固定前缀：真实 LLM 的回复是自由的，假 LLM 每次都以这串开头，构成「固定回复」。
 FIXED_REPLY_PREFIX = "（假LLM）快速思考后决定："
@@ -209,6 +209,9 @@ class LLMPlayer:
         self._llm = build_chat_llm(settings, self._tools, llm=llm)   # llm= 为测试注入缝
         self._history: list = []
         self._turn_log: list[dict] = []   # R2：逐回合 (turn/situation_key/action/prediction)
+        # 提示缓存观测：token 用量 + 缓存命中（本局累计；键只在网关真的返回时出现）。
+        # 对战侧是 token 大头（一局 ~90% 输入是重复前缀），命中率必须可测才谈得上优化。
+        self.usage: dict[str, int] = {}
 
     # ── Player Protocol ──
     def on_match_start(self, observation: dict) -> None:
@@ -220,6 +223,12 @@ class LLMPlayer:
 
         G2：`global_mem` 检索 Top-1 → `[全局经验]` 块同样进系统提示（整局不变，
         接管原 Playbook 的注入位）。开局全员存活 → matchup_key 稳定，不会中途漂移。
+
+        **拼接顺序是提示缓存的正确性约束，不要"优化"**：自动前缀缓存要求从第 0 个 token
+        起精确匹配，所以必须**最静态的排最前**——
+            `BATTLE_PLAYER_SYSTEM_PROMPT`（跨局恒定）→ `[战术手册]`（每局可能变）
+            → `[全局经验]`（每局都变）。
+        若把 `[全局经验]` 挪到最前，跨局连基础提示都无法命中缓存。
         """
         prompt = BATTLE_PLAYER_SYSTEM_PROMPT
         if self._strategy:
@@ -256,6 +265,7 @@ class LLMPlayer:
         for _attempt in range(self._max_retries + 1):
             try:
                 resp = self._llm.invoke(self._history)
+                accumulate_usage(self.usage, resp)     # 提示缓存观测
             except Exception:
                 dec = self._random.decide(observation, legal, items)   # 异常直接兜底
                 self._record_turn(observation, dec, "")
@@ -304,6 +314,7 @@ class LLMPlayer:
         for _attempt in range(self._max_retries + 1):
             try:
                 resp = self._llm.invoke(self._history)
+                accumulate_usage(self.usage, resp)     # 提示缓存观测
             except Exception:
                 return self._random.choose_replacement(observation, bench)
             self._history.append(resp)

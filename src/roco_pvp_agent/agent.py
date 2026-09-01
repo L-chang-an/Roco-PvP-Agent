@@ -246,12 +246,13 @@ class ChatAgent:
 
     @staticmethod
     def _accumulate_usage(usage: dict, response) -> None:
-        """把一次 LLM 响应的 usage_metadata 累加进统计（网关不给 usage 时保持 0）。"""
-        meta = getattr(response, "usage_metadata", None) or {}
-        for key in ("input_tokens", "output_tokens", "total_tokens"):
-            val = meta.get(key)
-            if isinstance(val, int):
-                usage[key] += val
+        """把一次 LLM 响应的用量累加进统计（网关不给 usage 时保持 0）。
+
+        提示缓存命中字段（`cache_read_tokens` 等）**只在网关真的返回时才出现**——
+        不塞零值，避免把「网关不报」与「零命中」混为一谈。
+        """
+        from .llm import accumulate_usage
+        accumulate_usage(usage, response)
 
     def _invoke_tool(self, tools_map: dict, call: dict) -> str:
         """执行单个工具调用；任何异常都吞成错误字符串（宁失败不抛）。"""
