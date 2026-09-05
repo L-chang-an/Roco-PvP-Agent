@@ -11,8 +11,11 @@
 """
 
 from dataclasses import dataclass, field
+import inspect
+import queue
+import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Collection, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -24,25 +27,36 @@ from langchain_core.messages import (
 
 from .config import Settings
 from .llm import build_chat_llm
-from .tools import FINAL_ANSWER_TOOL, build_agent_tools
+from .tooling import (
+    DispatchContext,
+    ToolDispatcher,
+    ToolErrorCode,
+    ToolRegistry,
+    ToolVisibility,
+)
+from .tools import build_agent_registry
 
 EMPTY_REPLY = "（模型未返回有效回复）"
 OFFLINE_HINT = "未配置 LLM_API_KEY，当前处于离线模式，仅返回确定性回复。请配置 .env 后重启以获得完整对话能力。"
-MAX_ROUNDS_FALLBACK = "（达到最大轮数仍未获得最终答案，请稍后再试或调整问题）"
+EXECUTION_BUDGET_FALLBACK = "（本轮未能在执行预算内完成终稿，请稍后重试或缩小问题范围。）"
 
 # 最后一轮的强制终结引导（Harness 注入，避免模型无限调非终结工具耗尽轮次）。
 # 只在最后一轮 invoke 前临时附加到消息列表，**不写入历史**（不污染后续对话）。
 LAST_ROUND_HINT = (
-    "（Harness 提示：这是最后一轮。你已收集足够信息，请立即调用终结工具"
-    "（submit_team_advice 或 final_answer）给出终稿，不要再调用其他工具。）"
+    "（Harness 提示：这是最后一轮。你已收集足够信息，请立即调用当前可用的"
+    "终结工具给出终稿，不要再调用查询或分析工具。）"
 )
 
-# 事件类型：thinking / tool / reply / done（meta 由 SSE 服务端补发）
+# 事件类型：progress / thinking / tool / reply / done（meta 由 SSE 服务端补发）
 EVENT_THINKING = "thinking"
 EVENT_TOOL = "tool"
 EVENT_REPLY = "reply"
 EVENT_DONE = "done"
 EVENT_PROGRESS = "progress"
+
+
+class _BudgetExpired(TimeoutError):
+    """一次 LLM/工具调用超过本轮对话剩余墙钟预算。"""
 
 
 def _content_text(response) -> str:
@@ -86,6 +100,7 @@ class ChatReply:
     history: list[BaseMessage] = field(default_factory=list)
     offline: bool = False
     rounds: int = 0
+    loaded_tools: tuple[str, ...] = ()
     usage: dict[str, int] = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     )
@@ -100,19 +115,19 @@ class ChatAgent:
         system_prompt: str = "",
         max_llm_rounds: int = 3,
         tools=None,
-        terminal_tools=None,
+        registry: ToolRegistry | None = None,
         emit_thinking: bool = True,
         max_total_seconds: Optional[float] = None,
     ):
         self._settings = settings
-        # 工具集注入缝：顾问用 advisor 工具集，默认仍是基础 [final_answer]。
-        self._tools = tools if tools is not None else build_agent_tools()
+        if registry is not None and tools is not None:
+            raise ValueError("registry 与 tools 不能同时传入")
+        # ``tools`` 保留旧调用方/测试注入能力，进入循环前统一归一为实例级注册表。
+        self._registry = registry if registry is not None else build_agent_registry(tools)
+        self._dispatcher = ToolDispatcher(self._registry)
         self._llm = llm  # 测试注入缝
         self._system_prompt = system_prompt
         self._max_llm_rounds = max_llm_rounds
-        # 终结工具名集合（顾问 = submit_team_advice + final_answer）。
-        self._terminal_tools = frozenset(terminal_tools) if terminal_tools is not None \
-            else frozenset({FINAL_ANSWER_TOOL})
         self._emit_thinking = emit_thinking      # 思维链外显开关（顾问关闭）
         # 整体时间预算（秒）：超时强制终结，防止用户无限等待（"1 分钟内给答案"的兜底）。
         self._max_total_seconds = max_total_seconds
@@ -121,10 +136,21 @@ class ChatAgent:
     def has_llm(self) -> bool:
         return self._llm is not None or self._settings.has_api_key
 
-    def _get_llm(self):
+    def new_tool_visibility(self) -> ToolVisibility:
+        """为一个新聊天会话创建独立的延迟工具加载状态。"""
+
+        return ToolVisibility(self._registry)
+
+    def _get_llm(self, visible_tool_names: Collection[str] | None = None):
         if self._llm is not None:
             return self._llm
-        return build_chat_llm(self._settings, self._tools)
+        if visible_tool_names is None:
+            visible_tool_names = {entry.name for entry in self._registry.immediate_entries()}
+        return build_chat_llm(
+            self._settings,
+            self._registry.model_tools(visible_tool_names),
+            schema_digest=self._registry.schema_digest(visible_tool_names),
+        )
 
     # ---------- 对外入口 ----------
 
@@ -134,11 +160,19 @@ class ChatAgent:
         history: Optional[list[BaseMessage]] = None,
         *,
         event_sink: Optional[Callable[[dict], None]] = None,
+        tool_visibility: ToolVisibility | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> ChatReply:
         history = list(history or [])
+        visibility = tool_visibility or self.new_tool_visibility()
+        if visibility.registry is not self._registry:
+            raise ValueError("tool_visibility 不属于当前 Agent 的 ToolRegistry")
         if not self.has_llm:
-            return self._offline_chat(message, history, event_sink)
-        return self._run_online(message, history, event_sink)
+            return self._offline_chat(message, history, event_sink, visibility)
+        return self._run_online(
+            message, history, event_sink, visibility,
+            cancel_event=cancel_event,
+        )
 
     # ---------- 离线降级 ----------
 
@@ -147,13 +181,20 @@ class ChatAgent:
         message: str,
         history: list[BaseMessage],
         event_sink: Optional[Callable[[dict], None]],
+        visibility: ToolVisibility,
     ) -> ChatReply:
         reply_text = f"[离线回复] 收到你的消息：{message}\n\n{OFFLINE_HINT}"
         history = history + [
             HumanMessage(content=message),
             AIMessage(content=reply_text),
         ]
-        reply_obj = ChatReply(reply=reply_text, history=history, offline=True, rounds=0)
+        reply_obj = ChatReply(
+            reply=reply_text,
+            history=history,
+            offline=True,
+            rounds=0,
+            loaded_tools=visibility.loaded_names(),
+        )
         self._emit_reply_events(event_sink, reply_obj)
         return reply_obj
 
@@ -164,13 +205,13 @@ class ChatAgent:
         message: str,
         history: list[BaseMessage],
         event_sink: Optional[Callable[[dict], None]],
+        visibility: ToolVisibility,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> ChatReply:
         working: list[BaseMessage] = [SystemMessage(content=self._system_prompt)]
         working.extend(history)
         working.append(HumanMessage(content=message))
-
-        llm = self._get_llm()
-        tools_map = {getattr(t, "name", ""): t for t in self._tools}
 
         tool_log: list[dict] = []
         thinking: list[str] = []
@@ -178,11 +219,18 @@ class ChatAgent:
         reply_text = EMPTY_REPLY
         rounds = 0
         start_ts = time.monotonic()
+        dispatch_context = DispatchContext(
+            deadline=(start_ts + self._max_total_seconds)
+            if self._max_total_seconds is not None else None,
+            progress_callback=lambda text: self._emit(
+                event_sink, {"event": EVENT_PROGRESS, "text": text}),
+            visibility=visibility,
+            cancel_event=cancel_event or threading.Event(),
+        )
 
         for rounds in range(1, self._max_llm_rounds + 1):
             # 时间预算：超时立即终结，不再发起新一轮慢调用（"1 分钟内给答案"的兜底）。
-            if self._max_total_seconds is not None \
-                    and time.monotonic() - start_ts > self._max_total_seconds:
+            if self._remaining_seconds(start_ts) == 0:
                 reply_text = self._handle_exhausted(
                     "timeout", tool_log, thinking, event_sink)
                 break
@@ -195,12 +243,41 @@ class ChatAgent:
                     "text": f"第 {rounds}/{self._max_llm_rounds} 轮：正在调用工具分析…",
                 })
 
+            # 每轮从会话加载状态派生同一份“模型可见 + Dispatcher 可执行”工具集合。
+            # tool_search 在本轮加载的 schema 只从下一轮起生效，模型必须先看到契约。
+            visible_names = visibility.visible_names()
+            dispatch_context.visible_tool_names = set(visible_names)
+            directory_prompt = visibility.directory_prompt()
+            system_content = self._system_prompt
+            if directory_prompt:
+                system_content = f"{system_content}\n\n{directory_prompt}" \
+                    if system_content else directory_prompt
+            working[0] = SystemMessage(content=system_content)
+            llm = self._get_llm(visible_names)
+
             # 最后一轮：临时附加强制终结引导（不写入 working/历史，避免污染后续对话）。
             invoke_messages = working
             if rounds == self._max_llm_rounds:
                 invoke_messages = working + [SystemMessage(content=LAST_ROUND_HINT)]
 
-            response = llm.invoke(invoke_messages)
+            try:
+                request_timeout = self._remaining_seconds(start_ts)
+                response = self._run_with_budget(
+                    lambda: self._invoke_llm(llm, invoke_messages, request_timeout),
+                    start_ts=start_ts,
+                    event_sink=event_sink,
+                    waiting_text=f"第 {rounds}/{self._max_llm_rounds} 轮：模型仍在整理证据…",
+                )
+            except _BudgetExpired:
+                reply_text = self._handle_exhausted(
+                    "timeout", tool_log, thinking, event_sink)
+                break
+            except Exception:
+                # API 超时、断网、限流、响应解析失败都不能直接冒泡到 CLI/WebUI。
+                # 详细异常可能带服务端信息，不进入用户回复；统一走子类的安全降级。
+                reply_text = self._handle_exhausted(
+                    "llm_error", tool_log, thinking, event_sink)
+                break
             working.append(response)
             self._accumulate_usage(usage, response)
 
@@ -224,31 +301,45 @@ class ChatAgent:
                 thinking.append(content)
                 self._emit(event_sink, {"event": EVENT_THINKING, "text": content})
 
-            # 逐个执行工具调用（一次回复可带多个，顺序执行）。
-            # 关键：每个 tool_use 都必须紧跟 tool_result（含终结工具），
-            # 否则历史重放时 OpenAI/Anthropic 网关会报 400（tool_use 无对应 tool_result）。
-            terminal = False
-            for call in calls:
-                name = call.get("name", "")
-                args = call.get("args", {})
-                call_id = call.get("id", "")
+            # 所有工具统一穿过 Dispatcher；Agent Loop 只消费结果，不识别具体工具名。
+            # dispatch_many 保证成功终结后的剩余调用也获得 skipped ToolMessage。
+            results = self._dispatcher.dispatch_many(calls, dispatch_context)
+            terminal_result = None
+            for result in results:
+                working.append(result.to_tool_message())
+                entry = self._registry.get(result.call.name)
+                terminal_capable = bool(entry and entry.terminal_on_success)
 
-                if name in self._terminal_tools:
-                    result_content, terminal = self._handle_terminal(name, args, call_id)
-                    if terminal:
-                        reply_text = result_content
-                    working.append(ToolMessage(content=result_content, tool_call_id=call_id))
-                    continue
+                # 保持 ChatReply/UI 既有语义：终结工具不作为取证工具展示；其调用仍完整
+                # 存在于消息历史和 Dispatcher 结果中，协议可重放。
+                if not terminal_capable:
+                    log_record = result.to_log_record()
+                    tool_log.append(log_record)
+                    self._emit(event_sink, {
+                        "event": EVENT_TOOL,
+                        "name": log_record["name"],
+                        "args": log_record["args"],
+                        "result": log_record["result"],
+                        "ok": log_record["ok"],
+                        "error_code": log_record["error_code"],
+                    })
+                if result.terminal and terminal_result is None:
+                    terminal_result = result
 
-                result = self._invoke_tool(tools_map, call)
-                tool_log.append({"name": name, "args": args, "result": result})
-                working.append(ToolMessage(content=result, tool_call_id=call_id))
-                self._emit(event_sink, {"event": EVENT_TOOL, "name": name, "args": args, "result": result})
+            if terminal_result is not None:
+                reply_text = terminal_result.content
+                break
 
-            if terminal:
+            budget_exhausted = (
+                self._remaining_seconds(start_ts) == 0
+                and any(result.error_code is ToolErrorCode.TIMEOUT for result in results)
+            )
+            if budget_exhausted:
+                reply_text = self._handle_exhausted(
+                    "timeout", tool_log, thinking, event_sink)
                 break
         else:
-            # 轮次耗尽仍未获得终稿 → 交给 _handle_exhausted（默认 = MAX_ROUNDS_FALLBACK，
+            # 轮次耗尽仍未获得终稿 → 交给 _handle_exhausted（默认通用预算降级，
             # 顾问覆写为有信息的降级答案）。
             reply_text = self._handle_exhausted(
                 "rounds", tool_log, thinking, event_sink)
@@ -267,34 +358,99 @@ class ChatAgent:
             thinking=thinking,
             history=working[1:],
             rounds=rounds,
+            loaded_tools=visibility.loaded_names(),
             usage=usage,
         )
         self._emit_reply_events(event_sink, reply_obj)
         return reply_obj
 
-    def _handle_terminal(self, name: str, args: dict, call_id: str) -> tuple[str, bool]:
-        """终结工具处理钩子。返回 (tool_result_content, terminal)。
-
-        默认 = final_answer 语义：取 text 为终稿并终结。顾问覆写为解析结构化建议 +
-        EvidenceGate 校验（失败时 terminal=False 让模型修复一次）。
-        """
-        return str(args.get("text", "")) or EMPTY_REPLY, True
-
     def _handle_no_tool_call(self, content: str) -> str:
         """无工具调用的兜底钩子。默认 = 以 content 为终稿（空则 EMPTY_REPLY）。
 
-        顾问覆写为「必须走 submit_team_advice」的提示（拒绝自由文本终稿）。
+        顾问沿用此兜底：模型直接输出正文时也能及时终结，不强迫再绕一轮工具。
         """
         return content or EMPTY_REPLY
 
     def _handle_exhausted(self, reason: str, tool_log: list[dict], thinking: list[str],
                           event_sink: Optional[Callable[[dict], None]]) -> str:
-        """轮次耗尽（reason="rounds"）或超时（reason="timeout"）的兜底钩子。
+        """轮次耗尽、超时或 LLM 异常的兜底钩子。
 
-        默认返回 MAX_ROUNDS_FALLBACK；顾问覆写为「列出已查了哪些工具 + 缺什么」的
+        默认返回通用预算降级；顾问覆写为「列出已查了哪些工具 + 缺什么」的
         有信息降级答案，避免用户拿到一句空话。
         """
-        return MAX_ROUNDS_FALLBACK
+        return EXECUTION_BUDGET_FALLBACK
+
+    def _remaining_seconds(self, start_ts: float) -> Optional[float]:
+        """返回总预算剩余秒数；未配置预算时返回 None。"""
+        if self._max_total_seconds is None:
+            return None
+        return max(0.0, self._max_total_seconds - (time.monotonic() - start_ts))
+
+    @staticmethod
+    def _invoke_llm(llm, messages, timeout: Optional[float]):
+        """调用模型；支持 kwargs 的真实客户端同时接收动态 request timeout。
+
+        测试 fake 通常只有 ``invoke(messages)``，因此先检查签名，避免用 TypeError
+        猜测后重试（重试可能造成一次真实请求被重复计费）。
+        """
+        if timeout is not None:
+            try:
+                params = inspect.signature(llm.invoke).parameters.values()
+                accepts_timeout = any(
+                    p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD
+                    for p in params
+                )
+            except (TypeError, ValueError):
+                accepts_timeout = False
+            if accepts_timeout:
+                return llm.invoke(messages, timeout=max(0.001, timeout))
+        return llm.invoke(messages)
+
+    def _run_with_budget(
+        self,
+        fn: Callable[[], object],
+        *,
+        start_ts: float,
+        event_sink: Optional[Callable[[dict], None]],
+        waiting_text: str,
+    ):
+        """在剩余墙钟预算内执行阻塞调用，并每 5 秒发一次安全进度摘要。
+
+        Python 无法可靠中断正在进行的同步 HTTP/工具调用，因此使用 daemon worker 隔离：
+        到期后主对话立即返回降级答案，迟到结果会被丢弃。真实 LLM 客户端自身的
+        request timeout 仍作为第二层资源回收保护。
+        """
+        remaining = self._remaining_seconds(start_ts)
+        if remaining is None:
+            return fn()
+        if remaining <= 0:
+            raise _BudgetExpired
+
+        result_queue: "queue.Queue[tuple[bool, object]]" = queue.Queue(maxsize=1)
+
+        def worker() -> None:
+            try:
+                result_queue.put((True, fn()))
+            except BaseException as exc:  # 在线程边界传回，主线程统一处理
+                result_queue.put((False, exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+        deadline = time.monotonic() + remaining
+        heartbeat = 5.0
+        while True:
+            wait_for = min(heartbeat, max(0.0, deadline - time.monotonic()))
+            if wait_for <= 0:
+                raise _BudgetExpired
+            try:
+                ok, value = result_queue.get(timeout=wait_for)
+            except queue.Empty:
+                if time.monotonic() >= deadline:
+                    raise _BudgetExpired
+                self._emit(event_sink, {"event": EVENT_PROGRESS, "text": waiting_text})
+                continue
+            if ok:
+                return value
+            raise value
 
     @staticmethod
     def _accumulate_usage(usage: dict, response) -> None:
@@ -305,18 +461,6 @@ class ChatAgent:
         """
         from .llm import accumulate_usage
         accumulate_usage(usage, response)
-
-    def _invoke_tool(self, tools_map: dict, call: dict) -> str:
-        """执行单个工具调用；任何异常都吞成错误字符串（宁失败不抛）。"""
-        name = call.get("name", "")
-        tool = tools_map.get(name)
-        if tool is None:
-            return f"未知工具：{name}"
-        try:
-            result = tool.invoke(call.get("args", {}))
-            return str(result)
-        except Exception as exc:
-            return f"工具 {name} 执行失败：{exc}"
 
     # ---------- 事件发射 ----------
 

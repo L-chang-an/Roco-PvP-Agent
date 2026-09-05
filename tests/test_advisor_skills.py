@@ -6,6 +6,7 @@ import hashlib
 import json
 
 import pytest
+from langchain_core.tools import tool
 
 from roco_pvp_agent.advisor.skills import (
     Skill,
@@ -13,6 +14,26 @@ from roco_pvp_agent.advisor.skills import (
     register_skill,
     retrieve_team_skill,
 )
+from roco_pvp_agent.tooling import ToolEntry, ToolRegistry
+
+
+@tool("validate_team")
+def _validate_team_stub() -> str:
+    """测试用合法阵容校验工具。"""
+    return "ok"
+
+
+@tool("newly_registered_tool")
+def _newly_registered_tool_stub() -> str:
+    """测试 Registry 新增能力无需同步第二份白名单。"""
+    return "ok"
+
+
+def _skill_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(ToolEntry(tool=_validate_team_stub))
+    registry.register(ToolEntry(tool=_newly_registered_tool_stub))
+    return registry
 
 
 def test_load_skills_reads_json():
@@ -45,18 +66,18 @@ def test_register_skill_forces_probationary():
 
 
 def test_retrieve_team_skill_active_and_trigger():
-    out = retrieve_team_skill("帮我组队")
+    out = retrieve_team_skill("帮我组队", registry=_skill_registry())
     assert out, "内置 roco-team-advisor 应被触发"
     assert all(s["name"] for s in out)
     assert len(out) <= 3
 
 
-def test_retrieve_team_skill_trims_allowed_tools(tmp_path, monkeypatch):
-    """allowed_tools 里不在顾问工具白名单的一律裁剪。"""
+def test_retrieve_team_skill_trims_allowed_tools_from_registry(tmp_path, monkeypatch):
+    """Skill 权限从 Registry 派生：新增已注册工具保留，未知工具裁剪。"""
     spec = {
         "name": "evil-skill", "version": 1, "status": "active", "trigger": ["组队"],
         "boundary": [], "verification": [],
-        "allowed_tools": ["validate_team", "execute_code", "open_file"],
+        "allowed_tools": ["validate_team", "newly_registered_tool", "execute_code"],
         "body": "body", "hash": hashlib.sha256("body".encode("utf-8")).hexdigest(),
     }
     bad_dir = tmp_path / "skills"
@@ -64,6 +85,6 @@ def test_retrieve_team_skill_trims_allowed_tools(tmp_path, monkeypatch):
     (bad_dir / "evil.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr("roco_pvp_agent.advisor.skills.SKILLS_DIR", bad_dir)
 
-    out = retrieve_team_skill("组队")
+    out = retrieve_team_skill("组队", registry=_skill_registry())
     assert len(out) == 1
-    assert out[0]["allowed_tools"] == ["validate_team"]  # execute_code/open_file 被裁剪
+    assert out[0]["allowed_tools"] == ["validate_team", "newly_registered_tool"]

@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, ValidationError
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from environment.datafingerprint import data_digest
 from environment.dataset import DataSource
-from environment.rules import DEFAULT_RULES, BattleRules
+from environment.rules import BattleRules
 from environment.teambuilder import TeamPick
 
 from roco_pvp_agent.advisor.validate import validate_team
@@ -22,7 +24,13 @@ from roco_pvp_agent.advisor.validate import validate_team
 _UNCERTAINTY_MARKERS = ("理论构筑", "启发式", "样本不足")
 
 
-class UnitAdvice(BaseModel):
+class _StrictAdviceModel(BaseModel):
+    """终稿协议的公共严格配置。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class UnitAdvice(_StrictAdviceModel):
     """单只精灵的组队建议（== TeamPick + 分工/理由/证据）。"""
 
     spirit: str
@@ -35,7 +43,7 @@ class UnitAdvice(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
-class EvidenceSummary(BaseModel):
+class EvidenceSummary(_StrictAdviceModel):
     """证据摘要：catalog / human / selfplay / simulation 四段分离（不提供合并字段）。"""
 
     catalog: dict = Field(default_factory=dict)
@@ -44,10 +52,24 @@ class EvidenceSummary(BaseModel):
     simulation: dict = Field(default_factory=dict)
 
 
-class TeamAdviceSchema(BaseModel):
+class AdviceRulesUsed(_StrictAdviceModel):
+    """终稿声明采用的对局规则；实战建议只允许 VALID 数据源。"""
+
+    team_size: Literal[3, 6]
+    lives: int
+    source: Literal["VALID"]
+
+    @model_validator(mode="after")
+    def validate_lives(self) -> "AdviceRulesUsed":
+        if not 1 <= self.lives < self.team_size:
+            raise ValueError("lives 必须大于等于 1 且小于 team_size")
+        return self
+
+
+class TeamAdviceSchema(_StrictAdviceModel):
     """顾问结构化终稿。"""
 
-    rules_used: dict            # {team_size, lives, source}
+    rules_used: AdviceRulesUsed
     assumptions: list[str] = Field(default_factory=list)
     data_digest: str
     team: list[UnitAdvice]
@@ -85,8 +107,8 @@ def submit_team_advice(payload: dict, *, source: DataSource = DataSource.VALID) 
 
     # LegalityGate：把 UnitAdvice 转 TeamPick → validate_team（实战推荐只用 VALID）
     rules = BattleRules(
-        team_size=advice.rules_used.get("team_size", DEFAULT_RULES.team_size),
-        lives=advice.rules_used.get("lives", DEFAULT_RULES.lives),
+        team_size=advice.rules_used.team_size,
+        lives=advice.rules_used.lives,
     )
     picks = [TeamPick(spirit=u.spirit, skills=list(u.skills), bloodline=u.bloodline,
                       nature=u.nature, iv=dict(u.iv)) for u in advice.team]

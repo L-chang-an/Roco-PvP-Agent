@@ -55,7 +55,7 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| Chat CLI / Web | 可用 | 支持多轮历史、SSE、工具调用和离线降级 |
+| Chat CLI / Web | 可用 | 支持多轮历史、SSE/CLI 实时进度、工具调用、55 秒墙钟预算和异常降级 |
 | 组队顾问 | 可用 | catalog 查询 DSL + validate 硬闸 + 轨迹证据 + 结构化终结 + 越界拒答 |
 | 精灵组队 | 可用 | 支持精灵、技能、血脉、性格和个体值配置与校验 |
 | 对战引擎 | 可用 | 支持状态推进、迷雾视角、事件过滤和确定性重放 |
@@ -74,6 +74,8 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 - CLI 单轮问答和交互式会话；
 - Web 端 SSE 流式输出；
 - 基于工具调用的 Agent 循环；
+- CLI/Web 实时展示安全的阶段摘要与工具调用（不展示原始思维链）；
+- 顾问目标 3 轮、最多 4 轮收敛，整体墙钟预算约 55 秒；超时或模型异常仍返回已核实的阶段结果；
 - 白名单查询 DSL（`search_spirits`）+ 精灵/技能档案 + 合法构筑项；
 - `validate_team` 结构化硬闸（未过校验的阵容绝不输出为推荐）；
 - 轨迹证据（版本闸/重放闸，人机与自博弈分开统计）；
@@ -354,15 +356,49 @@ uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 | `OPENAI_API_KEY` | 空 | `LLM_API_KEY` 缺失时的兼容变量 |
 | `LLM_MODEL` | `deepseek-chat` | 模型名称 |
 | `LLM_BASE_URL` | 空 | OpenAI 兼容接口地址；空值使用客户端默认地址 |
-| `LLM_TIMEOUT` | `60` | 请求超时时间，单位为秒 |
+| `LLM_TIMEOUT` | `60` | 通用 LLM 请求超时；Chat 顾问还会按 55 秒总预算动态收紧单次请求 |
 | `DEBUG` | `false` | 是否开启调试模式 |
 | `ROCO_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
 | `ROCO_UI_PORT` | `8001` | Web UI 监听端口 |
 
+### Chat Mode 只读查询沙箱
+
+沙箱默认关闭。先在部署/bootstrap 阶段构建独立运行时：
+
+```bash
+uv sync --project sandbox-runtime --python 3.12 --frozen
+```
+
+然后配置：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---:|---|
+| `SANDBOX_ENABLED` | `false` | 是否启用 `sandbox_python_query` |
+| `SANDBOX_BACKEND` | `auto` | `auto` / `macos` / `linux` / `docker`；生产建议显式指定 |
+| `SANDBOX_RUNTIME_PYTHON` | `sandbox-runtime/.venv/bin/python` | 受信任 CPython 3.12 解释器的绝对路径 |
+| `SANDBOX_MAX_CONCURRENCY` | `2` | 进程沙箱的全局并发上限 |
+
+模型只能提交 Python 代码与注册过的数据集 ID，不能提交路径、命令、依赖或资源上限。代码通过
+`game_data` 接口取数，并且必须且只能调用一次 `emit_result`：
+
+```python
+from game_data import load_dataset, emit_result
+
+skills = load_dataset("full_skills")
+emit_result({"count": len(skills)})
+```
+
+`emit_result` 只接受 JSON 基础类型及可归一化的 DataFrame、Series、NumPy 数组/标量。
+
+- macOS 后端依赖系统 `/usr/bin/sandbox-exec`。
+- Linux 与 WSL2 共用 `bubblewrap + libseccomp`；WSL1 不受支持。建议把项目、数据与运行时放在 WSL 文件系统内，而不是 `/mnt/c`。
+- Docker 协议已经冻结，但当前实现会明确报告 `docker_backend_not_implemented`，不会被 `auto` 自动选中。
+- 任一必需能力或探针不可用时，健康状态变为 `degraded` 且工具不注册；系统绝不会退回普通 `subprocess` 执行用户代码。
+
 ### 实验性记忆与 GlobalMem 配置
 
 > [!NOTE]
-> 这些参数**不从环境变量读取**——`load_settings()` 只解析上表中的 LLM/UI 变量。
+> 这些参数**不从环境变量读取**——`load_settings()` 只解析上表中的 LLM 与沙箱变量。
 > 它们是 `Settings` 的字段，通过程序注入或对应的 CLI 参数（如 `--memory-dir`、
 > `--globalmem-dir`）生效。
 

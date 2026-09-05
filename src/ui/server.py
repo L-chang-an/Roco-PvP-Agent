@@ -34,6 +34,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # 队列结束哨兵：后台线程塞完所有事件后塞入，SSE 生成器据此断开。
 _SENTINEL = object()
+SERVER_ERROR_REPLY = "（服务暂时异常，已安全结束本次请求，请稍后重试。）"
 
 
 class ChatBody(BaseModel):
@@ -58,12 +59,21 @@ def _run_chat(
     session_id: str,
     message: str,
     put: Callable[[object], None],
+    cancel_event: threading.Event,
 ) -> None:
     """后台线程入口：跑一次对话，事件逐个入队；任何异常降级为错误回复（宁失败不抛）。"""
     try:
-        context.chat(message, session_id, event_sink=put)
-    except Exception as exc:
-        put({"event": EVENT_REPLY, "text": f"（服务端错误：{exc}）", "offline": False, "rounds": 0})
+        context.chat(
+            message, session_id, event_sink=put, cancel_event=cancel_event)
+    except Exception:
+        put({
+            "event": EVENT_REPLY,
+            "text": SERVER_ERROR_REPLY,
+            "offline": False,
+            "rounds": 0,
+        })
+        # 前端只在 done 时解除输入框 busy 状态；异常路径也必须完整终结事件流。
+        put({"event": EVENT_DONE})
     finally:
         put(_SENTINEL)
 
@@ -95,7 +105,11 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"status": "ok"}
+        sandbox = app.state.agent.sandbox_health
+        return {
+            "status": "degraded" if sandbox.enabled and not sandbox.healthy else "ok",
+            "sandbox": sandbox.to_public_dict(),
+        }
 
     @app.get("/api/config")
     def config() -> dict:
@@ -113,7 +127,19 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     def chat_sync(body: ChatBody) -> dict:
         ctx = app.state.context
         session_id = body.session_id or ctx.new_session()
-        reply = ctx.chat(body.message, session_id)
+        try:
+            reply = ctx.chat(body.message, session_id)
+        except Exception:
+            # SSE 不可用时前端会走此同步兜底；异常也返回稳定 JSON，避免 500/白屏。
+            return {
+                "session_id": session_id,
+                "reply": SERVER_ERROR_REPLY,
+                "thinking": [],
+                "tool_calls": [],
+                "offline": False,
+                "rounds": 0,
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            }
         return {
             "session_id": session_id,
             "reply": reply.reply,
@@ -134,19 +160,24 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
         session_id = session_id or ctx.new_session()
 
         events: "queue.Queue" = queue.Queue()
+        cancel_event = threading.Event()
         events.put_nowait(_meta_event(session_id))
         threading.Thread(
             target=_run_chat,
-            args=(ctx, session_id, message, events.put_nowait),
+            args=(ctx, session_id, message, events.put_nowait, cancel_event),
             daemon=True,
         ).start()
 
         async def gen():
-            while True:
-                item = await asyncio.to_thread(events.get)
-                if item is _SENTINEL:
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            try:
+                while True:
+                    item = await asyncio.to_thread(events.get)
+                    if item is _SENTINEL:
+                        break
+                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            finally:
+                # 客户端断开 SSE 时，协作式取消会一路传到沙箱进程组。
+                cancel_event.set()
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 

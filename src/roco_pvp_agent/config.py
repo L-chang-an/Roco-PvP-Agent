@@ -4,9 +4,10 @@
 """
 
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Settings(BaseModel):
@@ -17,6 +18,12 @@ class Settings(BaseModel):
     base_url: str = ""  # 空则走 OpenAI 官方默认
     timeout: float = 60.0
     debug: bool = False
+
+    # Chat Mode 只读查询沙箱。默认关闭；生产应显式指定后端与独立 CPython 3.12。
+    sandbox_enabled: bool = False
+    sandbox_backend: Literal["auto", "macos", "linux", "docker"] = "auto"
+    sandbox_runtime_python: str = ""
+    sandbox_max_concurrency: int = Field(default=2, ge=1, le=32)
 
     # R1 记忆库配置（默认全关：memory_enabled=False 时检索/更新全链路 no-op）。
     memory_enabled: bool = False
@@ -55,6 +62,10 @@ def load_settings() -> Settings:
         base_url=os.getenv("LLM_BASE_URL", ""),
         timeout=float(os.getenv("LLM_TIMEOUT", "60")),
         debug=os.getenv("DEBUG", "").lower() in ("1", "true", "yes"),
+        sandbox_enabled=os.getenv("SANDBOX_ENABLED", "").lower() in ("1", "true", "yes"),
+        sandbox_backend=os.getenv("SANDBOX_BACKEND", "auto"),
+        sandbox_runtime_python=os.getenv("SANDBOX_RUNTIME_PYTHON", ""),
+        sandbox_max_concurrency=int(os.getenv("SANDBOX_MAX_CONCURRENCY", "2")),
     )
 
 

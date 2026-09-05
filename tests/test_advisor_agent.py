@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 from langchain_core.messages import AIMessage
 
 from environment.datafingerprint import data_digest
 from roco_pvp_agent.agent import ChatAgent
-from roco_pvp_agent.advisor.agent import TeamAdvisorAgent, _build_advisor_tools
+from roco_pvp_agent.advisor.agent import (
+    TeamAdvisorAgent,
+    _build_advisor_registry,
+)
+from roco_pvp_agent.tooling import ToolOutcome
 
 from fakes import ScriptedLLM, tool_call
 
@@ -46,6 +52,44 @@ def test_advisor_happy_path(agent_settings):
     assert "迪莫" in reply.reply                    # 终稿是结构化建议 JSON
     assert reply.rounds == 2
     assert [tc["name"] for tc in reply.tool_calls] == ["get_catalog_version"]
+
+
+def test_submit_team_advice_is_real_handler_with_registry_policy():
+    registry = _build_advisor_registry()
+    entry = registry.get("submit_team_advice")
+
+    assert entry is not None
+    assert entry.terminal_on_success is True
+    assert entry.retry_limit == 1
+    result = entry.tool.invoke({"payload": _valid_payload()})
+    assert isinstance(result, ToolOutcome)
+    assert result.ok is True
+    assert "迪莫" in result.content
+
+
+def test_advisor_retry_state_is_local_to_each_chat_call(agent_settings):
+    """同一共享 Agent 连续服务会话时，前一轮失败次数不能污染后一轮。"""
+
+    llm = ScriptedLLM([
+        # 第一次 chat：连续两次失败，触发降级。
+        AIMessage(content="", tool_calls=[
+            tool_call("submit_team_advice", {"payload": _illegal_payload()}, "a1")]),
+        AIMessage(content="", tool_calls=[
+            tool_call("submit_team_advice", {"payload": _illegal_payload()}, "a2")]),
+        # 第二次 chat：第一次失败仍应获得一次修复机会，随后成功。
+        AIMessage(content="", tool_calls=[
+            tool_call("submit_team_advice", {"payload": _illegal_payload()}, "b1")]),
+        AIMessage(content="", tool_calls=[
+            tool_call("submit_team_advice", {"payload": _valid_payload()}, "b2")]),
+    ])
+    agent = TeamAdvisorAgent(agent_settings, llm=llm)
+
+    first = agent.chat("组队")
+    second = agent.chat("组队")
+
+    assert "degraded" in first.reply
+    assert "迪莫" in second.reply and "degraded" not in second.reply
+    assert not hasattr(agent, "_advice_failed")
 
 
 def test_advisor_fix_once_then_success(agent_settings):
@@ -96,7 +140,8 @@ def test_advisor_no_thinking_emitted(agent_settings):
 
 def test_advisor_tools_invoke(tmp_path):
     """工具包装器端到端可 invoke（@tool schema 含嵌套 list 类型）。"""
-    tools = _build_advisor_tools(battles_dir=tmp_path, runs_dir=tmp_path)
+    tools = _build_advisor_registry(
+        battles_dir=tmp_path, runs_dir=tmp_path).model_tools()
     by_name = {getattr(t, "name", t.name): t for t in tools}
     team = [
         {"spirit": "迪莫", "skills": ["闪光"]},
@@ -114,3 +159,6 @@ def test_advisor_tools_invoke(tmp_path):
     assert "offensive_coverage" in by_name["analyze_team"].invoke({"team": team})
     assert "greedy" in by_name["simulate_matchups"].invoke(
         {"team": team, "opponents": [team], "seeds": [1]})
+    skills = json.loads(by_name["retrieve_team_skill"].invoke({"query": "帮我组队"}))
+    assert skills
+    assert set(skills[0]["allowed_tools"]).issubset(by_name)

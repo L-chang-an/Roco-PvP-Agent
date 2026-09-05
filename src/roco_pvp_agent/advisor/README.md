@@ -15,6 +15,7 @@
 | M3 | `analysis.py` | `analyze_team`（攻防覆盖 / 速度分层 / 角色缺口，纯计算） |
 | M3 | `simulate.py` | `simulate_matchups`（贪心换边多 seed 胜率下限） |
 | M3 | `agent.py` | `TeamAdvisorAgent` + 顾问工具集 |
+| M3 | `tool_schemas.py` | 全部顾问工具的严格 Pydantic 入参契约（含嵌套结构与枚举） |
 | M3 | `prompt.py` | 顾问 System Prompt（事实优先级 + 工作流程 + 纪律） |
 | M4 | `scope.py` | ScopeGate：确定性领域判定 + 越界/注入/模糊/欢迎固定模板 |
 | M4 | `skills.py` | 顾问 Skill 注册表（版本/哈希/工具白名单，新 Skill 默认 probationary） |
@@ -34,6 +35,19 @@
 
 - **纯确定性、可单测**：`catalog` / `validate` / `trajectory` / `analysis` / `simulate` / `advice` / `scope` / `skills` / `audit` / `eval` 均不依赖 LLM，核心功能无 key 可跑。
 - **DSL 不执行代码**：`search_spirits` 只编译到已审计的 `dataset.*` / `teambuilder.*` 只读函数。
-- **Skill 是数据不是指令**：`body`/`trigger` 只作流程建议，`allowed_tools` 代码级裁剪。
+- **输入契约闭合**：工具参数均为 `strict=True`、`extra="forbid"`；Dispatcher 在 handler 前用同一份
+  Pydantic schema 强制校验，拼错字段、隐式类型转换、非法枚举和错误嵌套不会进入业务代码。
+- **安全并发**：图鉴、校验、轨迹、分析、模拟、Skill 与记忆查询显式标记为只读并发安全；只有
+  整个模型调用批次都满足该策略时才进入线程池，混入终结/串行/未知调用即整批保守串行。
+- **延迟加载**：高频图鉴与合法性工具立即暴露完整 schema；低频轨迹、分析、模拟、Skill 和记忆
+  工具启动时只展示名称与用途，经 `tool_search` 命中后从下一模型轮次起可见、可执行。加载缓存按
+  CLI/Web 会话隔离，重置会话时一并清除。
+- **单一工具清单**：工具定义、schema、handler 与治理策略只在顾问 Registry 装配；模型视图、
+  Dispatcher、延迟目录以及 Skill 权限均由该实例派生，不维护第二份全局工具名白名单。
+- **Skill 是数据不是指令**：`body`/`trigger` 只作流程建议；`allowed_tools` 是每个 Skill 声明的
+  最小权限，并在返回前与当前顾问 Registry 求交。
+- **有界收敛**：按需取证、同轮并行独立查询，目标 3 轮/最多 4 轮；55 秒墙钟预算覆盖进行中的 LLM 与工具调用。
+- **可见但不泄露思维链**：CLI/Web 展示阶段进度、工具名与结果摘要；原始 reasoning 不写入回复或审计。
+- **失败也有终结**：模型异常、超时、轮次耗尽均返回已核实的阶段结果，SSE 异常路径也保证发出 `done`。
 
 详见 `tmpdocs/milestones/chatmode/` 下的 M1–M5 详设。

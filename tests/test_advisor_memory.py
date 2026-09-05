@@ -8,7 +8,7 @@ from environment.battle_config import build_battle_rules
 from environment.datafingerprint import data_digest
 from environment.dataset import DataSource
 from environment.teambuilder import build_roster
-from roco_pvp_agent.advisor.agent import _build_advisor_tools, _to_team_pick
+from roco_pvp_agent.advisor.agent import _build_advisor_registry, _to_team_pick
 from roco_pvp_agent.battle.evolution.globalmem import (
     GlobalMemStore,
     make_global_entry_id,
@@ -71,7 +71,8 @@ def test_query_global_mem_returns_history(tmp_path):
     key = matchup_key(_roster(my_picks), _roster(foe_picks), team_size=3, lives=2)
     store = _global_store(tmp_path, key=key)
 
-    tools = {t.name: t for t in _build_advisor_tools(globalmem_dir=str(tmp_path / "gm"))}
+    tools = {t.name: t for t in _build_advisor_registry(
+        globalmem_dir=str(tmp_path / "gm")).model_tools()}
     out = json.loads(_invoke(tools, "query_global_mem", my_team=my_picks, foe_team=foe_picks))
     assert out["matchup_key"] == key
     assert out["hits"], "应命中沉淀的 GlobalMem"
@@ -82,7 +83,7 @@ def test_query_global_mem_returns_history(tmp_path):
 
 
 def test_query_global_mem_disabled_without_dir():
-    tools = {t.name: t for t in _build_advisor_tools()}
+    tools = {t.name: t for t in _build_advisor_registry().model_tools()}
     out = _invoke(tools, "query_global_mem", my_team=_team_picks(),
                   foe_team=_team_picks())
     assert "未启用" in out
@@ -90,7 +91,8 @@ def test_query_global_mem_disabled_without_dir():
 
 def test_query_local_mem_returns_history(tmp_path):
     store = _local_store(tmp_path)
-    tools = {t.name: t for t in _build_advisor_tools(memory_dir=str(tmp_path / "mem"))}
+    tools = {t.name: t for t in _build_advisor_registry(
+        memory_dir=str(tmp_path / "mem")).model_tools()}
     out = json.loads(_invoke(tools, "query_local_mem",
                              situation_key="my2/foe2/迪莫/水蓝蓝/high/high/0/early/2/2"))
     assert out["hits"], "应命中沉淀的局部记忆"
@@ -102,7 +104,7 @@ def test_query_local_mem_returns_history(tmp_path):
 
 
 def test_query_local_mem_disabled_without_dir():
-    tools = {t.name: t for t in _build_advisor_tools()}
+    tools = {t.name: t for t in _build_advisor_registry().model_tools()}
     assert "未启用" in _invoke(tools, "query_local_mem",
                                situation_key="my2/foe2/迪莫/水蓝蓝/high/high/0/early/2/2")
 
@@ -112,8 +114,9 @@ def test_tools_are_read_only(tmp_path):
     my_picks = _team_picks()
     key = matchup_key(_roster(my_picks), _roster(my_picks), team_size=3, lives=2)
     store = _global_store(tmp_path, key=key)
-    tools = {t.name: t for t in _build_advisor_tools(globalmem_dir=str(tmp_path / "gm"),
-                                                     memory_dir=str(tmp_path / "mem"))}
+    tools = {t.name: t for t in _build_advisor_registry(
+        globalmem_dir=str(tmp_path / "gm"),
+        memory_dir=str(tmp_path / "mem")).model_tools()}
     before_gm = len(store.all())
     _invoke(tools, "query_global_mem", my_team=my_picks, foe_team=my_picks)
     assert len(store.all()) == before_gm

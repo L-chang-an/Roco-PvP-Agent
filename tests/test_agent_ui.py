@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
 
 from roco_pvp_agent.config import Settings  # noqa: E402
-from ui.server import create_chat_app  # noqa: E402
+from ui.server import SERVER_ERROR_REPLY, create_chat_app  # noqa: E402
 
 from fakes import ScriptedLLM, tool_call  # noqa: E402
 
@@ -33,7 +33,29 @@ def _final_llm(text="你好"):
 # ---------- 基础路由 ----------
 
 def test_health():
-    assert _client(_final_llm()).get("/api/health").json() == {"status": "ok"}
+    assert _client(_final_llm()).get("/api/health").json() == {
+        "status": "ok",
+        "sandbox": {
+            "enabled": False,
+            "configured_backend": "auto",
+            "active_backend": None,
+            "healthy": False,
+            "reason_code": "sandbox_disabled",
+        },
+    }
+
+
+def test_enabled_unavailable_backend_degrades_without_registering_tool():
+    settings = _settings().model_copy(update={
+        "sandbox_enabled": True,
+        "sandbox_backend": "docker",
+    })
+    app = create_chat_app(settings, llm_factory=_final_llm())
+    client = TestClient(app)
+    body = client.get("/api/health").json()
+    assert body["status"] == "degraded"
+    assert body["sandbox"]["reason_code"] == "docker_backend_not_implemented"
+    assert app.state.agent._registry.get("sandbox_python_query") is None
 
 
 def test_config_does_not_leak_api_key():
@@ -77,6 +99,28 @@ def test_sync_chat_rejects_empty_message():
     assert res.status_code == 422
 
 
+def test_sync_chat_exception_returns_safe_reply():
+    """POST 兜底自身异常时也返回稳定答复，不把异常细节或 HTTP 500 暴露给用户。"""
+    client = _client(_final_llm())
+    client.app.state.context.chat = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("secret-provider-detail")
+    )
+    res = client.post("/api/chat", json={"message": "帮我组队"})
+    assert res.status_code == 200
+    assert res.json()["reply"] == SERVER_ERROR_REPLY
+
+
+def test_stream_exception_still_emits_done():
+    """SSE 后台异常也必须发 done，否则 WebUI 输入框会永久保持禁用。"""
+    client = _client(_final_llm())
+    client.app.state.context.chat = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("secret-provider-detail")
+    )
+    events = _stream_events(client, "/api/chat/stream?message=帮我组队")
+    assert [e["event"] for e in events] == ["meta", "reply", "done"]
+    assert events[1]["text"] == SERVER_ERROR_REPLY
+
+
 # ---------- SSE 流式 ----------
 
 def _stream_events(client, url):
@@ -90,23 +134,26 @@ def _stream_events(client, url):
 
 
 def test_stream_event_sequence_final():
-    """在线单轮：meta → reply → done。"""
+    """在线单轮：meta → progress → reply → done。"""
     events = _stream_events(_client(_final_llm("你好")), "/api/chat/stream?message=帮我组队")
-    assert [e["event"] for e in events] == ["meta", "reply", "done"]
+    assert [e["event"] for e in events] == ["meta", "progress", "reply", "done"]
     assert events[0]["session_id"]
-    assert events[1]["text"] == "你好"
+    assert "第 1/4 轮" in events[1]["text"]
+    assert events[2]["text"] == "你好"
 
 
 def test_stream_event_sequence_with_tool():
-    """工具循环：meta → tool → reply → done（顾问不发射思维链）。"""
+    """工具循环：每个 LLM 轮次有 progress，顾问不发射原始思维链。"""
     llm = lambda settings: ScriptedLLM([
         AIMessage(content="先查一下", tool_calls=[tool_call("get_catalog_version", {}, "c1")]),
         AIMessage(content="", tool_calls=[tool_call("final_answer", {"text": "14.0"}, "c2")]),
     ])
     events = _stream_events(_client(llm), "/api/chat/stream?message=组队")
-    assert [e["event"] for e in events] == ["meta", "tool", "reply", "done"]
-    assert events[1]["name"] == "get_catalog_version"
-    assert events[2]["text"] == "14.0"
+    assert [e["event"] for e in events] == [
+        "meta", "progress", "tool", "progress", "reply", "done",
+    ]
+    assert events[2]["name"] == "get_catalog_version"
+    assert events[4]["text"] == "14.0"
 
 
 def test_stream_requires_message():

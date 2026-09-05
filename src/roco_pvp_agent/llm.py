@@ -146,17 +146,19 @@ def cache_hit_rate(usage: dict) -> float | None:
     return round(hit / denom, 4)
 
 
-def build_chat_llm(settings: Settings, tools, *, llm=None):
+def build_chat_llm(settings: Settings, tools, *, llm=None, schema_digest: str | None = None):
     """构建 chat LLM 并绑定工具。
 
     - llm 不为 None 时原样返回（测试注入缝，fake LLM 走这里，不碰网络）。
-    - 否则按 (model, base_url, api_key, timeout, 工具名集合) 缓存复用实例。
+    - 否则按 (model, base_url, api_key, timeout, 工具契约指纹) 缓存复用实例。
+      未传 ``schema_digest`` 的旧调用方仍回退到工具名集合。
     """
     if llm is not None:
         return llm
 
     tool_names = tuple(sorted(getattr(t, "name", "") for t in tools))
-    key = (settings.model, settings.base_url, settings.api_key, settings.timeout, tool_names)
+    tool_contract = schema_digest or tool_names
+    key = (settings.model, settings.base_url, settings.api_key, settings.timeout, tool_contract)
     with _LOCK:
         if key in _CACHE:
             return _CACHE[key]

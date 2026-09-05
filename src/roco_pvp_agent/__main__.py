@@ -529,6 +529,8 @@ def _run_once(agent: ChatAgent, query: str, debug: bool) -> int:
 def _repl(agent: ChatAgent, debug: bool) -> int:
     console.print("[cyan]Roco PVP Agent — 输入 exit / quit / q 退出[/cyan]")
     history = []
+    visibility_factory = getattr(agent, "new_tool_visibility", None)
+    tool_visibility = visibility_factory() if callable(visibility_factory) else None
     while True:
         try:
             text = input("你 > ").strip()
@@ -539,7 +541,10 @@ def _repl(agent: ChatAgent, debug: bool) -> int:
             continue
         if text.lower() in EXIT_WORDS:
             break
-        reply = agent.chat(text, history=history, event_sink=_cli_event_sink())
+        chat_kwargs = {"history": history, "event_sink": _cli_event_sink()}
+        if tool_visibility is not None:
+            chat_kwargs["tool_visibility"] = tool_visibility
+        reply = agent.chat(text, **chat_kwargs)
         _print_reply(reply, debug)
         history = reply.history
     return 0

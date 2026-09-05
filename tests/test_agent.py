@@ -3,9 +3,13 @@
 覆盖：离线降级 / 显式终稿 / 工具循环 / 轮次兜底 / 错误吞掉 / 事件契约 / 历史可重放 / 边界情况。
 """
 
+import pytest
+
 from langchain_core.messages import AIMessage
+from langchain_core.tools import tool
 
 from roco_pvp_agent.agent import ChatAgent, EMPTY_REPLY, OFFLINE_HINT
+from roco_pvp_agent.tooling import ToolEntry, ToolRegistry
 
 from fakes import AlwaysToolLLM, ScriptedLLM, tool_call
 
@@ -43,6 +47,32 @@ def test_online_final_answer_via_terminal_tool(agent_settings):
     assert reply.reply == "结果是 14.0"
     assert reply.offline is False
     assert reply.rounds == 1
+
+
+def test_agent_loop_uses_terminal_policy_not_a_specific_tool_name(agent_settings):
+    @tool
+    def complete(text: str) -> str:
+        """使用任意名称提交终稿。"""
+
+        return text
+
+    registry = ToolRegistry()
+    registry.register(ToolEntry(tool=complete, terminal_on_success=True))
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[tool_call("complete", {"text": "策略终结"})]),
+    ])
+
+    reply = ChatAgent(agent_settings, llm=llm, registry=registry).chat("hi")
+
+    assert reply.reply == "策略终结"
+    assert reply.tool_calls == []
+    assert reply.history[-1].tool_call_id == "call-1"
+
+
+def test_agent_rejects_registry_and_legacy_tools_together(agent_settings):
+    registry = ToolRegistry()
+    with pytest.raises(ValueError, match="不能同时"):
+        ChatAgent(agent_settings, registry=registry, tools=[])
 
 
 def test_online_fallback_content_without_tool_call(agent_settings):
@@ -94,7 +124,7 @@ def test_online_fallback_when_no_final_answer(agent_settings):
     llm = AlwaysToolLLM()
     agent = ChatAgent(agent_settings, llm=llm, max_llm_rounds=2)
     reply = agent.chat("算一下")
-    assert "最大轮数" in reply.reply
+    assert "执行预算" in reply.reply
     assert reply.rounds == 2
     assert len(reply.tool_calls) == 2
 

@@ -37,11 +37,11 @@ function ensureTurn() {
 
   const label = document.createElement("span");
   label.className = "reason-label";
-  label.textContent = "🧠 思考与工具调用";
+  label.textContent = "⏳ 正在连接顾问…";
 
   const btn = document.createElement("button");
   btn.className = "reason-toggle";
-  btn.textContent = "显示思考过程 ▾";
+  btn.textContent = "查看工作过程 ▾";
 
   const body = document.createElement("div");
   body.className = "reason-body"; // 默认折叠：CSS display:none（不要用 hidden 属性，会被 .reason-body{display:flex} 覆盖）
@@ -50,7 +50,7 @@ function ensureTurn() {
   btn.addEventListener("click", () => {
     open = !open;
     body.classList.toggle("open", open);
-    btn.textContent = open ? "收起 ▲" : "显示思考过程 ▾";
+    btn.textContent = open ? "收起 ▲" : "查看工作过程 ▾";
     btn.setAttribute("aria-expanded", String(open));
   });
 
@@ -61,15 +61,15 @@ function ensureTurn() {
   $("#chat").appendChild(card);
   scrollToBottom();
 
-  _turn = { body, label, thinking: [], tools: [] };
+  _turn = { body, label, thinking: [], tools: [], progress: [], latestStatus: "正在连接顾问…" };
   return _turn;
 }
 
 function refreshLabel(t) {
   const names = t.tools.map((x) => x.name).join(", ");
   const namesText = names ? "（" + names + "）" : "";
-  t.label.textContent =
-    "🧠 思考 × " + t.thinking.length + " · 🔧 工具 × " + t.tools.length + namesText;
+  const counts = " · 🔧 工具 × " + t.tools.length + namesText;
+  t.label.textContent = "⏳ " + t.latestStatus + counts;
 }
 
 function addThinking(text) {
@@ -86,16 +86,20 @@ function addThinking(text) {
 function addProgress(text) {
   // 轻量进度行：等待期反馈（第几轮/正在调工具），非原始思维链。
   const t = ensureTurn();
+  t.progress.push(text);
+  t.latestStatus = text;
   const el = document.createElement("div");
   el.className = "reason-progress";
   el.textContent = "⏳ " + text;
   t.body.appendChild(el);
+  refreshLabel(t); // 卡片折叠时，标题也必须让用户看见当前进度
   scrollToBottom();
 }
 
 function addTool(name, args, result) {
   const t = ensureTurn();
   t.tools.push({ name });
+  t.latestStatus = "已完成 " + name;
   const el = document.createElement("div");
   el.className = "reason-tool";
   el.innerHTML =
@@ -108,6 +112,10 @@ function addTool(name, args, result) {
 }
 
 function endTurn() {
+  if (_turn) {
+    _turn.latestStatus = "工作过程已完成";
+    refreshLabel(_turn);
+  }
   _turn = null;
 }
 
@@ -178,10 +186,13 @@ function renderReply(text, usage) {
 
   // 打字机：原文逐字进 raw 视图
   let i = 0;
+  // 固定逐字符会让 1 万字结构化建议额外播放 80 秒；按长度分块，保留可见流式效果，
+  // 同时把前端完整呈现时间控制在约 2 秒（最多约 250 帧 × 8ms）。
+  const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
   function tick() {
     if (i < text.length) {
-      raw.textContent = text.slice(0, i + 1);
-      i += 1;
+      i = Math.min(text.length, i + charsPerTick);
+      raw.textContent = text.slice(0, i);
       scrollToBottom();
       setTimeout(tick, 8);
     } else {
@@ -255,6 +266,8 @@ async function fallbackPost(message) {
 
 function send(message) {
   setBusy(true);
+  // EventSource 建连前就给首个可见反馈；即使 SSE 不可用转 POST，也不会白屏等待。
+  addProgress("请求已提交，正在建立连接…");
   const url =
     "/api/chat/stream?message=" + encodeURIComponent(message) +
     "&session_id=" + encodeURIComponent(getSessionId());

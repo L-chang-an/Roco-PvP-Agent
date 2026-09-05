@@ -13,14 +13,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-SKILLS_DIR = Path(__file__).resolve().parent / "skills"
+from roco_pvp_agent.tooling import ToolRegistry
 
-# 顾问工具集白名单（与 advisor/agent.py 的 _build_advisor_tools 一致）。
-ADVISOR_TOOLS = frozenset({
-    "get_catalog_version", "search_spirits", "get_spirit_profile", "get_skill_profile",
-    "get_build_options", "validate_team", "query_trajectory_evidence", "analyze_team",
-    "simulate_matchups", "submit_team_advice", "final_answer", "retrieve_team_skill",
-})
+SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 
 
 class Skill(BaseModel):
@@ -30,7 +25,7 @@ class Skill(BaseModel):
     status: str             # "active" | "probationary"
     trigger: list[str]      # 触发关键词
     boundary: list[str]     # 硬边界
-    allowed_tools: list[str]  # 工具白名单（须 ⊆ ADVISOR_TOOLS，加载时裁剪）
+    allowed_tools: list[str]  # Skill 最小权限；加载时与当前 Agent Registry 求交
     verification: list[str]   # 校验项
     body: str               # 程序性步骤（自然语言，仅流程建议）
 
@@ -57,15 +52,15 @@ def register_skill(spec: dict) -> Skill:
     return Skill(**{**spec, "status": "probationary", "hash": _hash_body(body)})
 
 
-def retrieve_team_skill(query: str) -> list[dict]:
-    """触发命中且 status=active 的 Skill，最多 3 个；allowed_tools 与顾问工具集求交。"""
+def retrieve_team_skill(query: str, *, registry: ToolRegistry) -> list[dict]:
+    """检索 active Skill；allowed_tools 只保留当前 Agent 已注册的工具。"""
     out: list[dict] = []
     for skill in load_skills():
         if skill.status != "active":
             continue
         if not any(t in query for t in skill.trigger):
             continue
-        trimmed = [t for t in skill.allowed_tools if t in ADVISOR_TOOLS]
+        trimmed = [t for t in skill.allowed_tools if registry.get(t) is not None]
         out.append({**skill.model_dump(), "allowed_tools": trimmed})
         if len(out) >= 3:
             break

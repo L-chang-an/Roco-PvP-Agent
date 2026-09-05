@@ -44,10 +44,10 @@ _OUT_OF_SCOPE_KEYWORDS = (
     "股票", "炒股", "数学题", "写论文", "写作文",
 )
 
-_INTENT_KEYWORDS = (
+_DOMAIN_KEYWORDS = (
     "组队", "组个", "配队", "组一", "组建", "配招", "克制", "阵容", "血脉", "性格",
-    "个体值", "推荐", "针对", "轨迹", "胜率", "构筑", "精灵", "技能", "属性", "对战",
-    "队友", "队伍", "选哪只", "怎么打", "换谁", "搭配",
+    "个体值", "轨迹", "胜率", "构筑", "精灵", "技能", "洛克王国", "洛克手游",
+    "PVP", "pvp", "对战", "队友", "队伍", "选哪只", "换谁", "推荐队友",
 )
 
 
@@ -64,7 +64,7 @@ def _has_entity(message: str) -> bool:
 def _is_welcome(message: str) -> bool:
     if not any(k in message for k in _WELCOME_KEYWORDS):
         return False
-    if any(k in message for k in _INTENT_KEYWORDS):
+    if any(k in message for k in _DOMAIN_KEYWORDS):
         return False
     return len(message) <= 12
 
@@ -80,7 +80,7 @@ def classify(message: str) -> ScopeVerdict:
         return ScopeVerdict.OUT_OF_SCOPE
     if _has_entity(m):
         return ScopeVerdict.IN_SCOPE
-    if any(k in m for k in _INTENT_KEYWORDS):
+    if any(k in m for k in _DOMAIN_KEYWORDS):
         return ScopeVerdict.IN_SCOPE
     return ScopeVerdict.AMBIGUOUS
 

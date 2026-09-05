@@ -3,7 +3,7 @@
 import pytest
 
 from roco_pvp_agent.llm import build_chat_llm, normalize_base_url
-from roco_pvp_agent.tools import build_agent_tools
+from roco_pvp_agent.tools import build_agent_registry
 
 
 class FakeLLM:
@@ -96,7 +96,7 @@ def test_reasoning_content_survives_conversion():
 
 def test_cache_reuses_instance_for_same_config(agent_settings, monkeypatch):
     _monkeypatch_chat(monkeypatch)
-    tools = build_agent_tools()
+    tools = build_agent_registry().model_tools()
     a = build_chat_llm(agent_settings, tools)
     b = build_chat_llm(agent_settings, tools)
     assert a is b
@@ -104,8 +104,16 @@ def test_cache_reuses_instance_for_same_config(agent_settings, monkeypatch):
 
 def test_cache_distinct_for_different_tools(agent_settings, monkeypatch):
     _monkeypatch_chat(monkeypatch)
-    a = build_chat_llm(agent_settings, build_agent_tools())
+    a = build_chat_llm(agent_settings, build_agent_registry().model_tools())
     b = build_chat_llm(agent_settings, [])
+    assert a is not b
+
+
+def test_cache_distinct_for_changed_schema_digest(agent_settings, monkeypatch):
+    _monkeypatch_chat(monkeypatch)
+    tools = build_agent_registry().model_tools()
+    a = build_chat_llm(agent_settings, tools, schema_digest="schema-v1")
+    b = build_chat_llm(agent_settings, tools, schema_digest="schema-v2")
     assert a is not b
 
 
