@@ -32,7 +32,7 @@ artifacts/
 .vscode/
 
 # Docs
-# mydocs/
+mydocs/
 # docs/
 # tests/
 # scripts/

@@ -349,7 +349,7 @@ def _degraded_answer(errors: list[dict]) -> str:
 class TeamAdvisorAgent(ChatAgent):
     """组队顾问：结构化终结 + EvidenceGate + 关闭思维链外显。"""
 
-    def __init__(self, settings, *, llm=None, max_llm_rounds: int = 4,
+    def __init__(self, settings, *, llm=None, max_llm_rounds: int = 100,
                  battles_dir=None, runs_dir=None,
                  memory_dir: str | None = None,
                  globalmem_dir: str | None = None,
@@ -372,7 +372,7 @@ class TeamAdvisorAgent(ChatAgent):
                 sandbox_service=sandbox_setup.service,
             ),
             emit_thinking=False,
-            max_total_seconds=55.0,       # < 1 分钟兜底：超时强制终结
+            max_total_seconds=555.0,       # < 1 分钟兜底：超时强制终结
         )
 
     @property
@@ -419,9 +419,9 @@ class TeamAdvisorAgent(ChatAgent):
         """轮次耗尽 / 超时 / API 异常时返回已核实结果，而非一句空话。"""
         names = [t["name"] for t in tool_log]
         when = {
-            "timeout": "约 55 秒的对话预算内",
+            "timeout": "约 555 秒的对话预算内",
             "llm_error": "模型服务发生异常后",
-            "rounds": "4 个模型轮次内",
+            "rounds": "100 个模型轮次内",
         }.get(reason, "当前预算内")
         # 最多带回 3 条、每条 800 字符的已核实工具结果；既有实际信息，又避免降级回复失控膨胀。
         partial_results = [
