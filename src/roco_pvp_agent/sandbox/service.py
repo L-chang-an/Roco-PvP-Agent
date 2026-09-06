@@ -16,7 +16,7 @@ from typing import Any
 
 from roco_pvp_agent.tooling import ToolOutcome
 
-from .backends import DockerSandboxBackend, LinuxSandboxBackend, MacOSSandboxBackend
+from .backends import DockerSandboxBackend, LinuxSandboxBackend, MacOSSandboxBackend, WindowsSandboxBackend
 from .backends.base import SandboxBackend
 from .catalog import DatasetCatalog, DatasetCatalogError
 from .models import (
@@ -301,11 +301,13 @@ def build_sandbox_setup(
         runtime_python = Path(runtime_value)
     else:
         project_root = Path(__file__).resolve().parents[3]
-        runtime_python = project_root / "sandbox-runtime" / ".venv" / "bin" / "python"
+        runtime_python = (project_root / "sandbox-runtime" / "windows-runtime" / "python.exe"
+                          if platform.system() == "Windows" else
+                          project_root / "sandbox-runtime" / ".venv" / "bin" / "python")
 
     selected = configured
     if configured == "auto":
-        selected = {"Darwin": "macos", "Linux": "linux"}.get(platform.system(), "")
+        selected = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system(), "")
         if not selected:
             health = SandboxHealth(
                 enabled=True,
@@ -321,6 +323,7 @@ def build_sandbox_setup(
             "macos": MacOSSandboxBackend,
             "linux": LinuxSandboxBackend,
             "docker": DockerSandboxBackend,
+            "windows": WindowsSandboxBackend,
         }.get(selected)
         if factory is None:
             health = SandboxHealth(

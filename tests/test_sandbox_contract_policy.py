@@ -44,7 +44,12 @@ def test_catalog_rejects_dataset_symlink(tmp_path: Path):
     outside.write_text("[]", encoding="utf-8")
     root = tmp_path / "data"
     root.mkdir()
-    (root / "full_spirits.json").symlink_to(outside)
+    try:
+        (root / "full_spirits.json").symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation requires Developer Mode or privilege; junction is tested separately")
+        raise
     with pytest.raises(DatasetCatalogError, match="symlink"):
         DatasetCatalog(root).resolve(("full_spirits",))
 

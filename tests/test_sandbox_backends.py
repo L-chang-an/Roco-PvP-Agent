@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import threading
 
 import pytest
@@ -54,7 +54,7 @@ def test_linux_argv_has_isolated_namespaces_seccomp_and_selected_mount_only(tmp_
 def test_macos_profile_quotes_paths_and_never_adds_unselected_data(tmp_path: Path):
     with pytest.raises(ValueError):
         _seatbelt_literal(Path("bad\npath"))
-    assert _seatbelt_literal(Path('/tmp/a"b')) == '"/tmp/a\\"b"'
+    assert _seatbelt_literal(PurePosixPath('/tmp/a"b')) == '"/tmp/a\\"b"'
 
     backend = object.__new__(MacOSSandboxBackend)
     backend._runtime = _runtime()
@@ -73,7 +73,7 @@ def test_macos_profile_quotes_paths_and_never_adds_unselected_data(tmp_path: Pat
         control=SandboxExecutionControl(None, threading.Event()),
     )
     profile = backend._profile(request, work)
-    assert str(selected) in profile
+    assert _seatbelt_literal(selected) in profile
     assert "full_skills.json" not in profile
     assert "(deny network*)" in profile
     assert "(deny default)" in profile

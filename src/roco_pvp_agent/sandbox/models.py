@@ -13,6 +13,7 @@ class SandboxBackendName(str, Enum):
     MACOS = "macos"
     LINUX = "linux"
     DOCKER = "docker"
+    WINDOWS = "windows"
 
 
 class PermissionAction(str, Enum):
@@ -33,7 +34,7 @@ class PermissionDecision:
 
 @dataclass(frozen=True)
 class SandboxLimits:
-    wall_seconds: float = 8.0
+    wall_seconds: float = 120.0
     cpu_seconds: int = 4
     memory_bytes: int = 512 * 1024 * 1024
     max_pids: int = 16

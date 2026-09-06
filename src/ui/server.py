@@ -91,6 +91,20 @@ def _serialize_history(messages) -> list[dict]:
     return out
 
 
+class _CancellableStreamingResponse(StreamingResponse):
+    """Cancel tools even when disconnect happens while the generator is yielding."""
+
+    def __init__(self, *args, cancel_event: threading.Event, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cancel_event = cancel_event
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._cancel_event.set()
+
+
 def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = None) -> FastAPI:
     llm = llm_factory(settings) if llm_factory else None
     agent = TeamAdvisorAgent(settings, llm=llm)
@@ -179,7 +193,8 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
                 # 客户端断开 SSE 时，协作式取消会一路传到沙箱进程组。
                 cancel_event.set()
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return _CancellableStreamingResponse(
+            gen(), media_type="text/event-stream", cancel_event=cancel_event)
 
     # ---------- 会话管理 ----------
 

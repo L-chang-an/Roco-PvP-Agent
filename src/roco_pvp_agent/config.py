@@ -21,7 +21,7 @@ class Settings(BaseModel):
 
     # Chat Mode 只读查询沙箱。默认关闭；生产应显式指定后端与独立 CPython 3.12。
     sandbox_enabled: bool = False
-    sandbox_backend: Literal["auto", "macos", "linux", "docker"] = "auto"
+    sandbox_backend: Literal["auto", "macos", "linux", "docker", "windows"] = "auto"
     sandbox_runtime_python: str = ""
     sandbox_max_concurrency: int = Field(default=2, ge=1, le=32)
 

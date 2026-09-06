@@ -360,8 +360,8 @@ uv sync --project sandbox-runtime --python 3.12 --frozen
 | 环境变量 | 默认值 | 说明 |
 |---|---:|---|
 | `SANDBOX_ENABLED` | `false` | 是否启用 `sandbox_python_query` |
-| `SANDBOX_BACKEND` | `auto` | `auto` / `macos` / `linux` / `docker`；生产建议显式指定 |
-| `SANDBOX_RUNTIME_PYTHON` | `sandbox-runtime/.venv/bin/python` | 受信任 CPython 3.12 解释器的绝对路径 |
+| `SANDBOX_BACKEND` | `auto` | `auto` / `macos` / `linux` / `docker` / `windows`；Windows 验收状态见下文 |
+| `SANDBOX_RUNTIME_PYTHON` | 按平台选择 | Unix：`sandbox-runtime/.venv/bin/python`；Windows：`sandbox-runtime/windows-runtime/python.exe`；显式配置时使用绝对路径 |
 | `SANDBOX_MAX_CONCURRENCY` | `2` | 进程沙箱的全局并发上限 |
 
 模型只能提交 Python 代码与注册过的数据集 ID，不能提交路径、命令、依赖或资源上限。代码通过
@@ -378,6 +378,7 @@ emit_result({"count": len(skills)})
 
 - macOS 后端依赖系统 `/usr/bin/sandbox-exec`。
 - Linux 与 WSL2 共用 `bubblewrap + libseccomp`；WSL1 不受支持。建议把项目、数据与运行时放在 WSL 文件系统内，而不是 `/mnt/c`。
+- Windows 原生后端已实现 LPAC、只读 ACL、独立桌面及 Job 限制，采用经批准的 `registryRead`/无 Win32k lockdown 兼容方案。当前 120 秒预算下的 Windows 隔离与持续查询复测已通过，历史原生崩溃本轮未复现；具体运行时、验收记录及部署步骤见 [Windows 沙箱说明](sandbox-runtime/WINDOWS.md)。
 - Docker 协议已经冻结，但当前实现会明确报告 `docker_backend_not_implemented`，不会被 `auto` 自动选中。
 - 任一必需能力或探针不可用时，健康状态变为 `degraded` 且工具不注册；系统绝不会退回普通 `subprocess` 执行用户代码。
 

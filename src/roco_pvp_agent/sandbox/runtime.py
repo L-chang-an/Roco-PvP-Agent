@@ -27,7 +27,7 @@ class RuntimeUnavailable(RuntimeError):
         self.reason_code = reason_code
 
 
-def inspect_runtime(python: Path) -> RuntimeInfo:
+def inspect_runtime(python: Path, *, standalone: bool = False) -> RuntimeInfo:
     requested = Path(python)
     if not requested.is_absolute() or not requested.exists() or not os.access(requested, os.X_OK):
         raise RuntimeUnavailable("runtime_python_missing")
@@ -38,13 +38,18 @@ def inspect_runtime(python: Path) -> RuntimeInfo:
         "'purelib':sysconfig.get_path('purelib'),'platlib':sysconfig.get_path('platlib'),"
         "'numpy':numpy.__version__,'pandas':pandas.__version__}))"
     )
+    argv = [str(requested), "-I", "-B", "-X", "utf8"]
+    if standalone:
+        argv.append("-S")
+        probe = (f"import sys;sys.path.insert(0,{str(requested.parent / 'Lib' / 'site-packages')!r});" + probe)
     try:
         completed = subprocess.run(
-            [str(requested), "-I", "-c", probe],
+            [*argv, "-c", probe],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env={
+                **_windows_system_environment(),
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
                 "PYTHONNOUSERSITE": "1",
@@ -53,7 +58,9 @@ def inspect_runtime(python: Path) -> RuntimeInfo:
                 "MKL_NUM_THREADS": "1",
                 "NUMEXPR_NUM_THREADS": "1",
             },
-            timeout=8,
+            # Newly copied DLLs can incur a cold antivirus scan. Deployment
+            # gets a bounded warm-up; query budgets come from SandboxLimits.
+            timeout=30 if standalone else 8,
             check=False,
         )
         if completed.returncode != 0 or len(completed.stdout) > 16_384:
@@ -85,10 +92,14 @@ def minimal_environment(temp_dir: Path) -> dict[str, str]:
     """固定、无宿主继承的子进程环境。"""
 
     return {
+        **_windows_system_environment(),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "HOME": str(temp_dir),
         "TMPDIR": str(temp_dir),
+        **({"TEMP": str(temp_dir), "TMP": str(temp_dir),
+            "USERPROFILE": str(temp_dir), "LOCALAPPDATA": str(temp_dir),
+            "APPDATA": str(temp_dir)} if os.name == "nt" else {}),
         "PYTHONNOUSERSITE": "1",
         "PYTHONHASHSEED": "0",
         "OMP_NUM_THREADS": "1",
@@ -96,6 +107,13 @@ def minimal_environment(temp_dir: Path) -> dict[str, str]:
         "MKL_NUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
     }
+
+
+def _windows_system_environment() -> dict[str, str]:
+    if os.name != "nt":
+        return {}
+    from .backends.win32 import api
+    return {"SystemRoot": str(api().system_directory(windows=True))}
 
 
 __all__ = ["RuntimeInfo", "RuntimeUnavailable", "inspect_runtime", "minimal_environment"]

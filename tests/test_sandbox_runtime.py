@@ -3,18 +3,42 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import threading
+import uuid
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = ROOT / "sandbox-runtime" / ".venv" / "bin" / "python"
+RUNTIME = (Path(os.environ.get("SANDBOX_WINDOWS_TEST_RUNTIME", str(ROOT / "sandbox-runtime/windows-runtime/python.exe")))
+           if os.name == "nt" else ROOT / "sandbox-runtime" / ".venv" / "bin" / "python")
 RUNNER = ROOT / "src" / "roco_pvp_agent" / "sandbox" / "runtime_runner.py"
 
 
+@lru_cache(maxsize=1)
+def _windows_backend():
+    from roco_pvp_agent.sandbox.backends.windows import WindowsSandboxBackend
+    backend = WindowsSandboxBackend(RUNTIME)
+    assert backend.health.healthy, backend.health.reason_code
+    return backend
+
+
 def _run(code: str, data_file: Path, *, allowed_id: str = "full_spirits") -> dict:
+    if os.name == "nt":
+        if os.environ.get("RUN_SANDBOX_INTEGRATION") != "1":
+            pytest.skip("Windows runner requires real LPAC: RUN_SANDBOX_INTEGRATION=1")
+        from roco_pvp_agent.sandbox.models import SandboxExecutionRequest, SandboxExecutionControl, SandboxLimits
+        assert RUNTIME.exists(), "prepare the Windows sandbox runtime first"
+        result = _windows_backend().execute(SandboxExecutionRequest(
+            uuid.uuid4().hex, code, (allowed_id,), {allowed_id: data_file}, "test", SandboxLimits(),
+            SandboxExecutionControl(None, threading.Event())))
+        if not result.ok:
+            return {"ok": False, "error_code": result.error_code}
+        return {"ok": True, "result": result.result, "truncated": result.truncated}
     if not RUNTIME.exists():
         pytest.skip("先执行 uv sync --project sandbox-runtime --frozen")
     payload = {
@@ -38,7 +62,7 @@ def _run(code: str, data_file: Path, *, allowed_id: str = "full_spirits") -> dic
         input=json.dumps(payload, ensure_ascii=False).encode(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=10,
+        timeout=120,
         check=False,
     )
     assert completed.stderr == b""

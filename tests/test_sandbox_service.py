@@ -15,6 +15,7 @@ from fakes import ScriptedLLM, tool_call
 from roco_pvp_agent.advisor.agent import TeamAdvisorAgent, _build_advisor_registry
 from roco_pvp_agent.config import Settings
 from roco_pvp_agent.sandbox.models import (
+    SandboxLimits,
     SandboxExecutionResult,
     SandboxHealth,
 )
@@ -116,7 +117,8 @@ def test_advisor_registry_adds_only_healthy_service_as_deferred_serial_tool(tmp_
     assert entry.exposure is ToolExposure.DEFERRED
     assert entry.concurrency is ToolConcurrency.SERIAL
     assert entry.retry_limit == 1
-    assert entry.timeout_seconds == 10.0
+    assert entry.timeout_seconds == 120.0
+    assert entry.timeout_seconds == SandboxLimits().wall_seconds
     assert entry.max_output_chars == 20_000
     assert entry.sensitive_arguments == frozenset({"code"})
     assert "sandbox_python_query" not in {

@@ -11,7 +11,6 @@ import io
 import json
 import math
 import os
-import resource
 import signal
 import sys
 import threading
@@ -19,6 +18,9 @@ import time
 import types
 from pathlib import Path
 from typing import Any
+
+if sys.platform != "win32":
+    import resource
 
 
 class _OutputInvalid(ValueError):
@@ -80,6 +82,22 @@ def _set_limit(
 
 
 def _apply_limits(limits: dict[str, Any]) -> None:
+    if sys.platform == "win32":
+        # platform.machine() otherwise performs an optional WMI/COM query during
+        # pandas import. Use its normal registry/environment fallback instead.
+        # This compatibility setting is not part of the OS security boundary.
+        sys.modules["_wmi"] = None
+        # No payload switch can disable OS isolation. This helper is a verified
+        # part of the standalone runtime, loaded without importing the host app.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_sandbox_win32", Path(__file__).with_name("_win32.py"))
+        if spec is None or spec.loader is None:
+            raise RuntimeError("windows_isolation_verifier_missing")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.api().verify_process()
+        return
     cpu = int(limits.get("cpu_seconds", 4))
     memory = int(limits.get("memory_bytes", 512 * 1024 * 1024))
     temp_bytes = int(limits.get("temp_bytes", 16 * 1024 * 1024))

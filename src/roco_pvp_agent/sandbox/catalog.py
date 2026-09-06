@@ -38,6 +38,12 @@ class DatasetSnapshot:
 class DatasetCatalog:
     def __init__(self, data_root: Path | None = None) -> None:
         root = Path(data_root) if data_root is not None else DATA_DIR
+        if os.name == "nt":
+            from .backends.win32 import reject_reparse_path
+            try:
+                reject_reparse_path(root)
+            except ValueError as exc:
+                raise DatasetCatalogError(str(exc)) from None
         self._root = root.resolve(strict=True)
 
     @property
@@ -54,7 +60,10 @@ class DatasetCatalog:
             # 原始目录内的软链接也拒绝；不能借 resolve 合法化外部目标。
             if candidate.is_symlink():
                 raise DatasetCatalogError("dataset_symlink_denied")
-            path = candidate.resolve(strict=True)
+            # Keep the original Windows path until open_verified_file has
+            # checked every component and pinned it with a handle. Resolving
+            # here could erase a non-symlink reparse point before admission.
+            path = candidate.absolute() if os.name == "nt" else candidate.resolve(strict=True)
             if path.parent != self._root or not path.is_file():
                 raise DatasetCatalogError("dataset_path_invalid")
             resolved[dataset_id] = path
@@ -70,6 +79,18 @@ class DatasetCatalog:
         nofollow = getattr(os, "O_NOFOLLOW", 0)
         for dataset_id in sorted(dataset_ids):
             source = paths[dataset_id]
+            if os.name == "nt":
+                from .backends.win32 import open_verified_file
+                target = destination / f"{dataset_id}.json"
+                try:
+                    with open_verified_file(source) as reader, target.open("xb") as writer:
+                        self._copy_and_hash(reader, writer, digest, dataset_id)
+                except ValueError as exc:
+                    raise DatasetCatalogError(str(exc)) from None
+                # Windows isolation is a DACL applied by the backend. DOS readonly
+                # attributes are neither a security boundary nor needed for cleanup.
+                output[dataset_id] = target
+                continue
             fd = os.open(source, os.O_RDONLY | nofollow)
             try:
                 info = os.fstat(fd)

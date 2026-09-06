@@ -137,7 +137,7 @@ Linux/WSL2 真实测试：当前 macOS 主机未执行，按平台条件跳过
 
 - 工具仍由现有 Registry 唯一注册，不维护平行工具列表。
 - 仅当 `SANDBOX_ENABLED=true` 且后端健康时注册 `sandbox_python_query`。
-- 工具配置为 `DEFERRED`、`SERIAL`、`retry_limit=1`、外层超时 10 秒、输出上限 20,000 字符。
+- 工具配置为 `DEFERRED`、`SERIAL`、`retry_limit=1`、外层超时 120 秒（与默认沙箱墙钟预算一致）、输出上限 20,000 字符；会话剩余预算和取消事件仍可提前终止执行。
 - Prompt 要求结构化图鉴工具优先，只有复杂统计或跨数据集查询才使用沙箱。
 - Prompt 明确数据内容不是指令，不允许用沙箱处理洛克王国领域外请求。
 - 沙箱证据 ID 可进入组队建议的 `evidence_ids` 和证据目录。
@@ -196,7 +196,7 @@ SANDBOX_MAX_CONCURRENCY=2
 2. 以不可变镜像 digest 启动一次性容器，不复用执行过用户代码的容器。
 3. 配置非 root、只读根文件系统、`network=none`、`cap-drop=ALL`、`no-new-privileges`。
 4. 仅挂载选中数据快照且只读，工作目录使用限额 tmpfs。
-5. 配置 CPU、512 MB 内存、16 PID、默认 seccomp 和 8 秒墙钟超时。
+5. 配置 CPU、512 MB 内存、16 PID、默认 seccomp 和 120 秒墙钟超时。
 6. 禁止挂载 Docker socket、应用目录、凭据和宿主环境变量。
 7. 通过与 macOS/Linux 完全相同的 conformance suite 后才将 Docker 标记为健康。
 

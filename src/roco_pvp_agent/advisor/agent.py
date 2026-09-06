@@ -51,6 +51,7 @@ from roco_pvp_agent.sandbox import (
     SandboxSetup,
     build_sandbox_setup,
 )
+from roco_pvp_agent.sandbox.models import SandboxLimits
 from roco_pvp_agent.tooling import (
     ToolConcurrency,
     ToolEntry,
@@ -311,7 +312,7 @@ def _build_advisor_registry(*, battles_dir=None, runs_dir=None,
             exposure=ToolExposure.DEFERRED,
             concurrency=ToolConcurrency.SERIAL,
             retry_limit=1,
-            timeout_seconds=10.0,
+            timeout_seconds=SandboxLimits().wall_seconds,
             max_output_chars=20_000,
             audit_tag="sandbox_query",
             directory_description=(
@@ -359,6 +360,7 @@ class TeamAdvisorAgent(ChatAgent):
         globalmem_dir = globalmem_dir or getattr(settings, "globalmem_dir", None)
         sandbox_setup = sandbox_setup or build_sandbox_setup(settings)
         self._sandbox_health = sandbox_setup.health
+        self._sandbox_service = sandbox_setup.service
         super().__init__(
             settings,
             llm=llm,
@@ -379,7 +381,7 @@ class TeamAdvisorAgent(ChatAgent):
     def sandbox_health(self):
         """供健康接口读取的脱敏能力状态。"""
 
-        return self._sandbox_health
+        return self._sandbox_service.health if self._sandbox_service else self._sandbox_health
 
     def chat(self, message, history=None, *, event_sink=None,
              tool_visibility: ToolVisibility | None = None,
