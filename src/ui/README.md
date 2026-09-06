@@ -1,29 +1,113 @@
 # ui — Web 界面（FastAPI + SSE）
 
-本目录是 Web 界面：聊天（组队顾问）、组队页、对战页、观战流。依赖 `roco_pvp_agent` 与 `environment`（绝对导入）。
+聊天页沿用原生 HTML/CSS/JavaScript，按真实模型轮次展示默认折叠的卡片。展开后分别显示
+主模型在同一次响应中提供的思考摘要、确定性的执行结果摘要、工具列表及按需加载的详情。
+最终回答保留 Markdown／原文切换和复制；本期不包含队伍看板、保存下载或完整会话侧栏。
 
-## 模块
+## 运行与预算
+
+```powershell
+uv sync --extra ui --group dev --inexact
+.\.venv\Scripts\python.exe -m ui
+```
+
+CLI/Web 顾问默认最多 100 次模型调用，模型和工具共用 555 秒总预算。配置源为
+`CHAT_MAX_LLM_ROUNDS`、`CHAT_MAX_TOTAL_SECONDS`；提示词和进度读取有效配置。
+思考摘要与主模型工具调用同次返回，不额外调用摘要模型。
+
+`CHAT_DB_PATH` 默认 `artifacts/chat/sessions.sqlite3`，启动时解析绝对路径。
+数据库在 FastAPI lifespan 中打开，使用 SQLite WAL、foreign_keys、busy_timeout 和
+synchronous=FULL；同一数据库由进程锁独占，运行时请保持单 worker。
+`CHAT_MAX_CONCURRENT_TURNS` 默认 4；同一会话最多一项运行任务，不隐式排队。
+
+## 模块与数据
 
 | 模块 | 职责 |
 |---|---|
-| `server.py` | FastAPI 应用工厂 `create_chat_app`：REST + SSE 聊天（meta → tool → reply → done 事件契约） |
-| `context.py` | `ChatContext`：按 session 隔离的聊天上下文（LRU 逐出） |
-| `battle.py` | `BattleController`：人类 vs LLM 的对战编排（含迷雾、补位、第 0 回合首发） |
-| `routes_battle.py` | `/api/battle/*`：对战 REST 契约（开局/出招/补位/重放/观战 SSE） |
-| `routes_team.py` | `/api/team/*`：组队页（精灵搜索 + 校验 + 队伍持久化） |
-| `static/` | 前端静态资源（HTML/CSS/JS） |
-| `__main__.py` | `run_ui`（uvicorn 启动入口） |
+| `server.py` | 应用工厂、lifespan、静态页面和旧兼容 API |
+| `chat_store.py` | SQLite 事务、公开记录和快照、事件序号、结果快照、checkpoint |
+| `turn_coordinator.py` | 任务创建、单点事件消费、取消、完成屏障、错误收束 |
+| `routes_chat.py` | 新会话与任务 REST、只订阅 SSE、有界工具详情 |
+| `context.py` | 旧 API 使用的内存会话上下文 |
+| `static/chat-state.js` | 实时事件与历史快照共用状态 reducer |
+| `static/round-card.js` | 保持展开状态的 Round／工具卡片 |
+| `static/chat.js` | 页面、轻量会话路由、创建去重、订阅／查询恢复 |
 
-## 关键设计
+用户可见记录包含用户原消息、最终答复、公开思考摘要和执行事实。checkpoint 使用
+规范化 Human/AI 最终答复配对、最新合法主队和已加载工具名称，不序列化原始 provider
+消息、reasoning 或未配对 ToolMessage；完整上下文自动压缩和历史检索留待后续。
+思考摘要保存在卡片记录中，不自动把全部过程摘要重新注入下一轮用户请求。
 
-- **SSE 事件契约**：`meta → thinking* → tool* → reply → done`（顾问模式关闭 thinking）。
-- **应用工厂 + 测试注入缝**：`create_chat_app(settings, llm_factory=...)`，测试用 fake LLM 零网络。
-- **路径安全**：组队/对战记录路径必须落在对应目录内（防 `..` 逃逸）。
-- **脱敏**：`/api/config` 绝不返回 `api_key`。
+## 会话与任务 API
 
-## 运行
+| 接口 | 行为 |
+|---|---|
+| `POST /api/chat/sessions` | 新建；返回 id，前端打开 `/chat/{id}` |
+| `GET /api/chat/sessions/{id}` | 会话信息与 active_turn_id |
+| `GET /api/chat/sessions/{id}/messages?before=...&limit=20` | 按完整 Turn 分页，返回消息、卡片和最终结果快照 |
+| `POST /api/chat/sessions/{id}/turns` | `{request_id, message}`，首次 202，重复请求 200 |
+| `GET /api/chat/turns/{id}` | 查询同一任务的状态、卡片、结果及 last_seq |
+| `GET /api/chat/turns/{id}/events?after_seq=N` | 只读订阅，支持 Last-Event-ID（合法时优先） |
+| `POST /api/chat/turns/{id}/cancel` | 幂等取消；已完成任务保持原状态 |
+| `GET /api/chat/turns/{id}/tools/{execution_id}` | 已脱敏、有界详情；不会重新执行工具 |
 
-```bash
-uv sync --all-extras
-python -m roco_pvp_agent --serve      # 或 python -m ui
+消息为 1–2000 字符且非空白。相同会话、相同 request_id 和内容复用同一任务；不同内容
+返回 409 REQUEST_ID_CONFLICT。会话已有其他任务返回 409 SESSION_BUSY（含 active_turn_id），
+全局满额返回 429 SERVER_BUSY。未知 id 返回 404，读取不隐式创建会话。
+
+新 SSE 外壳为 schema_version=2、event、session_id、turn_id、seq、created_at、
+round_id/index、payload。序号在 Turn 内递增，SSE id 使用同一序号。
+
+```text
+turn.started
+  round.started
+  round.summary（模型同轮给出的简短说明，缺失时明确标记）
+  round.progress / tool.started / tool.completed
+  round.completed
+  ...
+reply
+done
 ```
+
+`turn.cancelling` 表示停止已受理。每轮真实调用恰好创建／收束一次；ScopeGate 或离线
+模板为零 Round。并发工具按实际完成时间通知，显示顺序和 ToolMessage 顺序仍按调用序号。
+工具执行成功与业务校验成功独立，跳过／未找到／未启用／截断不伪装为校验通过。
+每项工具完成后，`round.progress` 同步持久化已完成部分的执行结果摘要，不等待同轮慢工具。
+页面显示真实轮数与持续更新的已用时间，实时更新保留展开状态和键盘焦点。
+聊天卡片撑开整个页面，右侧页面滚动范围随卡片追加和展开增长；顶部导航与底部输入区保持可见。
+自动滚底、新消息提示和历史翻页统一使用文档滚动位置，查看旧消息时保留当前位置。
+
+语义事件和卡片快照落盘后才发布。结果、checkpoint、Turn 终态、reply/done 在同一事务
+提交；写盘失败不发送成功 done，页面明确报错并停止执行，修复存储后重启恢复。
+纯连接心跳不入库。订阅者定期按数据库游标补读，不保存无消费者的无限通知队列。
+
+## 刷新、停止与兼容
+
+新建会话保留旧会话；独立地址可收藏或重新打开，根地址恢复最近访问的会话。
+刷新、切换页或 SSE 断开不取消任务；只重订阅或查询同一 Turn。创建响应丢失时使用原
+request_id 重试。输入框保留忙碌冲突时的草稿，中文输入法确认不会误发送。
+
+显式停止覆盖模型等待与工具执行，迟到结果丢弃。同步模型 HTTP 工作线程依赖客户端
+超时回收，取消不会强杀 Python 线程；协作式沙箱取消沿用其清理机制。
+服务启动会将上次遗留的任务收束为 interrupted，保留已完成步骤和最后完整 checkpoint，
+不自动重跑模型或工具。数据库不按旧的 64 会话 LRU 自动删除历史。
+
+旧 `/api/chat`、执行型 `/api/chat/stream`、`history`、`reset` 保留内存兼容路径及原返回
+形状；旧 SSE 仍在断开时取消。新持久化与去重保证由新 API 提供，新页面不混用旧回退。
+升级前已丢失的内存会话无法恢复，旧客户端会话不会自动迁移为新库记录。
+
+## 测试
+
+测试应用通过 `create_chat_app(settings, llm_factory=..., chat_store=...)` 注入 Fake LLM
+和临时数据库；新 API 测试需要使用 `with TestClient(app)` 运行 lifespan。
+
+```powershell
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+.\.venv\Scripts\python.exe -m pytest tests/test_chat_rounds.py tests/test_chat_sessions.py -q
+.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe -m pytest tests/test_chat_browser.py -q --browser chromium --output tmp/chat-browser-test-results
+```
+
+浏览器用真实本地 HTTP 服务和 Fake LLM 验证默认折叠、摘要、按需详情、刷新、新建与切换、
+提交响应丢失、SSE 查询回退、停止、输入法、键盘焦点、滚动、窄屏及 100 轮卡片。没有调用真实模型。

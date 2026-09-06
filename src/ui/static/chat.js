@@ -1,320 +1,261 @@
 "use strict";
-
-/** 聊天逻辑：session 管理、SSE 消费、事件渲染、POST 兜底。 */
-
-const SESSION_KEY = "roco_pvp_session_id";
-
-function getSessionId() {
-  let id = sessionStorage.getItem(SESSION_KEY);
-  if (!id) {
-    // 本地先生成一个兜底 id；SSE 的 meta 事件会回传服务端权威 id 并覆盖
-    id = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    sessionStorage.setItem(SESSION_KEY, id);
+/* Page orchestration: create once, subscribe/read the same durable turn. */
+(() => {
+  const RECENT = "roco_chat_recent_session", PENDING = "roco_chat_pending_";
+  const el = RoundCard.el;
+  let state, generation = 0, source = null, pollTimer = null, activeTurn = null;
+  let views = new Map(), nextBefore = null, pending = null, selecting = false;
+  const chat = () => document.querySelector("#chat");
+  const scroller = () => document.scrollingElement;
+  const input = () => document.querySelector("#input");
+  function status(text, error = false) {
+    const node = document.querySelector("#chat-status");
+    node.textContent = text; node.dataset.error = String(error);
   }
-  return id;
-}
-
-function setBusy(busy) {
-  $("#send-btn").disabled = busy;
-  $("#input").disabled = busy;
-  $("#input").placeholder = busy ? "AI 思考中…" : "输入消息，Enter 发送";
-}
-
-/* ------------------------------------------------------------------ *
- * 折叠的"思考过程"卡片：一次回复的思考文本 + 工具调用收进一张卡，      *
- * 默认隐藏正文，点"显示思考过程 ▾"才展开。                            *
- * ------------------------------------------------------------------ */
-
-let _turn = null; // { body, label, thinking: [], tools: [] }
-
-function ensureTurn() {
-  if (_turn) return _turn;
-  const card = document.createElement("div");
-  card.className = "bubble reason";
-
-  const header = document.createElement("div");
-  header.className = "reason-header";
-
-  const label = document.createElement("span");
-  label.className = "reason-label";
-  label.textContent = "⏳ 正在连接顾问…";
-
-  const btn = document.createElement("button");
-  btn.className = "reason-toggle";
-  btn.textContent = "查看工作过程 ▾";
-
-  const body = document.createElement("div");
-  body.className = "reason-body"; // 默认折叠：CSS display:none（不要用 hidden 属性，会被 .reason-body{display:flex} 覆盖）
-
-  let open = false;
-  btn.addEventListener("click", () => {
-    open = !open;
-    body.classList.toggle("open", open);
-    btn.textContent = open ? "收起 ▲" : "查看工作过程 ▾";
-    btn.setAttribute("aria-expanded", String(open));
-  });
-
-  header.appendChild(label);
-  header.appendChild(btn);
-  card.appendChild(header);
-  card.appendChild(body);
-  $("#chat").appendChild(card);
-  scrollToBottom();
-
-  _turn = { body, label, thinking: [], tools: [], progress: [], latestStatus: "正在连接顾问…" };
-  return _turn;
-}
-
-function refreshLabel(t) {
-  const names = t.tools.map((x) => x.name).join(", ");
-  const namesText = names ? "（" + names + "）" : "";
-  const counts = " · 🔧 工具 × " + t.tools.length + namesText;
-  t.label.textContent = "⏳ " + t.latestStatus + counts;
-}
-
-function addThinking(text) {
-  const t = ensureTurn();
-  t.thinking.push(text);
-  const el = document.createElement("div");
-  el.className = "reason-thinking";
-  el.textContent = "💭 " + text;
-  t.body.appendChild(el);
-  refreshLabel(t);
-  scrollToBottom();
-}
-
-function addProgress(text) {
-  // 轻量进度行：等待期反馈（第几轮/正在调工具），非原始思维链。
-  const t = ensureTurn();
-  t.progress.push(text);
-  t.latestStatus = text;
-  const el = document.createElement("div");
-  el.className = "reason-progress";
-  el.textContent = "⏳ " + text;
-  t.body.appendChild(el);
-  refreshLabel(t); // 卡片折叠时，标题也必须让用户看见当前进度
-  scrollToBottom();
-}
-
-function addTool(name, args, result) {
-  const t = ensureTurn();
-  t.tools.push({ name });
-  t.latestStatus = "已完成 " + name;
-  const el = document.createElement("div");
-  el.className = "reason-tool";
-  el.innerHTML =
-    '<span class="tool-name">🔧 ' + escapeHtml(name) + "</span> " +
-    "<code>" + escapeHtml(JSON.stringify(args)) + "</code>" +
-    '<div class="tool-result">→ ' + escapeHtml(result) + "</div>";
-  t.body.appendChild(el);
-  refreshLabel(t);
-  scrollToBottom();
-}
-
-function endTurn() {
-  if (_turn) {
-    _turn.latestStatus = "工作过程已完成";
-    refreshLabel(_turn);
-  }
-  _turn = null;
-}
-
-/* ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------ *
- * 终稿回复气泡：默认 Markdown 渲染展示；可切"查看原文"，可复制原文。 *
- * 打字机先把原文逐字打出来（体现流式），打完后默认切到渲染视图。    *
- * ------------------------------------------------------------------ */
-
-function renderReply(text, usage) {
-  const bubble = createBubble("reply", "");
-
-  // 渲染视图（默认显示）
-  const md = document.createElement("div");
-  md.className = "reply-md";
-  md.hidden = true;
-
-  // 原文视图
-  const raw = document.createElement("pre");
-  raw.className = "reply-raw";
-
-  // 工具条：查看原文/渲染 + 复制
-  const toolbar = document.createElement("div");
-  toolbar.className = "reply-toolbar";
-  const toggleBtn = document.createElement("button");
-  toggleBtn.textContent = "查看原文";
-  const copyBtn = document.createElement("button");
-  copyBtn.textContent = "复制";
-  toolbar.appendChild(toggleBtn);
-  toolbar.appendChild(copyBtn);
-
-  bubble.appendChild(md);
-  bubble.appendChild(raw);
-  bubble.appendChild(toolbar);
-
-  let rawText = "";
-  let finished = false;
-
-  const showMd = () => {
-    md.hidden = false;
-    raw.hidden = true;
-    toggleBtn.textContent = "查看原文";
-  };
-  const showRaw = () => {
-    md.hidden = true;
-    raw.hidden = false;
-    toggleBtn.textContent = "查看渲染";
-  };
-
-  toggleBtn.addEventListener("click", () => {
-    if (!finished) return;
-    if (md.hidden) {
-      showMd();
-    } else {
-      showRaw();
-    }
-  });
-
-  copyBtn.addEventListener("click", () => {
-    navigator.clipboard.writeText(rawText).then(() => {
-      copyBtn.textContent = "已复制";
-      setTimeout(() => {
-        copyBtn.textContent = "复制";
-      }, 1500);
-    });
-  });
-
-  // 打字机：原文逐字进 raw 视图
-  let i = 0;
-  // 固定逐字符会让 1 万字结构化建议额外播放 80 秒；按长度分块，保留可见流式效果，
-  // 同时把前端完整呈现时间控制在约 2 秒（最多约 250 帧 × 8ms）。
-  const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
-  function tick() {
-    if (i < text.length) {
-      i = Math.min(text.length, i + charsPerTick);
-      raw.textContent = text.slice(0, i);
-      scrollToBottom();
-      setTimeout(tick, 8);
-    } else {
-      // 打完 → 渲染 markdown 并默认显示渲染视图
-      rawText = text;
-      md.innerHTML = renderMarkdown(text);
-      finished = true;
-      showMd();
-      if (usage && usage.total_tokens) {
-        const note = document.createElement("div");
-        note.className = "usage";
-        note.textContent =
-          "⚡ tokens 输入 " + (usage.input_tokens ?? 0) +
-          " · 输出 " + (usage.output_tokens ?? 0) +
-          " · 总计 " + usage.total_tokens;
-        bubble.appendChild(note);
-      }
-      scrollToBottom();
-    }
-  }
-  tick();
-}
-
-function onEvent(data) {
-  switch (data.event) {
-    case "meta":
-      if (data.session_id) sessionStorage.setItem(SESSION_KEY, data.session_id);
-      break;
-    case "thinking":
-      addThinking(data.text);
-      break;
-    case "progress":
-      addProgress(data.text);
-      break;
-    case "tool":
-      addTool(data.name, data.args, data.result);
-      break;
-    case "reply":
-      renderReply(data.text, data.usage);
-      break;
-    case "done":
-      endTurn();
-      setBusy(false);
-      break;
-  }
-}
-
-async function fallbackPost(message) {
-  // SSE 失败（事件源中断）→ 同步 POST 兜底，至少拿到终稿
-  try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, session_id: getSessionId() }),
-    });
-    if (!res.ok) {
-      renderReply("（请求失败：HTTP " + res.status + "）");
-      return;
-    }
+  async function api(url, options = {}) {
+    const res = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...options.headers } });
     const data = await res.json();
-    renderReply(data.reply, data.usage);
-    data.thinking.forEach(addThinking);
-    data.tool_calls.forEach((tc) => addTool(tc.name, tc.args, tc.result));
-  } catch (err) {
-    renderReply("（请求失败：" + err + "）");
-  } finally {
-    endTurn();
-    setBusy(false);
+    if (!res.ok) {
+      const error = new Error(data.message || data.error || (typeof data.detail === "string" ? data.detail : "请求失败（HTTP " + res.status + "）"));
+      error.code = data.error; error.data = data; error.status = res.status; throw error;
+    }
+    return data;
   }
-}
-
-function send(message) {
-  setBusy(true);
-  // EventSource 建连前就给首个可见反馈；即使 SSE 不可用转 POST，也不会白屏等待。
-  addProgress("请求已提交，正在建立连接…");
-  const url =
-    "/api/chat/stream?message=" + encodeURIComponent(message) +
-    "&session_id=" + encodeURIComponent(getSessionId());
-  const es = new EventSource(url);
-  es.onmessage = (e) => {
-    let data;
+  function nearBottom() { const c = scroller(); return c.scrollHeight - c.scrollTop - c.clientHeight < 90; }
+  function scrollToLatest() { scroller().scrollTop = scroller().scrollHeight; }
+  function follow(wasNear) {
+    if (wasNear) scrollToLatest();
+    else document.querySelector("#new-messages").hidden = false;
+  }
+  function controls() {
+    const busy = selecting || !!pending || !!activeTurn;
+    document.querySelector("#send-btn").disabled = busy;
+    const stop = document.querySelector("#stop-btn");
+    stop.hidden = !activeTurn;
+    stop.disabled = !!activeTurn && state.turns.get(activeTurn)?.status === "cancelling";
+    document.querySelector("#retry-send").hidden = !pending;
+  }
+  function stopListening() {
+    source?.close(); source = null;
+    clearTimeout(pollTimer); pollTimer = null;
+  }
+  function updateElapsed() {
+    const turn = state?.turns.get(activeTurn), view = views.get(activeTurn);
+    if (!turn || !view || !ChatState.isActive(turn.status)) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(turn.created_at)) / 1000));
+    view.badge.textContent = (turn.status === "cancelling" ? "正在停止…" : "执行中") +
+      " · " + Object.keys(turn.rounds).length + " 轮 · 已用 " + seconds + " 秒";
+  }
+  function renderResult(container, result) {
+    if (container.dataset.message === result.message) return;
+    container.dataset.message = result.message; container.replaceChildren();
+    const md = el("div", "reply-md"); md.innerHTML = renderMarkdown(result.message);
+    const raw = el("pre", "reply-raw", result.message); raw.hidden = true;
+    const bar = el("div", "reply-toolbar"), toggle = el("button", "", "查看原文"), copy = el("button", "", "复制");
+    toggle.type = copy.type = "button";
+    toggle.addEventListener("click", () => {
+      raw.hidden = !raw.hidden; md.hidden = !raw.hidden;
+      toggle.textContent = raw.hidden ? "查看原文" : "查看渲染";
+    });
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(result.message); copy.textContent = "已复制"; }
+      catch { copy.textContent = "复制失败，请切换原文复制"; }
+    });
+    bar.append(toggle, copy); container.append(md, raw, bar);
+    if (result.usage?.total_tokens) container.append(el("div", "usage",
+      "tokens 输入 " + (result.usage.input_tokens || 0) + " · 输出 " + (result.usage.output_tokens || 0) + " · 总计 " + result.usage.total_tokens));
+  }
+  function renderTurn(t, { prepend = false } = {}) {
+    const wasNear = nearBottom();
+    let view = views.get(t.turn_id);
+    if (!view) {
+      const root = el("section", "chat-turn"); root.dataset.turnId = t.turn_id;
+      const user = el("div", "bubble user", t.message), rounds = el("div", "turn-rounds");
+      const result = el("div", "bubble reply"), badge = el("div", "turn-status"); result.hidden = true;
+      root.append(user, rounds, result, badge);
+      view = { root, rounds, result, badge, cards: new Map() }; views.set(t.turn_id, view);
+      if (prepend) chat().insertBefore(root, document.querySelector("#older-messages").nextSibling);
+      else chat().append(root);
+    }
+    Object.values(t.rounds).sort((a, b) => a.round_index - b.round_index).forEach((r, i) => {
+      let card = view.cards.get(r.round_id);
+      if (!card) {
+        card = RoundCard.create(xid => api("/api/chat/turns/" + t.turn_id + "/tools/" + xid));
+        view.cards.set(r.round_id, card);
+      }
+      card.update(r); RoundCard.placeChild(view.rounds, card.root, i);
+    });
+    if (t.result) { view.result.hidden = false; renderResult(view.result, t.result); }
+    const labels = { running: "执行中", cancelling: "正在停止…", completed: "已完成", degraded: "已返回阶段结果",
+      failed: "执行失败", timed_out: "已超时", cancelled: "已停止", interrupted: "已中断" };
+    view.badge.textContent = labels[t.status] || t.status;
+    if (ChatState.isActive(t.status)) {
+      activeTurn = t.turn_id;
+      const budget = t.budget || {};
+      status("执行中 · 最多 " + budget.max_llm_rounds + " 轮 · 总预算 " + budget.max_total_seconds + " 秒");
+    } else if (activeTurn === t.turn_id) {
+      activeTurn = null; status(labels[t.status] || "已结束");
+    }
+    updateElapsed(); controls(); if (!prepend) follow(wasNear);
+  }
+  function accept(snap, gen) {
+    if (gen !== generation || !ChatState.snapshot(state, snap)) return;
+    renderTurn(snap);
+  }
+  async function poll(tid, gen) {
+    if (gen !== generation) return;
     try {
-      data = JSON.parse(e.data);
-    } catch {
-      return;
+      const snap = await api("/api/chat/turns/" + tid);
+      if (gen !== generation) return;
+      accept(snap, gen);
+      if (ChatState.isActive(snap.status)) pollTimer = setTimeout(() => poll(tid, gen), 1000);
+    } catch (e) {
+      if (gen !== generation) return;
+      status(e.message + "；正在尝试恢复连接", true);
+      if (e.code === "CHAT_STORAGE_UNAVAILABLE") { activeTurn = null; controls(); return; }
+      pollTimer = setTimeout(() => poll(tid, gen), 2000);
     }
-    if (data.event === "done") {
-      es.close();
+  }
+  function subscribe(tid, gen) {
+    stopListening();
+    const turn = state.turns.get(tid);
+    if (!turn || !ChatState.isActive(turn.status)) return;
+    if (!window.EventSource) { poll(tid, gen); return; }
+    const es = new EventSource("/api/chat/turns/" + tid + "/events?after_seq=" + turn.last_seq);
+    source = es;
+    es.onmessage = e => {
+      if (gen !== generation) { es.close(); return; }
+      let data; try { data = JSON.parse(e.data); } catch { return; }
+      if (data.event === "stream.error") { es.close(); poll(tid, gen); return; }
+      const applied = ChatState.event(state, data);
+      if (applied === "gap") { es.close(); poll(tid, gen); return; }
+      if (applied) renderTurn(state.turns.get(tid));
+      if (data.event === "done") es.close();
+    };
+    es.onerror = () => { es.close(); if (gen === generation) poll(tid, gen); };
+  }
+  function clearPending(sid) {
+    sessionStorage.removeItem(PENDING + sid); pending = null;
+    document.querySelector("#pending-message")?.remove(); controls();
+  }
+  function showPending() {
+    if (!pending) return;
+    let node = document.querySelector("#pending-message");
+    if (!node) { node = el("div", "bubble user"); node.id = "pending-message"; chat().append(node); }
+    node.textContent = pending.message + "（正在确认提交）";
+  }
+  async function submitPending() {
+    if (!pending || selecting) return;
+    const gen = generation, sid = state.sessionId, request = { ...pending };
+    document.querySelector("#retry-send").disabled = true;
+    showPending(); status("请求已提交，正在确认…"); controls();
+    try {
+      const snap = await api("/api/chat/sessions/" + sid + "/turns", { method: "POST", body: JSON.stringify(request) });
+      if (gen !== generation) return;
+      clearPending(sid); accept(snap, gen); subscribe(snap.turn_id, gen);
+    } catch (e) {
+      if (gen !== generation) return;
+      if ([409, 422, 429, 404].includes(e.status)) {
+        input().value = request.message; clearPending(sid);
+        status(e.code === "SESSION_BUSY" ? "当前会话已有任务运行，草稿已保留。" : e.message, true);
+        if (e.data?.active_turn_id) poll(e.data.active_turn_id, gen);
+      } else {
+        status("提交结果尚未确认。重试将使用同一请求编号：" + e.message, true);
+      }
+    } finally {
+      if (gen === generation) { document.querySelector("#retry-send").disabled = false; controls(); }
     }
-    onEvent(data);
-  };
-  es.onerror = () => {
-    es.close();
-    fallbackPost(message);
-  };
-}
-
-async function reset() {
-  await fetch("/api/chat/reset", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: getSessionId() }),
+  }
+  async function selectSession(sid, push = false) {
+    const gen = ++generation; stopListening(); selecting = true; activeTurn = null; pending = null;
+    state = ChatState.create(sid); views = new Map(); controls();
+    chat().querySelectorAll(".chat-turn, #pending-message, .welcome").forEach(n => n.remove());
+    document.querySelector("#new-messages").hidden = true;
+    status("正在恢复会话…");
+    try {
+      const [session, history] = await Promise.all([api("/api/chat/sessions/" + sid), api("/api/chat/sessions/" + sid + "/messages")]);
+      if (gen !== generation) return;
+      if (push) window.history.pushState({}, "", "/chat/" + sid);
+      else window.history.replaceState({}, "", "/chat/" + sid);
+      localStorage.setItem(RECENT, sid);
+      history.turns.forEach(t => accept(t, gen));
+      nextBefore = history.next_before; document.querySelector("#older-messages").hidden = !nextBefore;
+      if (!history.turns.length) status("新会话已就绪");
+      else if (!session.active_turn_id) status("会话已恢复");
+      selecting = false;
+      const stored = sessionStorage.getItem(PENDING + sid);
+      try { pending = stored ? JSON.parse(stored) : null; } catch { sessionStorage.removeItem(PENDING + sid); }
+      if (pending && history.turns.some(t => t.request_id === pending.request_id)) clearPending(sid);
+      if (session.active_turn_id) {
+        const snap = await api("/api/chat/turns/" + session.active_turn_id);
+        if (gen !== generation) return;
+        accept(snap, gen); subscribe(snap.turn_id, gen);
+      }
+      if (pending) await submitPending();
+      if (gen !== generation) return;
+      scrollToLatest();
+    } catch (e) {
+      if (gen !== generation) return;
+      status("无法恢复会话：" + e.message + "。可点击新建会话。", true);
+      selecting = true;
+    } finally { if (gen === generation) controls(); }
+  }
+  async function newSession() {
+    const button = document.querySelector("#new-session-btn"); button.disabled = true;
+    const gen = generation;
+    try {
+      const session = await api("/api/chat/sessions", { method: "POST" });
+      if (gen !== generation) return;
+      input().value = ""; await selectSession(session.id, true);
+    } catch (e) { if (gen === generation) status("新建失败：" + e.message, true); }
+    finally { button.disabled = false; }
+  }
+  function send() {
+    const message = input().value.trim();
+    if (!message || selecting || pending || activeTurn) return;
+    pending = { request_id: crypto.randomUUID(), message };
+    sessionStorage.setItem(PENDING + state.sessionId, JSON.stringify(pending));
+    input().value = ""; submitPending();
+  }
+  document.addEventListener("DOMContentLoaded", async () => {
+    // Reads the selected state each tick, so a previous session cannot update this page.
+    setInterval(updateElapsed, 1000);
+    document.querySelector("#send-btn").addEventListener("click", send);
+    input().addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
+    });
+    document.querySelector("#new-session-btn").addEventListener("click", newSession);
+    document.querySelector("#retry-send").addEventListener("click", submitPending);
+    document.querySelector("#stop-btn").addEventListener("click", async () => {
+      const tid = activeTurn, gen = generation;
+      if (!tid) return;
+      try { accept(await api("/api/chat/turns/" + tid + "/cancel", { method: "POST" }), gen); }
+      catch (e) { if (gen === generation) status("停止请求失败：" + e.message, true); }
+    });
+    document.querySelector("#new-messages").addEventListener("click", () => {
+      scrollToLatest(); document.querySelector("#new-messages").hidden = true;
+    });
+    document.addEventListener("scroll", () => { if (nearBottom()) document.querySelector("#new-messages").hidden = true; }, { passive: true });
+    document.querySelector("#older-messages").addEventListener("click", async () => {
+      if (!nextBefore) return;
+      const gen = generation, previousHeight = scroller().scrollHeight, previousTop = scroller().scrollTop;
+      try {
+        const page = await api("/api/chat/sessions/" + state.sessionId + "/messages?before=" + nextBefore);
+        if (gen !== generation) return;
+        [...page.turns].reverse().forEach(t => { if (ChatState.snapshot(state, t)) renderTurn(t, { prepend: true }); });
+        nextBefore = page.next_before; document.querySelector("#older-messages").hidden = !nextBefore;
+        scroller().scrollTop = previousTop + scroller().scrollHeight - previousHeight;
+      } catch (e) { if (gen === generation) status(e.message, true); }
+    });
+    window.addEventListener("popstate", () => {
+      const sid = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
+      if (sid) selectSession(sid); else newSession();
+    });
+    const sid = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1] || localStorage.getItem(RECENT);
+    if (sid) {
+      await selectSession(sid);
+      // An explicit stale address remains visible; a stale recent preference opens a new session.
+      if (selecting && location.pathname === "/") await newSession();
+    } else await newSession();
   });
-  $("#chat").innerHTML = "";
-  endTurn();
-  setBusy(false);
-}
-
-function init() {
-  $("#send-btn").addEventListener("click", () => {
-    const text = $("#input").value.trim();
-    if (!text || $("#send-btn").disabled) return;
-    $("#input").value = "";
-    createBubble("user", text);
-    send(text);
-  });
-  $("#input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      $("#send-btn").click();
-    }
-  });
-  $("#reset-btn").addEventListener("click", reset);
-}
-
-document.addEventListener("DOMContentLoaded", init);
+})();

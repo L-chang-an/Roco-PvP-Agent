@@ -130,6 +130,18 @@ Dispatcher 总是返回 `ToolDispatchResult`。它记录调用、内容、成功
 - `deadline`：基于 `time.monotonic()` 的整个 Agent 调用绝对截止时间；
 - `progress_callback`：长工具运行期间的安全进度回调；
 - `visibility`：本会话的 `ToolVisibility`，通过 LangChain `RunnableConfig` 传给 `tool_search`。
+- `observer`、`round_id`、`round_index`：结构化生命周期通知及所属的真实模型轮次。
+
+### 实时观察与可信终稿
+
+Dispatcher 为每项调用分配独立 `tool_execution_id`，参数和可见性校验通过后发送
+`tool.started`，实际完成时发送 `tool.completed`。并发工具各自完成即通知观察者，
+`dispatch_many()` 的返回顺序仍与模型调用顺序一致。未执行的错误或跳过调用不发送开始事件，
+公开耗时为 `null`。顾问展示层负责中文名称和确定性摘要，通用 Dispatcher 不生成领域文案。
+
+`ToolOutcome.final_result` 和 `ToolDispatchResult.final_result` 可传递类型化 `AssistantResult`。
+通过业务校验的完整队伍保存在该内部字段中，不受给模型的工具字符串截断影响；持久化层另存
+结果快照，并在公开终稿中返回引用。普通工具字符串或最终回答中的 JSON 不会自动获得可信结果身份。
 
 ## 注册表：唯一工具来源
 
@@ -402,7 +414,7 @@ dispatch_context.visible_tool_names = set(visible_names)
 共享同一个 Agent/Registry，也拥有不同的 `ToolVisibility`，一个会话加载的工具不会泄漏到另一个会话。
 
 - CLI REPL 在会话循环外创建一次 Visibility，并在多轮输入间复用；
-- Web `ChatContext` 把 Visibility 与历史一起保存在 session state；
+- 旧 Web `ChatContext` 把 Visibility 与历史一起保存在内存 session state；新任务协议在完整 Turn 的 checkpoint 中保存已加载名称，恢复时从当前 Registry 重新加载；
 - reset 或会话逐出会同时清除历史和延迟工具缓存；
 - 直接调用 `agent.chat()` 且不传 Visibility 时，每次调用会创建新的加载状态。
 

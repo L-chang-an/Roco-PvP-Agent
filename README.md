@@ -55,7 +55,7 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| Chat CLI / Web | 可用 | 支持多轮历史、SSE/CLI 实时进度、工具调用、55 秒墙钟预算和异常降级 |
+| Chat CLI / Web | 可用 | 支持多轮历史、SSE/CLI 实时进度、工具调用、555 秒墙钟预算和异常降级 |
 | 组队顾问 | 可用 | catalog 查询 DSL + validate 硬闸 + 轨迹证据 + 结构化终结 + 越界拒答 |
 | 精灵组队 | 可用 | 支持精灵、技能、血脉、性格和个体值配置与校验 |
 | 对战引擎 | 可用 | 支持状态推进、迷雾视角、事件过滤和确定性重放 |
@@ -72,10 +72,10 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 ### 组队顾问（Chat Agent）
 
 - CLI 单轮问答和交互式会话；
-- Web 端 SSE 流式输出；
+- Web 端按模型轮次展示折叠卡片，分别显示同轮思考摘要和工具执行摘要；SQLite 保存会话，支持独立地址、刷新恢复、新建和停止；
 - 基于工具调用的 Agent 循环；
 - CLI/Web 实时展示安全的阶段摘要与工具调用（不展示原始思维链）；
-- 顾问目标 3 轮、最多 4 轮收敛，整体墙钟预算约 55 秒；超时或模型异常仍返回已核实的阶段结果；
+- 顾问默认最多 100 轮，信息足够即可结束，整体墙钟预算 555 秒；超时或模型异常仍返回已取得的执行结果；
 - 白名单查询 DSL（`search_spirits`）+ 精灵/技能档案 + 合法构筑项；
 - `validate_team` 结构化硬闸（未过校验的阵容绝不输出为推荐）；
 - 轨迹证据（版本闸/重放闸，人机与自博弈分开统计）；
@@ -342,7 +342,11 @@ uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 | `OPENAI_API_KEY` | 空 | `LLM_API_KEY` 缺失时的兼容变量 |
 | `LLM_MODEL` | `deepseek-chat` | 模型名称 |
 | `LLM_BASE_URL` | 空 | OpenAI 兼容接口地址；空值使用客户端默认地址 |
-| `LLM_TIMEOUT` | `60` | 通用 LLM 请求超时；Chat 顾问还会按 55 秒总预算动态收紧单次请求 |
+| `LLM_TIMEOUT` | `60` | 通用 LLM 请求超时；Chat 顾问还会使用 555 秒总预算的剩余时间作为单次请求超时 |
+| `CHAT_MAX_LLM_ROUNDS` | `100` | Chat 顾问单次请求的最大模型轮次 |
+| `CHAT_MAX_TOTAL_SECONDS` | `555` | 所有模型与工具调用共用的执行总预算，不随刷新或重连重置 |
+| `CHAT_DB_PATH` | `artifacts/chat/sessions.sqlite3` | Web 聊天数据库；启动时解析绝对路径，单进程独占 |
+| `CHAT_MAX_CONCURRENT_TURNS` | `4` | 不同会话同时执行的上限；同一会话始终串行 |
 | `DEBUG` | `false` | 是否开启调试模式 |
 | `ROCO_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
 | `ROCO_UI_PORT` | `8001` | Web UI 监听端口 |

@@ -76,6 +76,7 @@ class GetBuildOptionsArgs(NameArgs):
 class ValidateTeamArgs(StrictToolArgs):
     team: list[TeamPickInput]
     items: list[str] | None = None
+    team_size: Literal[3, 6] = 3
 
 
 class QueryTrajectoryEvidenceArgs(StrictToolArgs):

@@ -965,3 +965,55 @@ footer button:disabled {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .switch-menu .act-btn { white-space: nowrap; }
+
+/* Durable chat and round cards: scoped to avoid changing team/battle pages. */
+.chat-page [hidden] { display: none !important; }
+.chat-page { height: auto; min-height: 100vh; min-height: 100dvh; }
+/* Keep one page scroll range: cards grow the document instead of a clipped inner pane. */
+.chat-page #chat { flex: 1 0 auto; overflow: visible; min-height: 0; gap: 22px; }
+.chat-page > header { position: sticky; top: 0; z-index: 10; flex-shrink: 0; background: var(--bg); }
+.chat-page .chat-turn { display: flex; flex-direction: column; gap: 12px; width: min(100%, 1060px); margin: 0 auto; flex-shrink: 0; }
+.chat-page .turn-rounds { display: flex; flex-direction: column; gap: 8px; }
+.chat-page .bubble.reply { width: 100%; max-width: 100%; white-space: normal; }
+.chat-page .reply-raw { white-space: pre-wrap; }
+.chat-page .turn-status { color: var(--muted); font-size: 12px; }
+.chat-page .round-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow-wrap: anywhere; }
+.chat-page .round-heading { display: flex; gap: 12px; align-items: center; cursor: pointer; list-style: none; padding: 13px 16px; }
+.chat-page .round-heading::-webkit-details-marker { display: none; }
+.chat-page .round-heading::before { content: '›'; color: var(--accent); font-size: 24px; transition: transform 120ms; }
+.chat-page .round-card[open] > .round-heading::before { transform: rotate(90deg); }
+.chat-page .round-title { font-weight: 600; flex: 1; }
+.chat-page .round-meta { color: var(--muted); font-size: 12px; }
+.chat-page .round-body { border-top: 1px solid var(--border); padding: 16px 20px; }
+.chat-page .round-body h3 { font-size: 13px; color: var(--muted); margin: 12px 0 8px; }
+.chat-page .round-body p { line-height: 1.7; font-size: 14px; margin: 5px 0; }
+.chat-page .round-thought { white-space: pre-line; }
+.chat-page .round-tools { display: flex; flex-direction: column; gap: 12px; }
+.chat-page .round-tool { border-left: 3px solid var(--border); padding: 8px 12px; }
+.chat-page .round-tool[data-status='warning'], .chat-page .round-tool[data-status='failed'] { border-color: #dbb274; }
+.chat-page .tool-heading { font-size: 13px; font-weight: 600; }
+.chat-page .tool-args { color: var(--muted); }
+.chat-page .tool-highlights { margin-left: 18px; line-height: 1.7; font-size: 13px; }
+.chat-page .tool-details { margin-top: 8px; }
+.chat-page .tool-details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.chat-page .tool-details pre { max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 12px; margin-top: 8px; }
+.chat-page button, .chat-page summary, .chat-page textarea { outline-offset: 3px; }
+.chat-page button:focus-visible, .chat-page summary:focus-visible, .chat-page textarea:focus-visible { outline: 2px solid var(--accent); }
+.chat-page #chat-status { padding: 5px 20px; color: var(--muted); font-size: 12px; min-height: 26px; }
+.chat-page #chat-status[data-error='true'] { color: #f2c078; }
+.chat-page footer { position: sticky; bottom: 0; z-index: 10; flex-shrink: 0; align-items: center; background: var(--bg); }
+.chat-page #input { flex: 1; min-width: 0; resize: vertical; max-height: 160px; border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 8px; font: inherit; padding: 10px 12px; }
+.chat-page #new-messages { position: fixed; bottom: 140px; left: 50%; transform: translateX(-50%); z-index: 11; padding: 7px 16px; border: 1px solid var(--accent); border-radius: 20px; background: var(--panel); color: var(--accent); cursor: pointer; }
+.chat-page #older-messages { align-self: center; flex-shrink: 0; color: var(--accent); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 8px 15px; cursor: pointer; }
+@media (max-width: 640px) {
+  .chat-page header { flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
+  .chat-page header h1 { font-size: 16px; }
+  .chat-page .top-nav { order: 3; width: 100%; justify-content: center; }
+  .chat-page #chat { padding: 12px; }
+  .chat-page .round-heading { flex-wrap: wrap; gap: 6px 10px; padding: 10px 12px; }
+  .chat-page .round-meta { width: 100%; padding-left: 22px; }
+  .chat-page .round-body { padding: 10px 12px; }
+  .chat-page .bubble { max-width: 95%; }
+  .chat-page footer { padding: 10px; gap: 6px; flex-wrap: wrap; }
+  .chat-page #input { flex-basis: 100%; }
+}

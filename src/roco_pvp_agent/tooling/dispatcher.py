@@ -15,6 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from uuid import uuid4
+
+from ..events import ExecutionEvent, ExecutionObserver
 
 from pydantic import BaseModel, ValidationError
 
@@ -56,6 +59,9 @@ class DispatchContext:
     progress_callback: Callable[[str], None] | None = None
     visibility: "ToolVisibility | None" = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    observer: ExecutionObserver | None = None
+    round_id: str = ""
+    round_index: int = 0
     _progress_lock: threading.Lock = field(
         default_factory=threading.Lock,
         init=False,
@@ -85,9 +91,44 @@ class ToolDispatcher:
         return self._registry
 
     def dispatch(
+        self, raw_call: ToolCall | object, context: DispatchContext, *, call_index: int = 1,
+    ) -> ToolDispatchResult:
+        execution_id = "x_" + uuid4().hex
+        started_at = None
+
+        def started(entry, call):
+            nonlocal started_at
+            started_at = time.perf_counter()
+            self._observe(context, "tool.started", {
+                "tool_execution_id": execution_id, "call_index": call_index,
+                "name": call.name, "args": dict(self._logged_arguments(entry, call)),
+            })
+
+        result = self._dispatch(raw_call, context, on_started=started)
+        status = "completed" if result.ok else "failed"
+        if context.cancel_event.is_set():
+            status = "cancelled"
+        elif result.error_code in (ToolErrorCode.TIMEOUT, ToolErrorCode.SANDBOX_TIMEOUT):
+            status = "timed_out"
+        self._observe(context, "tool.completed", {
+            "tool_execution_id": execution_id, "call_index": call_index,
+            "status": status,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2)
+            if started_at is not None else None,
+        }, result)
+        return result
+
+    @staticmethod
+    def _observe(context, event, payload, result=None):
+        if context.observer is not None:
+            context.observer(ExecutionEvent(
+                event, context.round_id, context.round_index, payload, result))
+
+    def _dispatch(
         self,
         raw_call: ToolCall | object,
         context: DispatchContext,
+        *, on_started: Callable | None = None,
     ) -> ToolDispatchResult:
         """执行一个工具调用；所有预期失败均转换成 ToolDispatchResult。"""
 
@@ -139,6 +180,10 @@ class ToolDispatcher:
             # Dispatcher 先按注册工具的同一个 Pydantic schema 显式校验，保证模型契约
             # 和运行时契约一致；handler 只会在校验成功后执行。
             self._validate_arguments(entry, call)
+            if context.cancel_event.is_set():
+                raise _DispatchTimeout
+            if on_started is not None:
+                on_started(entry, call)
             raw_result = self._invoke(entry, call, timeout, context)
         except ValidationError as exc:
             return self._error_result(
@@ -200,29 +245,34 @@ class ToolDispatcher:
                 max_workers=workers,
                 thread_name_prefix="tool-batch",
             ) as pool:
-                futures = [pool.submit(self.dispatch, raw_call, context)
-                           for raw_call in raw_calls]
+                futures = [pool.submit(self.dispatch, raw_call, context, call_index=index)
+                           for index, raw_call in enumerate(raw_calls, 1)]
                 return [future.result() for future in futures]
 
         results: list[ToolDispatchResult] = []
         terminal_seen = False
-        for raw_call in raw_calls:
+        for index, raw_call in enumerate(raw_calls, 1):
             if terminal_seen:
                 try:
                     call = raw_call if isinstance(raw_call, ToolCall) \
                         else ToolCall.from_langchain(raw_call)
                 except InvalidToolCall:
                     call = self._fallback_call(raw_call)
-                results.append(self._error_result(
+                result = self._error_result(
                     call,
                     ToolErrorCode.SKIPPED_AFTER_TERMINAL,
                     "前序终结工具已完成，本调用未执行",
                     started=time.perf_counter(),
                     entry=self._registry.get(call.name),
-                ))
+                )
+                results.append(result)
+                self._observe(context, "tool.completed", {
+                    "tool_execution_id": "x_" + uuid4().hex, "call_index": index,
+                    "status": "skipped", "duration_ms": None,
+                }, result)
                 continue
 
-            result = self.dispatch(raw_call, context)
+            result = self.dispatch(raw_call, context, call_index=index)
             results.append(result)
             terminal_seen = result.terminal
         return results
@@ -328,6 +378,7 @@ class ToolDispatcher:
             audit_tag=entry.audit_tag,
             details=MappingProxyType(dict(outcome.details)),
             logged_arguments=self._logged_arguments(entry, call),
+            final_result=outcome.final_result,
         )
 
     def _error_result(
@@ -380,9 +431,6 @@ class ToolDispatcher:
             cancel_event=threading.Event(),
         )
         invoke_config = tool_invoke_config(context.visibility, control)
-        if timeout is None:
-            return entry.tool.invoke(arguments, config=invoke_config)
-
         # Python 线程无法强制杀死正在运行的 handler；daemon worker 保证 Dispatcher
         # 按时返回，且迟到/永久阻塞的 handler 不会阻止进程退出。
         result_queue: "queue.Queue[tuple[bool, object]]" = queue.Queue(maxsize=1)
@@ -398,9 +446,9 @@ class ToolDispatcher:
             daemon=True,
             name=f"tool-dispatch-{entry.name}",
         ).start()
-        deadline = control.deadline or (time.monotonic() + timeout)
+        deadline = control.deadline
         heartbeat = 5.0
-        poll_interval = 0.05 if entry.cooperative_cancellation else heartbeat
+        poll_interval = 0.05
         next_progress = time.monotonic() + heartbeat
         while True:
             if context.cancel_event.is_set():
@@ -411,7 +459,7 @@ class ToolDispatcher:
                     except queue.Empty:
                         pass
                 raise _DispatchTimeout
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.monotonic() if deadline is not None else heartbeat
             if remaining <= 0:
                 control.cancel_event.set()
                 # 可取消工具（沙箱）有最多 1 秒清理其完整进程组。普通旧工具仍
@@ -425,7 +473,7 @@ class ToolDispatcher:
             try:
                 ok, value = result_queue.get(timeout=min(poll_interval, remaining))
             except queue.Empty:
-                if time.monotonic() >= deadline:
+                if deadline is not None and time.monotonic() >= deadline:
                     control.cancel_event.set()
                     if entry.cooperative_cancellation:
                         try:

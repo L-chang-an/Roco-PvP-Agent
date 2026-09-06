@@ -6,7 +6,7 @@
   <title>Roco PVP Agent</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="chat-page">
   <header>
     <h1>Roco PVP Agent</h1>
     <nav class="top-nav" aria-label="页面导航">
@@ -15,17 +15,25 @@
       <a class="top-link" href="/battle">⚔️ 对战</a>
       <a class="top-link" href="/spectate">👀 观战</a>
     </nav>
-    <button id="reset-btn" title="清空当前会话">reset</button>
+    <button id="new-session-btn" type="button">新建会话</button>
   </header>
 
-  <main id="chat"></main>
+  <main id="chat" aria-label="聊天记录">
+    <button id="older-messages" type="button" hidden>加载更早记录</button>
+  </main>
+  <button id="new-messages" type="button" hidden>有新消息 ↓</button>
+  <div id="chat-status" role="status" aria-live="polite"></div>
 
   <footer>
-    <input id="input" placeholder="输入消息，Enter 发送" autocomplete="off">
+    <textarea id="input" rows="2" maxlength="2000" aria-label="消息" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off"></textarea>
+    <button id="retry-send" type="button" hidden>重试提交</button>
+    <button id="stop-btn" type="button" hidden>停止</button>
     <button id="send-btn">发送</button>
   </footer>
 
   <script src="/static/app.js"></script>
+  <script src="/static/chat-state.js"></script>
+  <script src="/static/round-card.js"></script>
   <script src="/static/chat.js"></script>
 </body>
 </html>

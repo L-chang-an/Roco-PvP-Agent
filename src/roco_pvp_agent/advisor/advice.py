@@ -80,6 +80,12 @@ class TeamAdviceSchema(_StrictAdviceModel):
     uncertainty: str = ""
     alternatives: list[list[UnitAdvice]] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def complete_main_team(self) -> "TeamAdviceSchema":
+        if len(self.team) != self.rules_used.team_size:
+            raise ValueError("主队人数必须等于 rules_used.team_size，完整终稿不接受空队伍")
+        return self
+
 
 def _evidence_check(advice: TeamAdviceSchema) -> list[dict]:
     """EvidenceGate：rationale 必须有证据或明确标注不确定性。"""

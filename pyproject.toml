@@ -27,6 +27,7 @@ packages = ["src/roco_pvp_agent", "src/environment", "src/ui"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["browser: browser acceptance (requires Playwright Chromium)"]
 
 [dependency-groups]
 dev = [
@@ -34,4 +35,5 @@ dev = [
     "pytest-asyncio",
     "respx",
     "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.7.0",
 ]

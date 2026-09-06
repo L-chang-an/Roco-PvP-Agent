@@ -73,7 +73,7 @@ def test_timeout_triggers_exhausted_hook(agent_settings):
 def test_advisor_timeout_returns_informative_degraded(agent_settings):
     """顾问超时 → 有信息降级（含 reason/hint），而非一句空话。"""
     agent = TeamAdvisorAgent(Settings(), llm=ScriptedLLM([AIMessage(content="", tool_calls=[tool_call("echo", {}, "c1")])]))
-    agent._max_total_seconds = 0.0              # 覆写硬编码 55 → 首次即超时
+    agent._max_total_seconds = 0.0              # 覆写有效总预算 → 首次即超时
     reply = agent.chat("帮我组个队")
     body = json.loads(reply.reply)
     assert body["ok"] is False and body["degraded"] is True
@@ -103,7 +103,7 @@ def test_progress_events_emitted_when_thinking_off(agent_settings):
     progresses = [e for e in events if e.get("event") == EVENT_PROGRESS]
     assert progresses, "应发射 progress 事件"
     assert any("第 1/3 轮" in p["text"] for p in progresses)
-    assert all("正在调用工具分析" in p["text"] for p in progresses)
+    assert all("正在分析请求" in p["text"] for p in progresses)
 
 
 def test_progress_not_emitted_when_thinking_on(agent_settings):
@@ -183,7 +183,7 @@ def test_advisor_round_exhaustion_never_returns_old_empty_fallback(agent_setting
     reply = TeamAdvisorAgent(agent_settings, llm=_CatalogLoopLLM()).chat("帮我组个队")
     body = json.loads(reply.reply)
     assert body["reason"] == "rounds"
-    assert body["tools_queried"] == ["get_catalog_version"] * 4
+    assert body["tools_queried"] == ["get_catalog_version"] * agent_settings.chat_max_llm_rounds
     assert body["partial_results"]
     assert "达到最大轮数仍未获得最终答案" not in reply.reply
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
+import re
 
 from environment.dataset import DataSource, load_skills, load_spirits
 
@@ -103,7 +104,7 @@ WELCOME_TEMPLATE = (
 )
 
 
-def route(message: str) -> tuple[str, str]:
+def route(message: str, *, conversation_state: dict | None = None) -> tuple[str, str]:
     """路由入口：返回 (target, text)。
 
     target ∈ agent/refuse/out_of_scope/ambiguous/welcome。非 agent 时 text 为固定模板，
@@ -115,6 +116,10 @@ def route(message: str) -> tuple[str, str]:
     if verdict is ScopeVerdict.OUT_OF_SCOPE:
         return "out_of_scope", OUT_OF_SCOPE_TEMPLATE
     if verdict is ScopeVerdict.AMBIGUOUS:
+        if (conversation_state or {}).get("current_team") and re.search(
+            r"第[一二三四五六1-6]只|(?:把|将).{0,12}(?:换掉|换成|改成)|继续(?:优化|调整)", message
+        ):
+            return "agent", ""
         return "ambiguous", AMBIGUOUS_TEMPLATE
     if _is_welcome(message):
         return "welcome", WELCOME_TEMPLATE

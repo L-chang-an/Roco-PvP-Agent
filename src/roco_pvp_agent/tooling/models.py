@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
+from ..results import AssistantResult
 
 
 class ToolExposure(str, Enum):
@@ -104,6 +105,7 @@ class ToolOutcome:
     retryable: bool = False
     terminal_override: bool | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
+    final_result: AssistantResult | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,7 @@ class ToolDispatchResult:
     audit_tag: str = ""
     details: Mapping[str, Any] = field(default_factory=dict)
     logged_arguments: Mapping[str, Any] | None = None
+    final_result: AssistantResult | None = None
 
     def to_tool_message(self) -> ToolMessage:
         """生成与原始 call id 一一对应的 LangChain ToolMessage。"""

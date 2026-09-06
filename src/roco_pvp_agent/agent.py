@@ -16,6 +16,9 @@ import queue
 import threading
 import time
 from typing import Callable, Collection, Optional
+from uuid import uuid4
+from .events import ExecutionEvent, ExecutionObserver, split_round_summary
+from .results import AssistantResult
 
 from langchain_core.messages import (
     AIMessage,
@@ -59,12 +62,16 @@ class _BudgetExpired(TimeoutError):
     """一次 LLM/工具调用超过本轮对话剩余墙钟预算。"""
 
 
+class _Cancelled(Exception):
+    """Explicit cancellation, distinct from time budget exhaustion."""
+
+
 def _content_text(response) -> str:
     """从响应中提取纯文本 content。
 
     兼容字符串与 Anthropic 风格的块列表（text / tool_use / thinking 块）：
     - text 块取 text 字段；
-    - thinking 块取 thinking 字段（思维链）；
+    - thinking/reasoning 块不进入公开正文；
     - tool_use 块不算思考文本。
     """
     content = getattr(response, "content", "")
@@ -75,10 +82,8 @@ def _content_text(response) -> str:
                 btype = block.get("type")
                 if btype == "text":
                     parts.append(str(block.get("text", "")))
-                elif btype in ("thinking", "reasoning_content", "redacted_thinking"):
-                    parts.append(str(block.get("thinking") or block.get("text") or ""))
-            else:
-                parts.append(str(block))
+            elif isinstance(block, str):
+                parts.append(block)
         return "\n".join(part for part in parts if part)
     return str(content or "")
 
@@ -101,9 +106,15 @@ class ChatReply:
     offline: bool = False
     rounds: int = 0
     loaded_tools: tuple[str, ...] = ()
+    final_result: AssistantResult | None = None
     usage: dict[str, int] = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     )
+
+
+    def __post_init__(self):
+        if self.final_result is None:
+            self.final_result = AssistantResult(message=self.reply, usage=dict(self.usage))
 
 
 class ChatAgent:
@@ -129,7 +140,7 @@ class ChatAgent:
         self._system_prompt = system_prompt
         self._max_llm_rounds = max_llm_rounds
         self._emit_thinking = emit_thinking      # 思维链外显开关（顾问关闭）
-        # 整体时间预算（秒）：超时强制终结，防止用户无限等待（"1 分钟内给答案"的兜底）。
+        # 所有模型与工具调用共用一次对话的截止时间。
         self._max_total_seconds = max_total_seconds
 
     @property
@@ -162,6 +173,7 @@ class ChatAgent:
         event_sink: Optional[Callable[[dict], None]] = None,
         tool_visibility: ToolVisibility | None = None,
         cancel_event: threading.Event | None = None,
+        execution_observer: ExecutionObserver | None = None,
     ) -> ChatReply:
         history = list(history or [])
         visibility = tool_visibility or self.new_tool_visibility()
@@ -171,7 +183,7 @@ class ChatAgent:
             return self._offline_chat(message, history, event_sink, visibility)
         return self._run_online(
             message, history, event_sink, visibility,
-            cancel_event=cancel_event,
+            cancel_event=cancel_event, execution_observer=execution_observer,
         )
 
     # ---------- 离线降级 ----------
@@ -201,166 +213,158 @@ class ChatAgent:
     # ---------- 在线工具循环 ----------
 
     def _run_online(
-        self,
-        message: str,
-        history: list[BaseMessage],
-        event_sink: Optional[Callable[[dict], None]],
-        visibility: ToolVisibility,
-        *,
-        cancel_event: threading.Event | None = None,
+        self, message: str, history: list[BaseMessage], event_sink,
+        visibility: ToolVisibility, *, cancel_event=None, execution_observer=None,
     ) -> ChatReply:
-        working: list[BaseMessage] = [SystemMessage(content=self._system_prompt)]
-        working.extend(history)
-        working.append(HumanMessage(content=message))
-
-        tool_log: list[dict] = []
-        thinking: list[str] = []
+        working = [SystemMessage(content=self._system_prompt), *history, HumanMessage(content=message)]
+        tool_log, thinking = [], []
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-        reply_text = EMPTY_REPLY
+        reply_text, final_result, reason = EMPTY_REPLY, None, None
         rounds = 0
         start_ts = time.monotonic()
+        cancel_event = cancel_event or threading.Event()
+
+        def observe(name, payload):
+            if execution_observer is not None:
+                execution_observer(ExecutionEvent(
+                    name, dispatch_context.round_id, dispatch_context.round_index, payload))
+
+        def progress(text):
+            self._emit(event_sink, {"event": EVENT_PROGRESS, "text": text})
+            observe("round.progress", {"phase": "tools", "text": text})
+
         dispatch_context = DispatchContext(
-            deadline=(start_ts + self._max_total_seconds)
-            if self._max_total_seconds is not None else None,
-            progress_callback=lambda text: self._emit(
-                event_sink, {"event": EVENT_PROGRESS, "text": text}),
-            visibility=visibility,
-            cancel_event=cancel_event or threading.Event(),
+            deadline=start_ts + self._max_total_seconds if self._max_total_seconds is not None else None,
+            progress_callback=progress, visibility=visibility,
+            cancel_event=cancel_event, observer=execution_observer,
         )
-
-        for rounds in range(1, self._max_llm_rounds + 1):
-            # 时间预算：超时立即终结，不再发起新一轮慢调用（"1 分钟内给答案"的兜底）。
-            if self._remaining_seconds(start_ts) == 0:
-                reply_text = self._handle_exhausted(
-                    "timeout", tool_log, thinking, event_sink)
+        for index in range(1, self._max_llm_rounds + 1):
+            if cancel_event.is_set():
+                reason = "cancelled"
                 break
-
-            # 进度事件：顾问关闭思维链（emit_thinking=False）时，仍发一条轻量"第几轮/正在调工具"
-            # 让 CLI/WebUI 在等待期也有反馈，不让用户干等（非原始思维链，无泄露）。
-            if not self._emit_thinking:
-                self._emit(event_sink, {
-                    "event": EVENT_PROGRESS,
-                    "text": f"第 {rounds}/{self._max_llm_rounds} 轮：正在调用工具分析…",
-                })
-
-            # 每轮从会话加载状态派生同一份“模型可见 + Dispatcher 可执行”工具集合。
-            # tool_search 在本轮加载的 schema 只从下一轮起生效，模型必须先看到契约。
-            visible_names = visibility.visible_names()
-            dispatch_context.visible_tool_names = set(visible_names)
-            directory_prompt = visibility.directory_prompt()
-            system_content = self._system_prompt
-            if directory_prompt:
-                system_content = f"{system_content}\n\n{directory_prompt}" \
-                    if system_content else directory_prompt
-            working[0] = SystemMessage(content=system_content)
-            llm = self._get_llm(visible_names)
-
-            # 最后一轮：临时附加强制终结引导（不写入 working/历史，避免污染后续对话）。
+            if self._remaining_seconds(start_ts) == 0:
+                reason = "timeout"
+                break
+            try:
+                visible_names = visibility.visible_names()
+                dispatch_context.visible_tool_names = set(visible_names)
+                directory = visibility.directory_prompt()
+                working[0] = SystemMessage(content=self._system_prompt + ("\n\n" + directory if directory else ""))
+                llm = self._get_llm(visible_names)
+            except Exception:
+                reason = "llm_error"
+                break
+            # Preparing visible schemas/client may consume the remaining budget.
+            if cancel_event.is_set():
+                reason = "cancelled"
+                break
+            if self._remaining_seconds(start_ts) == 0:
+                reason = "timeout"
+                break
             invoke_messages = working
-            if rounds == self._max_llm_rounds:
+            if index == self._max_llm_rounds:
                 invoke_messages = working + [SystemMessage(content=LAST_ROUND_HINT)]
-
+            rounds += 1
+            dispatch_context.round_id = "r_" + uuid4().hex
+            dispatch_context.round_index = rounds
+            round_start, round_status, results = time.monotonic(), "completed", []
+            observe("round.started", {"phase": "model", "text": "正在分析请求…"})
+            if not self._emit_thinking:
+                self._emit(event_sink, {"event": EVENT_PROGRESS,
+                    "text": f"第 {rounds}/{self._max_llm_rounds} 轮：正在分析请求…"})
             try:
                 request_timeout = self._remaining_seconds(start_ts)
                 response = self._run_with_budget(
                     lambda: self._invoke_llm(llm, invoke_messages, request_timeout),
-                    start_ts=start_ts,
-                    event_sink=event_sink,
+                    start_ts=start_ts, event_sink=event_sink,
                     waiting_text=f"第 {rounds}/{self._max_llm_rounds} 轮：模型仍在整理证据…",
+                    cancel_event=cancel_event,
                 )
+                working.append(response)
+                self._accumulate_usage(usage, response)
+                summary, content = split_round_summary(_content_text(response))
+                observe("round.summary", {"source": "model", "text": summary,
+                    "status": "available" if summary else "missing"})
+                calls = getattr(response, "tool_calls", None) or []
+                if self._emit_thinking:
+                    reasoning = _reasoning_text(response)
+                    if reasoning:
+                        thinking.append(reasoning)
+                        self._emit(event_sink, {"event": EVENT_THINKING, "text": reasoning})
+                if not calls:
+                    reply_text = self._handle_no_tool_call(content)
+                    if not content:
+                        final_result = AssistantResult(message=reply_text, kind="partial",
+                            status="degraded", reason_code="empty_reply")
+                    break
+                if content and self._emit_thinking:
+                    legacy_content = content
+                    if isinstance(response.content, list):
+                        blocks = [str(b.get("thinking") or b.get("text") or "")
+                                  for b in response.content if isinstance(b, dict)
+                                  and b.get("type") in ("thinking", "reasoning_content", "redacted_thinking")]
+                        legacy_content = "\n".join([*filter(None, blocks), content])
+                    thinking.append(legacy_content)
+                    self._emit(event_sink, {"event": EVENT_THINKING, "text": legacy_content})
+                if cancel_event.is_set():
+                    raise _Cancelled
+                observe("round.progress", {"phase": "tools", "text": "正在执行工具…"})
+                results = self._dispatcher.dispatch_many(calls, dispatch_context)
+                terminal = None
+                for result in results:
+                    working.append(result.to_tool_message())
+                    entry = self._registry.get(result.call.name)
+                    if not (entry and entry.terminal_on_success):
+                        log = result.to_log_record()
+                        tool_log.append(log)
+                        self._emit(event_sink, {"event": EVENT_TOOL, **{
+                            key: log[key] for key in ("name", "args", "result", "ok", "error_code")}})
+                    if result.terminal and terminal is None:
+                        terminal = result
+                if cancel_event.is_set():
+                    raise _Cancelled
+                if self._remaining_seconds(start_ts) == 0:
+                    raise _BudgetExpired
+                if terminal is not None:
+                    final_result = terminal.final_result
+                    reply_text = final_result.message if final_result else terminal.content
+                    if final_result is None and (not terminal.ok or terminal.retry_exhausted):
+                        final_result = AssistantResult(message=reply_text, kind="partial",
+                            status="degraded", reason_code="terminal_failed")
+                    break
+            except _Cancelled:
+                reason, round_status = "cancelled", "cancelled"
+                break
             except _BudgetExpired:
-                reply_text = self._handle_exhausted(
-                    "timeout", tool_log, thinking, event_sink)
+                reason, round_status = "timeout", "timed_out"
                 break
             except Exception:
-                # API 超时、断网、限流、响应解析失败都不能直接冒泡到 CLI/WebUI。
-                # 详细异常可能带服务端信息，不进入用户回复；统一走子类的安全降级。
-                reply_text = self._handle_exhausted(
-                    "llm_error", tool_log, thinking, event_sink)
+                reason, round_status = "llm_error", "failed"
                 break
-            working.append(response)
-            self._accumulate_usage(usage, response)
-
-            content = _content_text(response)
-            calls = getattr(response, "tool_calls", None) or []
-            reasoning = _reasoning_text(response)
-
-            # 思维链文本：reasoning_content 无条件捕获为思考；content 仅在有工具调用时算思考。
-            # emit_thinking=False（顾问）时既不收集也不发射——不存原始思维链。
-            if reasoning and self._emit_thinking:
-                thinking.append(reasoning)
-                self._emit(event_sink, {"event": EVENT_THINKING, "text": reasoning})
-
-            # 兜底：模型未守协议，返回无工具调用 → 交给 _handle_no_tool_call（默认以 content 为终稿）
-            if not calls:
-                reply_text = self._handle_no_tool_call(content)
-                break
-
-            # 思考文本：伴随工具调用的中间输出，记为思考
-            if content and self._emit_thinking:
-                thinking.append(content)
-                self._emit(event_sink, {"event": EVENT_THINKING, "text": content})
-
-            # 所有工具统一穿过 Dispatcher；Agent Loop 只消费结果，不识别具体工具名。
-            # dispatch_many 保证成功终结后的剩余调用也获得 skipped ToolMessage。
-            results = self._dispatcher.dispatch_many(calls, dispatch_context)
-            terminal_result = None
-            for result in results:
-                working.append(result.to_tool_message())
-                entry = self._registry.get(result.call.name)
-                terminal_capable = bool(entry and entry.terminal_on_success)
-
-                # 保持 ChatReply/UI 既有语义：终结工具不作为取证工具展示；其调用仍完整
-                # 存在于消息历史和 Dispatcher 结果中，协议可重放。
-                if not terminal_capable:
-                    log_record = result.to_log_record()
-                    tool_log.append(log_record)
-                    self._emit(event_sink, {
-                        "event": EVENT_TOOL,
-                        "name": log_record["name"],
-                        "args": log_record["args"],
-                        "result": log_record["result"],
-                        "ok": log_record["ok"],
-                        "error_code": log_record["error_code"],
-                    })
-                if result.terminal and terminal_result is None:
-                    terminal_result = result
-
-            if terminal_result is not None:
-                reply_text = terminal_result.content
-                break
-
-            budget_exhausted = (
-                self._remaining_seconds(start_ts) == 0
-                and any(result.error_code is ToolErrorCode.TIMEOUT for result in results)
-            )
-            if budget_exhausted:
-                reply_text = self._handle_exhausted(
-                    "timeout", tool_log, thinking, event_sink)
-                break
+            finally:
+                observe("round.completed", {
+                    "status": round_status, "tool_count": len(results),
+                    "duration_ms": round((time.monotonic() - round_start) * 1000, 2),
+                    "has_warnings": any(not result.ok for result in results),
+                })
         else:
-            # 轮次耗尽仍未获得终稿 → 交给 _handle_exhausted（默认通用预算降级，
-            # 顾问覆写为有信息的降级答案）。
-            reply_text = self._handle_exhausted(
-                "rounds", tool_log, thinking, event_sink)
-
-        # 若最终走了"未终结"路径（timeout/rounds），最后一条 AI 消息可能带未回填的
-        # tool_result——补全保证历史可重放（OpenAI/Anthropic 网关 400 防护）。
-        last = working[-1]
-        for call in getattr(last, "tool_calls", None) or []:
-            working.append(
-                ToolMessage(content="未执行（已中止）", tool_call_id=call.get("id", ""))
-            )
-
-        reply_obj = ChatReply(
-            reply=reply_text,
-            tool_calls=tool_log,
-            thinking=thinking,
-            history=working[1:],
-            rounds=rounds,
-            loaded_tools=visibility.loaded_names(),
-            usage=usage,
-        )
+            reason = "rounds"
+        if reason:
+            reply_text = "（本次请求已停止。）" if reason == "cancelled" else self._handle_exhausted(
+                reason, tool_log, thinking, event_sink)
+            status = {"timeout": "timed_out", "cancelled": "cancelled",
+                      "llm_error": "failed", "rounds": "degraded"}[reason]
+            final_result = AssistantResult(message=reply_text, status=status,
+                kind="partial" if tool_log or reason == "rounds" else "error", reason_code=reason)
+        # Every outstanding tool call must have a matching observation on early exit.
+        for call in getattr(working[-1], "tool_calls", None) or []:
+            working.append(ToolMessage(content="未执行（已中止）", tool_call_id=call.get("id", "")))
+        if final_result is None:
+            final_result = AssistantResult(message=reply_text)
+        final_result = final_result.model_copy(update={"usage": dict(usage)})
+        reply_obj = ChatReply(reply=reply_text, tool_calls=tool_log, thinking=thinking,
+            history=working[1:], rounds=rounds, loaded_tools=visibility.loaded_names(),
+            usage=usage, final_result=final_result)
         self._emit_reply_events(event_sink, reply_obj)
         return reply_obj
 
@@ -413,6 +417,7 @@ class ChatAgent:
         start_ts: float,
         event_sink: Optional[Callable[[dict], None]],
         waiting_text: str,
+        cancel_event: threading.Event | None = None,
     ):
         """在剩余墙钟预算内执行阻塞调用，并每 5 秒发一次安全进度摘要。
 
@@ -421,9 +426,9 @@ class ChatAgent:
         request timeout 仍作为第二层资源回收保护。
         """
         remaining = self._remaining_seconds(start_ts)
-        if remaining is None:
+        if remaining is None and cancel_event is None:
             return fn()
-        if remaining <= 0:
+        if remaining is not None and remaining <= 0:
             raise _BudgetExpired
 
         result_queue: "queue.Queue[tuple[bool, object]]" = queue.Queue(maxsize=1)
@@ -434,20 +439,29 @@ class ChatAgent:
             except BaseException as exc:  # 在线程边界传回，主线程统一处理
                 result_queue.put((False, exc))
 
+        deadline = time.monotonic() + remaining if remaining is not None else None
         threading.Thread(target=worker, daemon=True).start()
-        deadline = time.monotonic() + remaining
         heartbeat = 5.0
+        next_progress = time.monotonic() + heartbeat
         while True:
-            wait_for = min(heartbeat, max(0.0, deadline - time.monotonic()))
+            if cancel_event is not None and cancel_event.is_set():
+                raise _Cancelled
+            wait_for = min(0.05, max(0.0, deadline - time.monotonic())) if deadline is not None else 0.05
             if wait_for <= 0:
                 raise _BudgetExpired
             try:
                 ok, value = result_queue.get(timeout=wait_for)
             except queue.Empty:
-                if time.monotonic() >= deadline:
+                if deadline is not None and time.monotonic() >= deadline:
                     raise _BudgetExpired
-                self._emit(event_sink, {"event": EVENT_PROGRESS, "text": waiting_text})
+                if time.monotonic() >= next_progress:
+                    self._emit(event_sink, {"event": EVENT_PROGRESS, "text": waiting_text})
+                    next_progress = time.monotonic() + heartbeat
                 continue
+            if cancel_event is not None and cancel_event.is_set():
+                raise _Cancelled
+            if deadline is not None and time.monotonic() >= deadline:
+                raise _BudgetExpired
             if ok:
                 return value
             raise value

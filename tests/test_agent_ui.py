@@ -138,7 +138,7 @@ def test_stream_event_sequence_final():
     events = _stream_events(_client(_final_llm("你好")), "/api/chat/stream?message=帮我组队")
     assert [e["event"] for e in events] == ["meta", "progress", "reply", "done"]
     assert events[0]["session_id"]
-    assert "第 1/4 轮" in events[1]["text"]
+    assert "第 1/100 轮" in events[1]["text"]
     assert events[2]["text"] == "你好"
 
 

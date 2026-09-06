@@ -18,6 +18,10 @@ class Settings(BaseModel):
     base_url: str = ""  # 空则走 OpenAI 官方默认
     timeout: float = 60.0
     debug: bool = False
+    chat_max_llm_rounds: int = Field(default=100, ge=1)
+    chat_max_total_seconds: float = Field(default=555.0, ge=0)
+    chat_db_path: str = "artifacts/chat/sessions.sqlite3"
+    chat_max_concurrent_turns: int = Field(default=4, ge=1)
 
     # Chat Mode 只读查询沙箱。默认关闭；生产应显式指定后端与独立 CPython 3.12。
     sandbox_enabled: bool = False
@@ -62,6 +66,10 @@ def load_settings() -> Settings:
         base_url=os.getenv("LLM_BASE_URL", ""),
         timeout=float(os.getenv("LLM_TIMEOUT", "60")),
         debug=os.getenv("DEBUG", "").lower() in ("1", "true", "yes"),
+        chat_max_llm_rounds=int(os.getenv("CHAT_MAX_LLM_ROUNDS", "100")),
+        chat_max_total_seconds=float(os.getenv("CHAT_MAX_TOTAL_SECONDS", "555")),
+        chat_db_path=os.getenv("CHAT_DB_PATH", "artifacts/chat/sessions.sqlite3"),
+        chat_max_concurrent_turns=int(os.getenv("CHAT_MAX_CONCURRENT_TURNS", "4")),
         sandbox_enabled=os.getenv("SANDBOX_ENABLED", "").lower() in ("1", "true", "yes"),
         sandbox_backend=os.getenv("SANDBOX_BACKEND", "auto"),
         sandbox_runtime_python=os.getenv("SANDBOX_RUNTIME_PYTHON", ""),

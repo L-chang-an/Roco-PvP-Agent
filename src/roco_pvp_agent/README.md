@@ -18,9 +18,13 @@
 ## 两种 Agent
 
 - **`ChatAgent`**：通用工具循环基类。工具 Registry、自定义工具和思维链外显都可注入，默认注册 `echo` 与 `final_answer`。
-- **`TeamAdvisorAgent`**：组队顾问，替换了基础助手成为默认入口。它先过 ScopeGate，再按问题所需并行取证；完整配队走 `submit_team_advice` 硬闸，配招/克制/局部策略可用 `final_answer` 快速终结。默认最多 4 个模型轮次、约 55 秒墙钟预算。
+- **`TeamAdvisorAgent`**：组队顾问，替换了基础助手成为默认入口。它先过 ScopeGate，再按问题所需并行取证；完整配队走 `submit_team_advice` 硬闸，配招/克制/局部策略可用 `final_answer` 快速终结。默认最多 100 个模型轮次、约 555 秒墙钟预算。
 
 CLI 和 Web SSE 都会实时展示安全的阶段摘要与工具调用。顾问不外显原始思维链；模型超时、限流或未按协议终结时，会返回已完成工具的阶段结果，而不是无限等待或只显示“达到最大轮数”。
+
+Web 使用新的结构化 observer：每次真实模型调用生成独立 Round，并展示主模型同次响应
+提供的 `round_summary`。思考摘要与确定性工具摘要分别呈现，不增加摘要模型调用。
+旧 `event_sink` 与 `ChatReply` 字段继续兼容 CLI；`final_result` 提供显式结果类型。
 
 工具 schema 不再默认全量塞入每轮请求：高频工具立即可见，低频分析、模拟、轨迹与记忆工具只以
 紧凑目录出现。模型通过 `tool_search` 加载完整 schema 后，下一轮才能直接调用；加载状态由 CLI/Web

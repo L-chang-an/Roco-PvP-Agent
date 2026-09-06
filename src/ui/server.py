@@ -15,11 +15,13 @@ import asyncio
 import json
 import queue
 import threading
+import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -29,6 +31,9 @@ from roco_pvp_agent.config import Settings, get_settings
 from .context import ChatContext
 from .routes_battle import router as battle_router
 from .routes_team import router as team_router
+from .routes_chat import router as chat_router
+from .chat_store import SQLiteChatSessionStore, ChatError
+from .turn_coordinator import TurnCoordinator
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -105,15 +110,40 @@ class _CancellableStreamingResponse(StreamingResponse):
             self._cancel_event.set()
 
 
-def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = None) -> FastAPI:
+def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = None,
+                    chat_store: SQLiteChatSessionStore | None = None) -> FastAPI:
     llm = llm_factory(settings) if llm_factory else None
     agent = TeamAdvisorAgent(settings, llm=llm)
     context = ChatContext(agent)
 
-    app = FastAPI(title="Roco PVP Agent")
+    @asynccontextmanager
+    async def lifespan(app):
+        store = chat_store or SQLiteChatSessionStore(settings.chat_db_path)
+        store.open()
+        try:
+            store.recover()
+            coordinator = TurnCoordinator(agent, store, max_active=settings.chat_max_concurrent_turns)
+            app.state.turn_coordinator = coordinator
+            try:
+                yield
+            finally:
+                await asyncio.to_thread(coordinator.close)
+                app.state.turn_coordinator = None
+        finally:
+            store.close()
+
+    app = FastAPI(title="Roco PVP Agent", lifespan=lifespan)
     app.state.agent = agent
     app.state.context = context
     app.state.settings = settings
+
+    @app.exception_handler(ChatError)
+    async def chat_error_handler(request, exc):
+        return JSONResponse({"error": exc.code, **exc.details}, status_code=exc.status)
+
+    @app.exception_handler(sqlite3.Error)
+    async def storage_error_handler(request, exc):
+        return JSONResponse({"error": "CHAT_STORAGE_UNAVAILABLE", "message": "聊天记录存储暂不可用。"}, status_code=503)
 
     # ---------- 基础 ----------
 
@@ -133,6 +163,8 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
             "model": s.model,
             "has_api_key": s.has_api_key,
             "debug": s.debug,
+            "chat_budget": {"max_llm_rounds": agent._max_llm_rounds,
+                            "max_total_seconds": agent._max_total_seconds},
         }
 
     # ---------- 同步兜底（SSE 不可用时的 POST 回退） ----------
@@ -213,6 +245,10 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/chat/{session_id}")
+    def chat_page(session_id: str) -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
     @app.get("/team")
     def team_page() -> FileResponse:
         return FileResponse(STATIC_DIR / "team.html")
@@ -229,6 +265,7 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
 
     # ---------- 组队模式（精灵搜索 + 校验 + 队伍持久化，见 routes_team.py） ----------
     app.include_router(team_router)
+    app.include_router(chat_router)
 
     # ---------- 对战模式（人类 vs LLM，见 routes_battle.py） ----------
     app.include_router(battle_router)

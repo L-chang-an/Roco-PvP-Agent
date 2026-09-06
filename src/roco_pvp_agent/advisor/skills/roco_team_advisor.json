@@ -1,7 +1,7 @@
 {
   "name": "roco-team-advisor",
-  "version": 1,
-  "hash": "425f0d59a34f42c863486454442bf93dce6fdf21922d5fb995cbc54eff4325b4",
+  "version": 2,
+  "hash": "facf483a4c0338b187524ef5e5feb52e9ca428510ac2c27a77be9df036c0a30e",
   "status": "active",
   "trigger": [
     "组队",
@@ -37,5 +37,5 @@
     "轨迹必须 replay_ok",
     "人机与 selfplay 证据分别报告"
   ],
-  "body": "1. 解析用户约束并列明缺省假设。\n2. 按问题所需取证，不机械执行全工具链；互不依赖的候选、档案、轨迹和记忆查询应在同一轮并行调用。\n3. 完整配队在候选确定后调用 validate_team 硬闸，再按需 analyze_team / simulate_matchups。\n4. 记忆只作历史经验佐证，不覆盖数据库和引擎；人机与自博弈证据分开报告。\n5. 目标 3 轮、最多 4 轮内收敛；最后一轮禁止继续查询。\n6. 完整合法阵容用 submit_team_advice；配招、克制、局部策略、轨迹解释或阶段性建议用 final_answer。\n7. 未过 validate_team 的阵容绝不推荐；证据不足标「理论构筑/启发式建议/样本不足」。"
+  "body": "1. 解析用户约束并列明缺省假设。\n2. 按问题所需取证，不机械执行全工具链；互不依赖的候选、档案、轨迹和记忆查询应在同一轮并行调用。\n3. 完整配队在候选确定后调用 validate_team 硬闸，再按需 analyze_team / simulate_matchups。\n4. 记忆只作历史经验佐证，不覆盖数据库和引擎；人机与自博弈证据分开报告。\n5. 遵守本次 Harness 的有效轮次和总时间预算，信息足够即可终结；最后一轮禁止继续查询。每轮同一响应中附上公开 round_summary，简述目标、判断依据和待验证事项。\n6. 完整合法阵容用 submit_team_advice；配招、克制、局部策略、轨迹解释或阶段性建议用 final_answer。\n7. 未过 validate_team 的阵容绝不推荐；证据不足标「理论构筑/启发式建议/样本不足」。"
 }

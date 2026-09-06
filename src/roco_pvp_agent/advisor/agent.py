@@ -45,6 +45,7 @@ from roco_pvp_agent.advisor.tool_schemas import (
 )
 from roco_pvp_agent.advisor.trajectory import query_trajectory_evidence as _query_trajectory
 from roco_pvp_agent.agent import ChatAgent, ChatReply
+from roco_pvp_agent.results import AssistantResult
 from roco_pvp_agent.sandbox import (
     SandboxPythonQueryTool,
     SandboxQueryService,
@@ -150,10 +151,11 @@ def _build_advisor_registry(*, battles_dir=None, runs_dir=None,
         return _dump(catalog.get_build_options(name, bloodline))
 
     @tool(args_schema=ValidateTeamArgs)
-    def validate_team(team: list[TeamPickInput], items: list[str] | None = None) -> str:
+    def validate_team(team: list[TeamPickInput], items: list[str] | None = None,
+                      team_size: Literal[3, 6] = 3) -> str:
         """组队硬闸：校验阵容（spirit/skills/bloodline/nature/iv），返回 {ok, errors:[{code,message,pick_index}]}。"""
         picks = [_to_team_pick(p) for p in team]
-        tv = advisor_validate.validate_team(picks, items or [])
+        tv = advisor_validate.validate_team(picks, items or [], rules=build_battle_rules(team_size=team_size))
         return _dump({"ok": tv.ok, "errors": tv.errors})
 
     @tool(args_schema=QueryTrajectoryEvidenceArgs)
@@ -235,6 +237,9 @@ def _build_advisor_registry(*, battles_dir=None, runs_dir=None,
             return ToolOutcome(
                 content=_dump(result["advice"].model_dump()),
                 details={"validation": {"ok": True, "errors": []}},
+                final_result=AssistantResult(kind="team_advice",
+                    message=_dump(result["advice"].model_dump()),
+                    advice=result["advice"].model_dump()),
             )
         errors = list(result["errors"])
         return ToolOutcome(
@@ -253,6 +258,8 @@ def _build_advisor_registry(*, battles_dir=None, runs_dir=None,
             content=_degraded_answer(errors),
             terminal_override=True,
             details={"validation": {"ok": False, "errors": errors}},
+            final_result=AssistantResult(kind="partial", message=_degraded_answer(errors),
+                status="degraded", reason_code="advice_validation_failed"),
         )
 
     for registered_tool, audit_tag, exposure, directory_description in (
@@ -350,7 +357,8 @@ def _degraded_answer(errors: list[dict]) -> str:
 class TeamAdvisorAgent(ChatAgent):
     """组队顾问：结构化终结 + EvidenceGate + 关闭思维链外显。"""
 
-    def __init__(self, settings, *, llm=None, max_llm_rounds: int = 100,
+    def __init__(self, settings, *, llm=None, max_llm_rounds: int | None = None,
+                 max_total_seconds: float | None = None,
                  battles_dir=None, runs_dir=None,
                  memory_dir: str | None = None,
                  globalmem_dir: str | None = None,
@@ -364,8 +372,11 @@ class TeamAdvisorAgent(ChatAgent):
         super().__init__(
             settings,
             llm=llm,
-            system_prompt=ADVISOR_SYSTEM_PROMPT,
-            max_llm_rounds=max_llm_rounds,
+            system_prompt=ADVISOR_SYSTEM_PROMPT.replace("{max_llm_rounds}", str(
+                max_llm_rounds if max_llm_rounds is not None else settings.chat_max_llm_rounds
+            )).replace("{max_total_seconds}", str(
+                max_total_seconds if max_total_seconds is not None else settings.chat_max_total_seconds)),
+            max_llm_rounds=max_llm_rounds if max_llm_rounds is not None else settings.chat_max_llm_rounds,
             registry=_build_advisor_registry(
                 battles_dir=battles_dir,
                 runs_dir=runs_dir,
@@ -374,7 +385,7 @@ class TeamAdvisorAgent(ChatAgent):
                 sandbox_service=sandbox_setup.service,
             ),
             emit_thinking=False,
-            max_total_seconds=555.0,       # < 1 分钟兜底：超时强制终结
+            max_total_seconds=max_total_seconds if max_total_seconds is not None else settings.chat_max_total_seconds,
         )
 
     @property
@@ -385,11 +396,11 @@ class TeamAdvisorAgent(ChatAgent):
 
     def chat(self, message, history=None, *, event_sink=None,
              tool_visibility: ToolVisibility | None = None,
-             cancel_event=None):
+             cancel_event=None, execution_observer=None, conversation_state=None):
         """先过 ScopeGate；越界/注入/模糊/欢迎走固定模板，不进入 LLM。"""
         if tool_visibility is not None and tool_visibility.registry is not self._registry:
             raise ValueError("tool_visibility 不属于当前 Agent 的 ToolRegistry")
-        target, text = _route(message)
+        target, text = _route(message, conversation_state=conversation_state)
         if target != "agent":
             return self._scoped_reply(
                 message, text, history, event_sink, tool_visibility)
@@ -399,6 +410,7 @@ class TeamAdvisorAgent(ChatAgent):
             event_sink=event_sink,
             tool_visibility=tool_visibility,
             cancel_event=cancel_event,
+            execution_observer=execution_observer,
         )
 
     def _scoped_reply(self, message: str, text: str, history, event_sink,
@@ -421,9 +433,9 @@ class TeamAdvisorAgent(ChatAgent):
         """轮次耗尽 / 超时 / API 异常时返回已核实结果，而非一句空话。"""
         names = [t["name"] for t in tool_log]
         when = {
-            "timeout": "约 555 秒的对话预算内",
+            "timeout": f"{self._max_total_seconds:g} 秒的对话时间预算内",
             "llm_error": "模型服务发生异常后",
-            "rounds": "100 个模型轮次内",
+            "rounds": f"{self._max_llm_rounds} 个模型轮次内",
         }.get(reason, "当前预算内")
         # 最多带回 3 条、每条 800 字符的已核实工具结果；既有实际信息，又避免降级回复失控膨胀。
         partial_results = [
@@ -434,7 +446,7 @@ class TeamAdvisorAgent(ChatAgent):
             "ok": False,
             "degraded": True,
             "reason": reason,
-            "message": f"{when}未能生成完整终稿；先返回本轮已经核实的阶段结果。",
+            "message": f"{when}未能生成完整终稿；先返回本轮已经取得的执行结果。",
             "tools_queried": names,
             "partial_results": partial_results,
             "hint": (
