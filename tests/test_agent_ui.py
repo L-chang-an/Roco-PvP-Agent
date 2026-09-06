@@ -14,14 +14,29 @@ from ui.server import SERVER_ERROR_REPLY, create_chat_app  # noqa: E402
 
 from fakes import ScriptedLLM, tool_call  # noqa: E402
 
+_clients = []
+_database_root = None
+
+
+@pytest.fixture(autouse=True)
+def durable_client_lifespans(tmp_path):
+    global _database_root
+    _database_root = tmp_path
+    yield
+    while _clients:
+        _clients.pop().__exit__(None, None, None)
+
 
 def _settings():
     return Settings(api_key="sk-test", base_url="http://test.invalid", model="test-model", timeout=5.0)
 
 
 def _client(llm_factory):
-    app = create_chat_app(_settings(), llm_factory=llm_factory)
-    return TestClient(app)
+    settings = _settings().model_copy(update={'chat_db_path': str(_database_root / f'chat-{len(_clients)}.db')})
+    app = create_chat_app(settings, llm_factory=llm_factory)
+    client = TestClient(app).__enter__()
+    _clients.append(client)
+    return client
 
 
 def _final_llm(text="你好"):

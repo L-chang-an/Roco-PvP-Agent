@@ -70,7 +70,7 @@ def test_persist_replay_and_restart_normalized_checkpoint(tmp_path):
         assert [e["event"] for e in tail] == ["done"]
         assert client.get(f"/api/chat/turns/{tid}/events?after_seq=9999").status_code == 400
         cp = app.state.turn_coordinator.store.checkpoint(sid)
-        assert cp["messages"] == [{"role": "human", "content": "帮我组队"}, {"role": "ai", "content": "完成回答"}]
+        assert cp["messages"] == [{"role": "human", "content": "帮我组队", "turn_id": tid}, {"role": "ai", "content": "完成回答", "turn_id": tid}]
         assert "公开思考摘要" not in json.dumps(cp, ensure_ascii=False)
         assert not client.get(f"/api/chat/sessions/{sid}").json()["active_turn_id"]
     seen = []

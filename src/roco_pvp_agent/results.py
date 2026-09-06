@@ -16,3 +16,4 @@ class AssistantResult(BaseModel):
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     # Trusted terminal payload, stored separately by the coordinator, never in tool events.
     advice: dict[str, Any] | None = Field(default=None, exclude=True)
+    legacy_message: str | None = Field(default=None, exclude=True)

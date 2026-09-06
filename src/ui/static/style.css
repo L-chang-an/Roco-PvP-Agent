@@ -967,6 +967,42 @@ footer button:disabled {
 .switch-menu .act-btn { white-space: nowrap; }
 
 /* Durable chat and round cards: scoped to avoid changing team/battle pages. */
+.chat-page #sessions-sidebar { position: fixed; top: var(--chat-header-height, 60px); bottom: 0; left: 0; width: 250px; padding: 16px; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--border); z-index: 12; }
+.chat-page #session-search { width: 100%; padding: 9px; margin: 12px 0; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.chat-page #session-title { margin: 18px 24px 0 280px; font-size: 18px; overflow-wrap: anywhere; }
+.chat-page #chat, .chat-page #chat-status, .chat-page footer { margin-left: 250px; }
+.chat-page .session-entry { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.chat-page .session-date-group { font-size: 12px; color: var(--muted); margin-top: 16px; }
+.chat-page .session-link { display: block; overflow-wrap: anywhere; color: var(--text); text-decoration: none; padding: 6px 0; }
+.chat-page .session-link[aria-current='page'] { color: var(--accent); font-weight: bold; }
+.chat-page .session-preview, .chat-page .session-entry small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.chat-page .session-menu { margin-top: 8px; font-size: 12px; }
+.chat-page .session-menu button { margin: 5px 4px 0 0; }
+.chat-page .action-error { color: #f2c078; font-size: 12px; }
+.chat-page #sessions-toggle { display: none; }
+.chat-page .advice-members { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.chat-page .advice-member { padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; overflow-wrap: anywhere; }
+.chat-page .team-advice-card h2, .chat-page .team-advice-card h3 { margin: 12px 0 8px; }
+.chat-page .team-advice-card p { margin: 8px 0; line-height: 1.6; }
+.chat-page .team-advice-card pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-page .advice-skills { display: flex; flex-wrap: wrap; gap: 5px; }
+.chat-page .advice-skills span { padding: 4px 7px; border-radius: 5px; background: var(--bg); }
+.chat-page .advice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.chat-page .advice-actions a, .chat-page .save-status a { color: var(--accent); padding: 5px; }
+.chat-page [aria-disabled='true'] { opacity: .5; }
+.chat-page .retry-turn { align-self: flex-start; }
+.chat-page .session-menu button, .chat-page .team-advice-card button, .chat-page .retry-turn, .chat-page #more-sessions { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+.chat-page .team-advice-card button { border-color: var(--accent); color: var(--accent); }
+.chat-page button:disabled { cursor: default; opacity: .5; }
+@media (max-width: 1100px) { .chat-page .advice-members { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 800px) {
+  .chat-page #sessions-sidebar { display: none; width: min(300px, 85vw); }
+  .chat-page.sessions-open #sessions-sidebar { display: block; }
+  .chat-page #sessions-toggle { display: inline-block; }
+  .chat-page #chat, .chat-page #chat-status, .chat-page footer { margin-left: 0; }
+  .chat-page #session-title { margin-left: 16px; }
+}
+@media (max-width: 540px) { .chat-page .advice-members { grid-template-columns: 1fr; } }
 .chat-page [hidden] { display: none !important; }
 .chat-page { height: auto; min-height: 100vh; min-height: 100dvh; }
 /* Keep one page scroll range: cards grow the document instead of a clipped inner pane. */

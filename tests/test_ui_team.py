@@ -33,8 +33,9 @@ def _settings() -> Settings:
 def client(tmp_path, monkeypatch):
     """每个测试一个独立应用 + 独立队伍落盘目录（零副作用）。"""
     monkeypatch.setattr(routes_team, "TEAMS_DIR", tmp_path)
-    app = create_chat_app(_settings())
-    return TestClient(app)
+    app = create_chat_app(_settings().model_copy(update={'chat_db_path': str(tmp_path / 'chat.db')}))
+    with TestClient(app) as active:
+        yield active
 
 
 # ---------- 组队数据构造（真实数据，与前端同一来源） ----------

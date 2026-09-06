@@ -198,7 +198,8 @@ def test_full_team_payload_survives_tool_text_limit():
     result = ToolDispatcher(_build_advisor_registry()).dispatch(tool_call("submit_team_advice", {"payload": payload}), DispatchContext())
     assert result.ok and result.truncated
     assert result.final_result.advice["synergy"] == payload["synergy"]
-    assert len(result.final_result.message) > 20_000
+    assert '主队配置已通过校验' in result.final_result.message
+    assert len(result.final_result.message) < 240
     presentation, details = present_tool(result)
     assert presentation["domain_status"] == "valid"
     assert "synergy" not in json.dumps(details)

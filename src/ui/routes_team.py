@@ -23,8 +23,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +45,8 @@ from environment.teambuilder import (
     learnable_skills,
     validate_team,
 )
+
+from .team_service import enrich_pick, atomic_write, serialize_v2, validate_document
 
 router = APIRouter(prefix="/api/team", tags=["team"])
 
@@ -92,6 +92,7 @@ class SaveTeamBody(TeamBody):
     """保存请求：在校验之上加 `path`（绝对路径或相对 TEAMS_DIR 的文件名/子路径）。"""
 
     path: str = ""
+    overwrite: bool | None = None  # None preserves the legacy API; current UI explicitly confirms.
 
     model_config = ConfigDict(extra="forbid")
 
@@ -139,21 +140,9 @@ def _pick_from(body: PickBody) -> TeamPick:
 
 
 def _enrich_pick(p: PickBody) -> dict:
-    """PickBody → 落盘 dict（版本 2 富化：技能带 {name,type,desc}、精灵带 trait{name,desc}）。
-
-    从 FULL 数据查表嵌入——保存文件自描述，不依赖数据源也能读懂。
-    **富化只发生在写盘时**；请求体仍是最简形状（PickBody extra="forbid" 拒绝富化字段）。
-    """
-    d = p.model_dump()
-    full_skills = load_skills(DataSource.FULL)
-    d["skills"] = [
-        {"name": s, "type": full_skills[s].type, "desc": full_skills[s].desc}
-        for s in p.skills if s in full_skills
-    ]
-    sp = load_spirits(DataSource.FULL).get(p.spirit)
-    if sp is not None:
-        d["trait"] = {"name": sp.trait_name, "desc": sp.trait_desc}
-    return d
+    data = enrich_pick(p.model_dump())
+    data.pop("types", None)
+    return data
 
 
 def _rules_for(team_size: int) -> BattleRules:
@@ -188,22 +177,7 @@ def _resolve_path(path: str, *, must_exist: bool) -> Path:
     return p
 
 
-def _atomic_write(target: Path, payload: dict) -> None:
-    """同目录临时文件 + fsync + os.replace：写一半断电也不会留下半个 JSON。"""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".team-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+_atomic_write = atomic_write
 
 
 def _spirit_card(sp) -> dict:
@@ -336,13 +310,8 @@ def validate_team_route(body: TeamBody) -> dict[str, Any]:
     这是**保存的闸门**：`validate_team(picks, [], rules, VALID)` 通过才允许落盘。
     """
     _ensure_team_size(body.team_size)
-    picks = [_pick_from(p) for p in body.team]
-    rules = _rules_for(body.team_size)
-    errors = validate_team(picks, body.items, rules, VALID)
-    if errors:
-        return {"ok": False, "errors": errors}
-    roster = build_roster(picks, VALID, rules)
-    return {"ok": True, "errors": [], "team_size": body.team_size, "roster": roster}
+    checked = validate_document(body.model_dump())
+    return {'ok': checked['ok'], 'errors': checked['errors'], 'team_size': body.team_size, 'roster': checked['roster']}
 
 
 @router.post("/save")
@@ -352,19 +321,15 @@ def save_team(body: SaveTeamBody) -> dict[str, Any]:
     路径语义见 `_resolve_path`：空 → teams/时间戳.json；相对 → teams/下；绝对 → 自选位置。
     """
     _ensure_team_size(body.team_size)
-    picks = [_pick_from(p) for p in body.team]
-    errors = validate_team(picks, body.items, _rules_for(body.team_size), VALID)
+    document = body.model_dump(exclude={'path', 'overwrite'})
+    errors = validate_document(document)['errors']
     if errors:
         raise HTTPException(status_code=422, detail={"message": "队伍不合法，未保存。", "errors": errors})
     target = _resolve_path(body.path, must_exist=False)
+    if body.overwrite is False and target.exists():
+        raise HTTPException(status_code=409, detail={'code': 'OVERWRITE_REQUIRED', 'path': str(target)})
     saved_at = _now()
-    payload = {
-        "version": 2,
-        "saved_at": saved_at,
-        "team_size": body.team_size,
-        "items": list(body.items),
-        "team": [_enrich_pick(p) for p in body.team],
-    }
+    payload = serialize_v2(document, saved_at)
     _atomic_write(target, payload)
     return {"ok": True, "path": str(target), "saved_at": saved_at}
 

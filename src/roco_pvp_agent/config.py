@@ -22,6 +22,8 @@ class Settings(BaseModel):
     chat_max_total_seconds: float = Field(default=555.0, ge=0)
     chat_db_path: str = "artifacts/chat/sessions.sqlite3"
     chat_max_concurrent_turns: int = Field(default=4, ge=1)
+    chat_context_max_chars: int = Field(default=32000, ge=1000)
+    chat_context_max_turns: int = Field(default=20, ge=1)
 
     # Chat Mode 只读查询沙箱。默认关闭；生产应显式指定后端与独立 CPython 3.12。
     sandbox_enabled: bool = False
@@ -70,6 +72,8 @@ def load_settings() -> Settings:
         chat_max_total_seconds=float(os.getenv("CHAT_MAX_TOTAL_SECONDS", "555")),
         chat_db_path=os.getenv("CHAT_DB_PATH", "artifacts/chat/sessions.sqlite3"),
         chat_max_concurrent_turns=int(os.getenv("CHAT_MAX_CONCURRENT_TURNS", "4")),
+        chat_context_max_chars=int(os.getenv("CHAT_CONTEXT_MAX_CHARS", "32000")),
+        chat_context_max_turns=int(os.getenv("CHAT_CONTEXT_MAX_TURNS", "20")),
         sandbox_enabled=os.getenv("SANDBOX_ENABLED", "").lower() in ("1", "true", "yes"),
         sandbox_backend=os.getenv("SANDBOX_BACKEND", "auto"),
         sandbox_runtime_python=os.getenv("SANDBOX_RUNTIME_PYTHON", ""),

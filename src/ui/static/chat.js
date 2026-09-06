@@ -5,6 +5,7 @@
   const el = RoundCard.el;
   let state, generation = 0, source = null, pollTimer = null, activeTurn = null;
   let views = new Map(), nextBefore = null, pending = null, selecting = false;
+  let sessionMeta = null;
   const chat = () => document.querySelector("#chat");
   const scroller = () => document.scrollingElement;
   const input = () => document.querySelector("#input");
@@ -16,7 +17,7 @@
     const res = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...options.headers } });
     const data = await res.json();
     if (!res.ok) {
-      const error = new Error(data.message || data.error || (typeof data.detail === "string" ? data.detail : "请求失败（HTTP " + res.status + "）"));
+      const error = new Error(data.message || (data.errors ? data.errors.map(x => typeof x === 'string' ? x : x.message).join('；') : null) || data.error || (typeof data.detail === "string" ? data.detail : "请求失败（HTTP " + res.status + "）"));
       error.code = data.error; error.data = data; error.status = res.status; throw error;
     }
     return data;
@@ -28,7 +29,7 @@
     else document.querySelector("#new-messages").hidden = false;
   }
   function controls() {
-    const busy = selecting || !!pending || !!activeTurn;
+    const busy = selecting || !state || !!sessionMeta?.archived_at || !!pending || !!activeTurn;
     document.querySelector("#send-btn").disabled = busy;
     const stop = document.querySelector("#stop-btn");
     stop.hidden = !activeTurn;
@@ -47,8 +48,10 @@
       " · " + Object.keys(turn.rounds).length + " 轮 · 已用 " + seconds + " 秒";
   }
   function renderResult(container, result) {
-    if (container.dataset.message === result.message) return;
-    container.dataset.message = result.message; container.replaceChildren();
+    const key = JSON.stringify([result.kind, result.message, result.artifacts]);
+    if (container.dataset.message === key) return;
+    container.dataset.message = key; container.replaceChildren();
+    const gen = generation;
     const md = el("div", "reply-md"); md.innerHTML = renderMarkdown(result.message);
     const raw = el("pre", "reply-raw", result.message); raw.hidden = true;
     const bar = el("div", "reply-toolbar"), toggle = el("button", "", "查看原文"), copy = el("button", "", "复制");
@@ -62,6 +65,9 @@
       catch { copy.textContent = "复制失败，请切换原文复制"; }
     });
     bar.append(toggle, copy); container.append(md, raw, bar);
+    if (result.kind === 'team_advice') {
+      result.artifacts.forEach(ref => TeamAdviceCard.render(container, ref, api, () => gen === generation && container.isConnected));
+    }
     if (result.usage?.total_tokens) container.append(el("div", "usage",
       "tokens 输入 " + (result.usage.input_tokens || 0) + " · 输出 " + (result.usage.output_tokens || 0) + " · 总计 " + result.usage.total_tokens));
   }
@@ -80,7 +86,12 @@
     Object.values(t.rounds).sort((a, b) => a.round_index - b.round_index).forEach((r, i) => {
       let card = view.cards.get(r.round_id);
       if (!card) {
-        card = RoundCard.create(xid => api("/api/chat/turns/" + t.turn_id + "/tools/" + xid));
+        const gen = generation;
+        card = RoundCard.create(async xid => {
+          const data = await api("/api/chat/turns/" + t.turn_id + "/tools/" + xid);
+          if (gen !== generation) throw new Error('会话已切换');
+          return data;
+        });
         view.cards.set(r.round_id, card);
       }
       card.update(r); RoundCard.placeChild(view.rounds, card.root, i);
@@ -89,12 +100,20 @@
     const labels = { running: "执行中", cancelling: "正在停止…", completed: "已完成", degraded: "已返回阶段结果",
       failed: "执行失败", timed_out: "已超时", cancelled: "已停止", interrupted: "已中断" };
     view.badge.textContent = labels[t.status] || t.status;
+    if (['failed', 'cancelled', 'timed_out', 'interrupted', 'degraded'].includes(t.status) && !view.retry) {
+      view.retry = el('button', 'retry-turn', '重试此请求'); view.retry.type = 'button';
+      view.retry.addEventListener('click', () => {
+        if (pending || activeTurn || selecting || sessionMeta?.archived_at) return;
+        pending = {request_id: crypto.randomUUID(), message: t.message, retry_of: t.turn_id};
+        sessionStorage.setItem(PENDING + state.sessionId, JSON.stringify(pending)); submitPending();
+      }); view.root.append(view.retry);
+    }
     if (ChatState.isActive(t.status)) {
       activeTurn = t.turn_id;
       const budget = t.budget || {};
       status("执行中 · 最多 " + budget.max_llm_rounds + " 轮 · 总预算 " + budget.max_total_seconds + " 秒");
     } else if (activeTurn === t.turn_id) {
-      activeTurn = null; status(labels[t.status] || "已结束");
+      activeTurn = null; status(labels[t.status] || "已结束"); Sessions.changed();
     }
     updateElapsed(); controls(); if (!prepend) follow(wasNear);
   }
@@ -155,8 +174,8 @@
       clearPending(sid); accept(snap, gen); subscribe(snap.turn_id, gen);
     } catch (e) {
       if (gen !== generation) return;
-      if ([409, 422, 429, 404].includes(e.status)) {
-        input().value = request.message; clearPending(sid);
+      if ([409, 422, 429, 404, 410].includes(e.status)) {
+        input().value = request.message; clearPending(sid); Sessions.saveDraft(sid, request.message);
         status(e.code === "SESSION_BUSY" ? "当前会话已有任务运行，草稿已保留。" : e.message, true);
         if (e.data?.active_turn_id) poll(e.data.active_turn_id, gen);
       } else {
@@ -167,21 +186,25 @@
     }
   }
   async function selectSession(sid, push = false) {
+    if (state) Sessions.saveDraft(state.sessionId, input().value);
+    sessionMeta = null; input().value = Sessions.draft(sid);
     const gen = ++generation; stopListening(); selecting = true; activeTurn = null; pending = null;
     state = ChatState.create(sid); views = new Map(); controls();
     chat().querySelectorAll(".chat-turn, #pending-message, .welcome").forEach(n => n.remove());
     document.querySelector("#new-messages").hidden = true;
     status("正在恢复会话…");
     try {
-      const [session, history] = await Promise.all([api("/api/chat/sessions/" + sid), api("/api/chat/sessions/" + sid + "/messages")]);
+      const history = await api("/api/chat/sessions/" + sid + "/messages");
+      const session = history.session;
       if (gen !== generation) return;
+      sessionMeta = session; Sessions.setSelected(session);
       if (push) window.history.pushState({}, "", "/chat/" + sid);
       else window.history.replaceState({}, "", "/chat/" + sid);
       localStorage.setItem(RECENT, sid);
       history.turns.forEach(t => accept(t, gen));
       nextBefore = history.next_before; document.querySelector("#older-messages").hidden = !nextBefore;
       if (!history.turns.length) status("新会话已就绪");
-      else if (!session.active_turn_id) status("会话已恢复");
+      else if (!session.active_turn_id) status(session.archived_at ? "已归档，恢复会话后可继续发送。" : (session.recovery_warning || "会话已恢复"));
       selecting = false;
       const stored = sessionStorage.getItem(PENDING + sid);
       try { pending = stored ? JSON.parse(stored) : null; } catch { sessionStorage.removeItem(PENDING + sid); }
@@ -191,7 +214,7 @@
         if (gen !== generation) return;
         accept(snap, gen); subscribe(snap.turn_id, gen);
       }
-      if (pending) await submitPending();
+      if (pending && !session.archived_at) await submitPending();
       if (gen !== generation) return;
       scrollToLatest();
     } catch (e) {
@@ -206,18 +229,32 @@
     try {
       const session = await api("/api/chat/sessions", { method: "POST" });
       if (gen !== generation) return;
-      input().value = ""; await selectSession(session.id, true);
+      await selectSession(session.id, true); Sessions.changed();
     } catch (e) { if (gen === generation) status("新建失败：" + e.message, true); }
     finally { button.disabled = false; }
   }
   function send() {
-    const message = input().value.trim();
-    if (!message || selecting || pending || activeTurn) return;
+    const message = input().value;
+    if (!message.trim() || !state || sessionMeta?.archived_at || selecting || pending || activeTurn) return;
     pending = { request_id: crypto.randomUUID(), message };
     sessionStorage.setItem(PENDING + state.sessionId, JSON.stringify(pending));
-    input().value = ""; submitPending();
+    input().value = ""; Sessions.saveDraft(state.sessionId, ''); submitPending();
   }
+  function welcome(push = false) {
+    if (state) Sessions.saveDraft(state.sessionId, input().value);
+    ++generation; stopListening(); state = null; sessionMeta = null; activeTurn = null; pending = null; selecting = false;
+    views = new Map(); nextBefore = null;
+    chat().querySelectorAll('.chat-turn, #pending-message, .welcome').forEach(n => n.remove());
+    chat().append(el('p', 'welcome', '新建会话，开始查询精灵、优化配招或构建队伍。'));
+    input().value = ''; document.querySelector('#older-messages').hidden = true;
+    document.querySelector('#new-messages').hidden = true;
+    if (push) window.history.pushState({}, '', '/');
+    Sessions.setSelected(null); status('点击“新建会话”开始。'); controls();
+  }
+  window.ChatUI = {welcome};
   document.addEventListener("DOMContentLoaded", async () => {
+    Sessions.init(api, selectSession);
+    input().addEventListener('input', () => { if (state) Sessions.saveDraft(state.sessionId, input().value); });
     // Reads the selected state each tick, so a previous session cannot update this page.
     setInterval(updateElapsed, 1000);
     document.querySelector("#send-btn").addEventListener("click", send);
@@ -249,13 +286,13 @@
     });
     window.addEventListener("popstate", () => {
       const sid = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
-      if (sid) selectSession(sid); else newSession();
+      if (sid) selectSession(sid); else welcome();
     });
     const sid = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1] || localStorage.getItem(RECENT);
     if (sid) {
       await selectSession(sid);
       // An explicit stale address remains visible; a stale recent preference opens a new session.
-      if (selecting && location.pathname === "/") await newSession();
-    } else await newSession();
+      if (selecting && location.pathname === "/") welcome();
+    } else welcome();
   });
 })();

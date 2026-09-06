@@ -72,7 +72,7 @@ Roco PVP Agent 是一个围绕精灵组队、回合制对战与 LLM 策略进化
 ### 组队顾问（Chat Agent）
 
 - CLI 单轮问答和交互式会话；
-- Web 端按模型轮次展示折叠卡片，分别显示同轮思考摘要和工具执行摘要；SQLite 保存会话，支持独立地址、刷新恢复、新建和停止；
+- Web 端按模型轮次展示折叠卡片，分别显示同轮思考摘要和工具执行摘要；SQLite 保存会话，支持侧栏管理、独立地址、跨重启续聊和停止；队伍看板支持保存、下载与组队页编辑；
 - 基于工具调用的 Agent 循环；
 - CLI/Web 实时展示安全的阶段摘要与工具调用（不展示原始思维链）；
 - 顾问默认最多 100 轮，信息足够即可结束，整体墙钟预算 555 秒；超时或模型异常仍返回已取得的执行结果；
@@ -347,6 +347,8 @@ uv run python -m roco_pvp_agent evolve health --memory artifacts/memory
 | `CHAT_MAX_TOTAL_SECONDS` | `555` | 所有模型与工具调用共用的执行总预算，不随刷新或重连重置 |
 | `CHAT_DB_PATH` | `artifacts/chat/sessions.sqlite3` | Web 聊天数据库；启动时解析绝对路径，单进程独占 |
 | `CHAT_MAX_CONCURRENT_TURNS` | `4` | 不同会话同时执行的上限；同一会话始终串行 |
+| `CHAT_CONTEXT_MAX_CHARS` | `32000` | 续聊上下文字符预算，完整队伍和约束优先 |
+| `CHAT_CONTEXT_MAX_TURNS` | `20` | 模型输入最多保留的近期完整用户轮次 |
 | `DEBUG` | `false` | 是否开启调试模式 |
 | `ROCO_UI_HOST` | `127.0.0.1` | Web UI 监听地址 |
 | `ROCO_UI_PORT` | `8001` | Web UI 监听端口 |

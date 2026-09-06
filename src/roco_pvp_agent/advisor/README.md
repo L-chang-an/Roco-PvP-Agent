@@ -65,3 +65,7 @@
 字段独立于工具文本大小限制传递；`final_answer` 中出现 JSON 不会自动获得合法队伍身份。
 
 详见 `tmpdocs/milestones/chatmode/` 下的 M1–M5 详设。
+
+Web 队伍终稿 message 使用简短说明，完整建议只通过 artifact 展示；旧 CLI reply 字符串保持兼容。
+建议载荷最多 128 KiB、6 个备选；备选需显式校验才获得独立保存资格。Web 续聊采用有版本的
+ConversationScopeContext/checkpoint，按完整 Turn 和字符预算裁剪，用户约束与模型假设分开。

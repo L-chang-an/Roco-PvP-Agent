@@ -327,7 +327,7 @@ class ChatAgent:
                     raise _BudgetExpired
                 if terminal is not None:
                     final_result = terminal.final_result
-                    reply_text = final_result.message if final_result else terminal.content
+                    reply_text = (final_result.legacy_message or final_result.message) if final_result else terminal.content
                     if final_result is None and (not terminal.ok or terminal.retry_exhausted):
                         final_result = AssistantResult(message=reply_text, kind="partial",
                             status="degraded", reason_code="terminal_failed")

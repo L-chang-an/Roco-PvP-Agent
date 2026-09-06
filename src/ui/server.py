@@ -1,14 +1,8 @@
-"""FastAPI 应用工厂 + REST/SSE 路由。
+"""FastAPI factory with lifespan-managed SQLite and durable chat coordination.
 
-设计要点：
-- create_chat_app(settings, *, llm_factory=None) 应用工厂：llm_factory 是测试注入缝。
-- SSE 只支持 GET → message/session_id 走 query params（EventSource 无法带 body）。
-- 后台 daemon 线程跑 agent，事件经 queue.Queue 送回，asyncio.to_thread 阻塞读不堵事件循环。
-- 事件顺序契约：meta → thinking* → tool* → reply → done（meta 由本服务补发）。
-- 组队页：`/team` 静态页 + `/api/team/*` REST（见 routes_team.py）。
-
-注意：本包已提级为顶层 `ui`（原 `roco_pvp_agent.ui`），依赖 `roco_pvp_agent` 的
-agent/config 层走绝对导入。
+New clients create tasks by POST, then subscribe to read-only SSE or poll snapshots.
+Legacy endpoints preserve their wire format through the same coordinator.
+Team and battle routes share the static application without importing storage into the engine.
 """
 
 import asyncio
@@ -23,15 +17,16 @@ from typing import Callable, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from roco_pvp_agent.advisor.agent import TeamAdvisorAgent
 from roco_pvp_agent.agent import EVENT_DONE, EVENT_REPLY
 from roco_pvp_agent.config import Settings, get_settings
-from .context import ChatContext
+from .legacy_chat import DurableChatContext
 from .routes_battle import router as battle_router
 from .routes_team import router as team_router
 from .routes_chat import router as chat_router
+from .routes_chat_artifacts import router as artifacts_router
 from .chat_store import SQLiteChatSessionStore, ChatError
 from .turn_coordinator import TurnCoordinator
 
@@ -45,6 +40,13 @@ SERVER_ERROR_REPLY = "（服务暂时异常，已安全结束本次请求，请�
 class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: Optional[str] = None
+
+    @field_validator('message')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError('消息不能为空')
+        return value
 
     model_config = {"extra": "forbid"}  # 前端发了多余字段直接 400，早暴露问题
 
@@ -60,7 +62,7 @@ def _meta_event(session_id: str) -> dict:
 
 
 def _run_chat(
-    context: ChatContext,
+    context: DurableChatContext,
     session_id: str,
     message: str,
     put: Callable[[object], None],
@@ -114,7 +116,6 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
                     chat_store: SQLiteChatSessionStore | None = None) -> FastAPI:
     llm = llm_factory(settings) if llm_factory else None
     agent = TeamAdvisorAgent(settings, llm=llm)
-    context = ChatContext(agent)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -122,7 +123,8 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
         store.open()
         try:
             store.recover()
-            coordinator = TurnCoordinator(agent, store, max_active=settings.chat_max_concurrent_turns)
+            coordinator = TurnCoordinator(agent, store, max_active=settings.chat_max_concurrent_turns,
+                                          max_chars=settings.chat_context_max_chars, max_turns=settings.chat_context_max_turns)
             app.state.turn_coordinator = coordinator
             try:
                 yield
@@ -134,12 +136,26 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
 
     app = FastAPI(title="Roco PVP Agent", lifespan=lifespan)
     app.state.agent = agent
-    app.state.context = context
+    app.state.context = DurableChatContext(app)
     app.state.settings = settings
 
     @app.exception_handler(ChatError)
     async def chat_error_handler(request, exc):
-        return JSONResponse({"error": exc.code, **exc.details}, status_code=exc.status)
+        messages = {
+            'SESSION_BUSY': '当前会话已有请求运行，请等待结束或先停止。',
+            'SESSION_ARCHIVED': '会话已归档，请先恢复会话。',
+            'SESSION_NOT_FOUND': '找不到该会话。', 'SESSION_DELETED': '该会话已删除。',
+            'REVISION_CONFLICT': '会话已在其他页面更新，请刷新后重试。',
+            'REQUEST_ID_CONFLICT': '该请求编号已用于不同内容，请重新提交。',
+            'SERVER_BUSY': '当前运行请求较多，请稍后重试，草稿已保留。',
+            'ARTIFACT_NOT_FOUND': '找不到该队伍建议，原会话可能已删除。',
+            'ARTIFACT_VERSION_CONFLICT': '队伍版本不匹配，请重新打开建议。',
+            'CHAT_STORAGE_UNAVAILABLE': '聊天存储暂不可用，请检查存储后重启服务。',
+            'INVALID_RETRY': '无法重试这条请求，请选择当前会话中已结束的请求。',
+            'TEAM_INVALID': '队伍未通过当前规则校验，请在组队页修复。',
+            'ALTERNATIVE_INVALID': '该备选尚未通过校验，不能作为合法队伍保存。',
+        }
+        return JSONResponse({"error": exc.code, 'message': messages.get(exc.code, '请求未能完成，请刷新后重试。'), **exc.details}, status_code=exc.status)
 
     @app.exception_handler(sqlite3.Error)
     async def storage_error_handler(request, exc):
@@ -175,6 +191,8 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
         session_id = body.session_id or ctx.new_session()
         try:
             reply = ctx.chat(body.message, session_id)
+        except ChatError:
+            raise
         except Exception:
             # SSE 不可用时前端会走此同步兜底；异常也返回稳定 JSON，避免 500/白屏。
             return {
@@ -200,10 +218,12 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
 
     @app.get("/api/chat/stream")
     async def chat_stream(message: str, session_id: Optional[str] = None):
-        if not message or not message.strip():
+        if not message or not message.strip() or len(message) > 2000:
             raise HTTPException(status_code=400, detail="message 不能为空")
         ctx = app.state.context
         session_id = session_id or ctx.new_session()
+
+        ctx.coordinator.store.session(session_id)
 
         events: "queue.Queue" = queue.Queue()
         cancel_event = threading.Event()
@@ -266,6 +286,7 @@ def create_chat_app(settings: Settings, *, llm_factory: Optional[Callable] = Non
     # ---------- 组队模式（精灵搜索 + 校验 + 队伍持久化，见 routes_team.py） ----------
     app.include_router(team_router)
     app.include_router(chat_router)
+    app.include_router(artifacts_router)
 
     # ---------- 对战模式（人类 vs LLM，见 routes_battle.py） ----------
     app.include_router(battle_router)

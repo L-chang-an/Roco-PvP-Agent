@@ -238,7 +238,8 @@ def _build_advisor_registry(*, battles_dir=None, runs_dir=None,
                 content=_dump(result["advice"].model_dump()),
                 details={"validation": {"ok": True, "errors": []}},
                 final_result=AssistantResult(kind="team_advice",
-                    message=_dump(result["advice"].model_dump()),
+                    message=f"已生成 {result['advice'].rules_used.team_size} 人队伍，主队配置已通过校验。可查看成员配置、保存队伍，或进入组队页调整。",
+                    legacy_message=_dump(result['advice'].model_dump()),
                     advice=result["advice"].model_dump()),
             )
         errors = list(result["errors"])
@@ -404,7 +405,7 @@ class TeamAdvisorAgent(ChatAgent):
         if target != "agent":
             return self._scoped_reply(
                 message, text, history, event_sink, tool_visibility)
-        return super().chat(
+        reply = super().chat(
             message,
             history,
             event_sink=event_sink,
@@ -412,6 +413,18 @@ class TeamAdvisorAgent(ChatAgent):
             cancel_event=cancel_event,
             execution_observer=execution_observer,
         )
+        if reply.final_result.kind in ('partial', 'error'):
+            try:
+                body = json.loads(reply.final_result.message)
+            except (ValueError, TypeError):
+                body = None
+            if isinstance(body, dict):
+                message = str(body.get('message') or '本次请求未能生成完整队伍。')
+                if body.get('hint'):
+                    message += '\n\n' + str(body['hint'])
+                message += '\n\n已完成的查询和校验可在工作卡片中查看。'
+                reply.final_result = reply.final_result.model_copy(update={'message': message})
+        return reply
 
     def _scoped_reply(self, message: str, text: str, history, event_sink,
                       tool_visibility: ToolVisibility | None = None) -> ChatReply:

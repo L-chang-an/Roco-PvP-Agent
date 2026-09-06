@@ -17,13 +17,28 @@ class TurnBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=2000)
+    retry_of: str | None = Field(default=None, min_length=1, max_length=128)
 
     @field_validator("message", "request_id")
     @classmethod
     def nonblank(cls, value):
         if not value.strip():
             raise ValueError("不能为空白")
-        return value.strip()
+        return value
+
+
+class SessionPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision: int = Field(ge=0)
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    archived: bool | None = None
+
+    @field_validator('title')
+    @classmethod
+    def title_nonblank(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError('标题不能为空')
+        return value.strip() if value else value
 
 
 def services(request):
@@ -43,6 +58,23 @@ def session(sid: str, request: Request):
     return services(request)[1].session(sid)
 
 
+@router.get('/sessions')
+def sessions(request: Request, cursor: str | None = None, limit: int = Query(20, ge=1, le=100),
+             archived: bool = False, q: str = Query('', max_length=100)):
+    return services(request)[1].list_sessions(cursor, limit, archived, q)
+
+
+@router.patch('/sessions/{sid}')
+def patch_session(sid: str, body: SessionPatch, request: Request):
+    return services(request)[1].update_session(sid, body.revision, title=body.title, archived=body.archived)
+
+
+@router.delete('/sessions/{sid}')
+def delete_session(sid: str, request: Request, revision: int = Query(ge=0)):
+    services(request)[1].clear_session(sid, delete=True, revision=revision)
+    return {'ok': True}
+
+
 @router.get("/sessions/{sid}/messages")
 def messages(sid: str, request: Request, before: str | None = None, limit: int = Query(20, ge=1, le=100)):
     return services(request)[1].messages(sid, before, limit)
@@ -51,7 +83,7 @@ def messages(sid: str, request: Request, before: str | None = None, limit: int =
 @router.post("/sessions/{sid}/turns")
 def create_turn(sid: str, body: TurnBody, request: Request):
     coordinator, _ = services(request)
-    snap, created = coordinator.create(sid, body.request_id, body.message)
+    snap, created = coordinator.create(sid, body.request_id, body.message, body.retry_of)
     return JSONResponse({**snap, "events_url": f"/api/chat/turns/{snap['turn_id']}/events"}, status_code=202 if created else 200)
 
 

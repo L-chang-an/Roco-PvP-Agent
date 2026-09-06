@@ -110,16 +110,22 @@ def route(message: str, *, conversation_state: dict | None = None) -> tuple[str,
     target ∈ agent/refuse/out_of_scope/ambiguous/welcome。非 agent 时 text 为固定模板，
     调用方直接返回、不进 LLM。
     """
+    from ..conversation import ConversationScopeContext
+    state = conversation_state if isinstance(conversation_state, ConversationScopeContext) else ConversationScopeContext.model_validate(conversation_state or {})
     verdict = classify(message)
     if verdict is ScopeVerdict.REFUSE:
         return "refuse", REFUSE_TEMPLATE
     if verdict is ScopeVerdict.OUT_OF_SCOPE:
         return "out_of_scope", OUT_OF_SCOPE_TEMPLATE
     if verdict is ScopeVerdict.AMBIGUOUS:
-        if (conversation_state or {}).get("current_team") and re.search(
-            r"第[一二三四五六1-6]只|(?:把|将).{0,12}(?:换掉|换成|改成)|继续(?:优化|调整)", message
-        ):
+        index = re.search(r'第([一二三四五六1-6])只', message)
+        number = ('一二三四五六'.index(index[1]) + 1 if index and index[1] in '一二三四五六' else int(index[1]) if index else None)
+        if state.current_team and (number is None or number <= len(state.current_team)) and re.search(
+            r"(?:换掉|换成|改成|调整|优化|替换)", message
+        ) and (index or re.search(r'(?:把|将).{0,12}(?:换掉|换成|改成)|继续(?:优化|调整)', message)):
             return "agent", ""
+        if state.unresolved_questions and re.fullmatch(r'\s*(?:3|6|三|六)\s*(?:只|人|v[36])?\s*', message):
+            return 'agent', ''
         return "ambiguous", AMBIGUOUS_TEMPLATE
     if _is_welcome(message):
         return "welcome", WELCOME_TEMPLATE

@@ -26,14 +26,7 @@
   'use strict';
 
   /* 六维表：UI 展示名 ↔ 字段名（渲染 IV 行、预览属性都按此顺序）。 */
-  const STATS = [
-    { cn: '生命', field: 'hp' },
-    { cn: '物攻', field: 'atk' },
-    { cn: '魔攻', field: 'sp_atk' },
-    { cn: '物防', field: 'def' },
-    { cn: '魔防', field: 'sp_def' },
-    { cn: '速度', field: 'speed' },
-  ];
+  const STATS = TeamComponents.stats;
   const STAT_FIELDS = STATS.map((s) => s.field);
 
   /* 模块级状态：本页唯一数据源（普通对象，每次变更后手动重绘）。 */
@@ -366,7 +359,12 @@
       if (removed.length) {
         cur.skills = cur.skills.filter((n) => names.has(n));
         flash(`技能池变化，已移除不再可携带的技能：${removed.join('、')}`, 'warn');
+        let note = document.querySelector('#load-changes');
+        if (!note) { note = document.createElement('p'); note.id = 'load-changes'; document.querySelector('main').prepend(note); }
+        note.textContent += ` ${cur.spirit.name} 已移除技能：${removed.join('、')}。`;
+        note.setAttribute('role', 'status');
         renderAll();
+        validate();
         return;   // renderAll 已重绘技能列表
       }
     }
@@ -448,14 +446,26 @@
     }));
   }
 
+  let validatedContent = null, validationRequest = 0;
+  function currentDocument() { return {team: picksPayload(), team_size: S.teamSize, items: S.items.slice()}; }
+  function invalidateValidation() {
+    if (validatedContent && validatedContent !== JSON.stringify(currentDocument())) {
+      validatedContent = null;
+      const box = $('#validate-result'); box.className = 'validate-box'; box.textContent = '配置已修改，请重新校验。';
+    }
+  }
   async function validate() {
+    const request = ++validationRequest;
     const body = { team: picksPayload(), team_size: S.teamSize, items: S.items.slice() };
+    const content = JSON.stringify(body);
     const r = await api('/api/team/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const box = $('#validate-result');
+    if (request !== validationRequest || content !== JSON.stringify(currentDocument())) { invalidateValidation(); return; }
+    validatedContent = content;
     if (r.ok && r.j.ok) {
       box.className = 'validate-box ok';
       box.innerHTML = `<b>✓ 队伍合法（${r.j.team_size}v${r.j.team_size}）</b><br>已选 ${r.j.roster.length} 只，属性以服务端计算为准。`;
@@ -468,12 +478,15 @@
 
   async function save() {
     const path = ($('#save-path').value || '').trim();
-    const body = { team: picksPayload(), team_size: S.teamSize, items: S.items.slice(), path };
-    const r = await api('/api/team/save', {
+    const body = { team: picksPayload(), team_size: S.teamSize, items: S.items.slice(), path, overwrite: false };
+    let r = await api('/api/team/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (r.status === 409 && r.j.detail?.code === 'OVERWRITE_REQUIRED' && confirm(`覆盖现有文件「${r.j.detail.path}」？`)) {
+      r = await api('/api/team/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, overwrite: true})});
+    }
     if (r.ok && r.j.ok) {
       flash(`已保存到 ${r.j.path}`, 'ok');
       $('#save-path').value = '';
@@ -514,6 +527,7 @@
   /* 加载后的统一落地：按 team_size 恢复槽位 + 自动校验（历史队伍可能已失效）。
      历史 4v4/5v5 队伍（不再支持）→ 就近吸附到 3 或 6 + 提示。 */
   function applyLoaded(data) {
+    const changes = [];
     const team = Array.isArray(data.team) ? data.team : [];
     const allowed = Array.isArray(S.config.team_size.allowed)
       ? S.config.team_size.allowed : [S.config.team_size.default];
@@ -534,10 +548,12 @@
     const slots = [];
     for (let i = 0; i < size; i++) {
       const p = team[i];
-      if (!p || typeof p !== 'object' || !S.spiritsByName[p.spirit]) { slots.push(null); continue; }
+      if (!p || typeof p !== 'object' || !S.spiritsByName[p.spirit]) {
+        if (p) changes.push(`第 ${i + 1} 只精灵不存在，槽位留空等待修复`);
+        slots.push(null); continue;
+      }
       // 技能归一化：v1 存字符串数组，v2 存 {name,type,desc} 富化对象 → 都转回名字数组
-      const skillNames = (Array.isArray(p.skills) ? p.skills : []).map(
-        (x) => (typeof x === 'string' ? x : (x && x.name) || '')).filter(Boolean);
+      const skillNames = TeamComponents.skillNames(p.skills);
       slots.push({
         spirit: S.spiritsByName[p.spirit],
         skills: skillNames,
@@ -545,6 +561,7 @@
         nature: typeof p.nature === 'string' ? p.nature : '坦率',
         iv: sanitizeIv(p.iv),
       });
+      if (JSON.stringify(p.iv || {}) !== JSON.stringify(slots[slots.length - 1].iv)) changes.push(`第 ${i + 1} 只 IV 已规范化，请核对`);
     }
     S.slots = slots;
     S.teamSize = size;
@@ -552,6 +569,13 @@
     refreshPool();
     validate();   // 加载即校验：未实装/家族冲突等会立即提示
     flash(snapped ? `历史队伍规模已吸附到 ${size}v${size}（原 ${data.team_size} 不再支持）。` : `已加载队伍（${size} 只）。`, snapped ? 'warn' : 'ok');
+    if (team.length !== size) changes.push(`原文件 ${team.length} 个成员，当前 ${size} 个槽位`);
+    if (Array.isArray(data.items) && JSON.stringify(data.items) !== JSON.stringify(S.items)) changes.push('无法使用的道具已移除');
+    if (changes.length) {
+      let note = document.querySelector('#load-changes');
+      if (!note) { note = document.createElement('p'); note.id = 'load-changes'; document.querySelector('main').prepend(note); }
+      note.textContent = '加载时的变更：' + changes.join('；'); note.setAttribute('role', 'status');
+    }
   }
 
   async function deleteSelected() {
@@ -570,6 +594,7 @@
   /* ---------- 渲染入口 ---------- */
 
   function renderAll() {
+    if (S.config) invalidateValidation();
     renderTeamSize();
     renderSpiritList();
     renderTeamSlots();
@@ -603,6 +628,7 @@
   }
 
   async function init() {
+    for (const event of ['input', 'change', 'click']) document.addEventListener(event, () => invalidateValidation());
     const cfgR = await api('/api/team/config');
     if (!cfgR.ok) { flash('组队配置加载失败。', 'warn'); return; }
     S.config = cfgR.j;
@@ -617,6 +643,18 @@
     renderAll();
     refreshPool();
     refreshSaved();
+    const params = new URLSearchParams(location.search);
+    const artifact = params.get('artifact_id'), path = params.get('path');
+    if (artifact || path) {
+      const response = await api(artifact ? '/api/chat/artifacts/' + encodeURIComponent(artifact) : '/api/team/load?path=' + encodeURIComponent(path));
+      if (!response.ok) { flash('队伍打开失败，可从聊天页重新保存或选择文件。', 'warn'); return; }
+      applyLoaded(artifact ? response.j.team_document : response.j);
+      const sid = artifact ? response.j.session_id : params.get('session_id');
+      if (sid) {
+        const back = document.createElement('a'); back.href = '/chat/' + encodeURIComponent(sid); back.textContent = '返回原会话';
+        document.querySelector('header').append(back);
+      }
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);

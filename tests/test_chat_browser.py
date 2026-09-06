@@ -26,6 +26,8 @@ class BrowserLLM:
 
     def invoke(self, messages, **kwargs):
         self.invocations += 1
+        if getattr(self, 'team_payload', None):
+            return AIMessage(content='', tool_calls=[tool_call('submit_team_advice', {'payload': self.team_payload})])
         last = max(i for i, m in enumerate(messages) if m.type == "human")
         message = messages[last].content
         count = sum(m.type == "tool" for m in messages[last + 1:])
@@ -50,7 +52,9 @@ class BrowserLLM:
 
 
 @pytest.fixture
-def web_server(tmp_path):
+def web_server(tmp_path, monkeypatch):
+    import ui.routes_team as team_routes
+    monkeypatch.setattr(team_routes, 'TEAMS_DIR', tmp_path / 'teams')
     llm = BrowserLLM()
     app = create_chat_app(Settings(chat_db_path=str(tmp_path / "browser.db")), llm_factory=lambda settings: llm)
     sock = socket.socket(); sock.bind(("127.0.0.1", 0)); sock.listen(128)
@@ -69,6 +73,8 @@ def web_server(tmp_path):
 
 def ready(page, url):
     page.goto(url)
+    if '/chat/' not in page.url:
+        page.locator('#new-session-btn').click()
     expect(page.locator("#send-btn")).to_be_enabled()
 
 
@@ -252,6 +258,128 @@ def test_live_updates_preserve_expansion_and_keyboard_focus(page, web_server):
     expect(first).to_have_attribute("open", "")
     expect(first.locator(".tool-details").first).to_have_attribute("open", "")
     expect(detail_heading).to_be_focused()
+
+
+def test_welcome_sidebar_drafts_rename_archive_delete(page, web_server):
+    url, llm, _ = web_server
+    page.goto(url)
+    expect(page.locator('.welcome')).to_be_visible()
+    assert page.request.get(url + '/api/chat/sessions').json()['sessions'] == []
+    page.locator('#new-session-btn').click()
+    expect(page.locator('#send-btn')).to_be_enabled()
+    first_url = page.url
+    send(page); completed(page)
+    page.locator('#input').fill('未发送草稿')
+    page.locator('#new-session-btn').click()
+    expect(page).not_to_have_url(first_url)
+    expect(page.locator('#input')).to_have_value('')
+    page.locator('.session-link', has_text='帮我配招').click()
+    expect(page).to_have_url(first_url)
+    expect(page.locator('#input')).to_have_value('未发送草稿')
+    row = page.locator('.session-entry').filter(has=page.locator('.session-link[aria-current="page"]'))
+    row.locator('summary').click()
+    page.once('dialog', lambda dialog: dialog.accept('手工标题'))
+    row.get_by_role('button', name='重命名').click()
+    expect(page.locator('#session-title')).to_have_text('手工标题')
+    row = page.locator('.session-entry').filter(has=page.get_by_role('link', name='手工标题', exact=True))
+    row.locator('summary').click()
+    row.get_by_role('button', name='归档', exact=True).click()
+    expect(page.locator('#send-btn')).to_be_disabled()
+    page.locator('#show-archived').check()
+    archived = page.locator('.session-entry').filter(has=page.get_by_role('link', name='手工标题', exact=True))
+    archived.locator('summary').click(); archived.get_by_role('button', name='恢复会话').click()
+    expect(page.locator('#send-btn')).to_be_enabled()
+    page.locator('#show-archived').uncheck()
+    row = page.locator('.session-entry').filter(has=page.get_by_role('link', name='手工标题', exact=True))
+    row.locator('summary').click()
+    page.once('dialog', lambda dialog: dialog.accept())
+    row.get_by_role('button', name='删除', exact=True).click()
+    expect(page.locator('.welcome')).to_be_visible()
+    assert page.request.get(first_url.replace('/chat/', '/api/chat/sessions/')).status == 410
+    assert llm.invocations == 3
+
+
+def test_two_tabs_busy_and_result_restoration(page, context, web_server):
+    url, llm, _ = web_server
+    ready(page, url)
+    other = context.new_page(); other.goto(page.url)
+    expect(other.locator('#send-btn')).to_be_enabled()
+    send(page, '慢组队'); assert llm.slow_entered.wait(2)
+    send(other, '帮我配招但需要保留草稿')
+    expect(other.locator('#input')).to_have_value('帮我配招但需要保留草稿')
+    llm.release.set(); completed(page); completed(other)
+    expect(other.locator('.bubble.user')).to_have_count(1)
+    assert llm.invocations == 3
+    other.close()
+
+
+def test_team_dashboard_save_download_edit_return_and_screenshot(page, web_server, tmp_path):
+    from test_advisor_tool_schemas import _valid_payload
+    url, llm, _ = web_server
+    llm.team_payload = _valid_payload()
+    ready(page, url); session_url = page.url
+    send(page, '围绕迪莫组队'); completed(page)
+    expect(page.locator('.advice-member')).to_have_count(3)
+    expect(page.locator('.team-validity')).to_contain_text('通过')
+    assert not page.locator('.reply-md').inner_text().lstrip().startswith('{')
+    page.once('dialog', lambda dialog: dialog.accept(''))
+    page.get_by_role('button', name='保存队伍', exact=True).click()
+    expect(page.locator('.save-status')).to_contain_text('已保存')
+    with page.expect_download() as info:
+        page.get_by_role('link', name='下载队伍 JSON', exact=True).click()
+    downloaded = tmp_path / 'download.json'; info.value.save_as(downloaded)
+    import json
+    data = json.loads(downloaded.read_text(encoding='utf-8'))
+    assert data['version'] == 2 and data['items'] == [] and len(data['team']) == 3
+    page.get_by_role('link', name='在组队页编辑', exact=True).click()
+    expect(page.get_by_role('link', name='返回原会话')).to_be_visible()
+    expect(page.locator('#load-changes')).to_have_count(0)
+    expect(page.locator('#validate-result')).to_contain_text('队伍合法')
+    nature = page.locator('#nature-select option').evaluate_all("options => options.find(o => o.value !== '坦率').value")
+    page.locator('#nature-select').select_option(nature)
+    expect(page.locator('#validate-result')).to_contain_text('配置已修改')
+    page.locator('#btn-validate').click()
+    expect(page.locator('#validate-result')).to_contain_text('队伍合法')
+    page.locator('#save-path').fill('edited.json'); page.locator('#btn-save').click()
+    expect(page.locator('#notice')).to_contain_text('已保存')
+    edited = page.request.get(url + '/api/team/load?path=edited.json').json()
+    assert edited['team'][0]['nature'] == nature
+    assert edited['team'][0]['skills'] == data['team'][0]['skills'] and edited['items'] == []
+    page.get_by_role('link', name='返回原会话').click()
+    expect(page).to_have_url(session_url)
+    expect(page.locator('.advice-member')).to_have_count(3)
+    expect(page.locator('.advice-member').first).to_contain_text('性格：坦率')
+    expect(page.locator('.save-status')).to_contain_text('保存记录')
+    assert llm.invocations == 1
+    page.screenshot(path=str(tmp_path / 'team-dashboard-desktop.png'), full_page=True)
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    page.screenshot(path=str(tmp_path / 'team-dashboard-mobile.png'), full_page=True)
+
+
+def test_artifact_late_response_and_untrusted_text(page, web_server):
+    from test_advisor_tool_schemas import _valid_payload
+    url, llm, _ = web_server
+    llm.team_payload = _valid_payload()
+    llm.team_payload['team'][0]['rationale'] = '<img src=x onerror="window.UNSAFE=1">'
+    ready(page, url)
+    held = []
+    page.route('**/api/chat/artifacts/*', lambda route: held.append((route, route.fetch())))
+    send(page); completed(page)
+    expect(page.locator('.team-advice-card')).to_contain_text('正在加载')
+    old_url = page.url
+    page.locator('#new-session-btn').click()
+    expect(page).not_to_have_url(old_url)
+    for route, response in held:
+        route.fulfill(response=response)
+    expect(page.locator('.team-advice-card')).to_have_count(0)
+    page.unroute('**/api/chat/artifacts/*')
+    page.goto(old_url)
+    expect(page.locator('.advice-member')).to_have_count(3)
+    page.locator('.advice-member').first.locator('summary').click()
+    expect(page.locator('.advice-member').first).to_contain_text('<img')
+    assert page.locator('.advice-member img').count() == 0
+    assert page.evaluate('window.UNSAFE') is None
 
 
 def test_loading_older_turns_preserves_document_scroll_anchor(page, web_server):

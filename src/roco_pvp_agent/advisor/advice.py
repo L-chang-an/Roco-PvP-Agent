@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from typing import Literal
+import json
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -106,6 +107,10 @@ def submit_team_advice(payload: dict, *, source: DataSource = DataSource.VALID) 
 
     三道闸：LegalityGate（阵容合法）→ VersionGate（data_digest 匹配）→ EvidenceGate（理由可溯源）。
     """
+    if len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > 131072:
+        return {'ok': False, 'errors': [{'code': 'ADVICE_TOO_LARGE', 'message': '建议超过 128 KiB，请缩短说明后重新提交。', 'pick_index': None}]}
+    if len(payload.get('alternatives', [])) > 6:
+        return {'ok': False, 'errors': [{'code': 'TOO_MANY_ALTERNATIVES', 'message': '备选队伍最多 6 支。', 'pick_index': None}]}
     try:
         advice = TeamAdviceSchema(**payload)
     except ValidationError as exc:

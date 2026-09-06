@@ -16,7 +16,18 @@
       <a class="top-link" href="/spectate">👀 观战</a>
     </nav>
     <button id="new-session-btn" type="button">新建会话</button>
+    <button id="sessions-toggle" type="button" aria-controls="sessions-sidebar" aria-expanded="false">会话列表</button>
   </header>
+
+  <aside id="sessions-sidebar" aria-label="会话列表">
+    <h2>会话</h2>
+    <input id="session-search" maxlength="100" placeholder="搜索会话标题" aria-label="搜索会话标题">
+    <label><input id="show-archived" type="checkbox"> 已归档</label>
+    <div id="session-list"></div>
+    <button id="more-sessions" type="button" hidden>更多会话</button>
+    <p id="sessions-error" role="status"></p>
+  </aside>
+  <h2 id="session-title">欢迎使用组队顾问</h2>
 
   <main id="chat" aria-label="聊天记录">
     <button id="older-messages" type="button" hidden>加载更早记录</button>
@@ -34,6 +45,9 @@
   <script src="/static/app.js"></script>
   <script src="/static/chat-state.js"></script>
   <script src="/static/round-card.js"></script>
+  <script src="/static/sessions.js"></script>
+  <script src="/static/team-components.js"></script>
+  <script src="/static/team-advice-card.js"></script>
   <script src="/static/chat.js"></script>
 </body>
 </html>
