@@ -18,20 +18,33 @@
   <title>观战 · Roco PVP Agent</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
-  <header>
-    <h1>👀 双 LLM 观战 <small class="muted">全局视角</small></h1>
+<body class="spectate-page">
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="Roco PVP Agent 首页">
+      <span class="brand-mark" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M8 9.5 12 12l4-2.5M12 12v5"/></svg></span>
+      <span class="brand-name">ROCO<span class="brand-subtitle">PVP AGENT</span></span>
+    </a>
     <nav class="top-nav" aria-label="页面导航">
-      <a class="top-link" href="/">💬 聊天</a>
-      <a class="top-link" href="/team">🧩 组队</a>
-      <a class="top-link" href="/battle">⚔️ 对战</a>
-      <a class="top-link active" href="/spectate">👀 观战</a>
+      <a class="top-link" href="/"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span>聊天</span></a>
+      <a class="top-link" href="/team"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>组队</span></a>
+      <a class="top-link" href="/battle"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 17 17M3 3l1 5 4-4-5-1ZM3 21l6-6m-3 7-4-4M21 3l-1 5-4-4 5-1Zm0 18-6-6m3 7 4-4"/></svg><span>对战</span></a>
+      <a class="top-link active" href="/spectate" aria-current="page"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span>观战</span></a>
     </nav>
+    <span class="workspace-label">策略实验室 <span class="status-dot" aria-hidden="true"></span></span>
   </header>
 
   <main id="spectate-app">
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">LIVE SPECTATE</p>
+        <h1>双 LLM 观战</h1>
+        <p class="page-description">以全局视角观察双方行动，追踪每一回合的策略与变化。</p>
+      </div>
+    </div>
+
     <!-- ── 配置条 ── -->
     <section id="spectate-config" class="panel">
+      <h2><span class="panel-index">01</span>观战配置</h2>
       <div class="cfg-row">
         <label>a 玩家</label>
         <select id="kind-a" title="llm=真实 LLM（无 key 自动降级假LLM）；fake_llm=假 LLM；random=随机">
@@ -63,7 +76,7 @@
         <button id="start-btn" class="primary">开始观战</button>
       </div>
       <div class="muted dim" id="spectate-status">
-        全局视角：双方血量 / 全部技能 / 事件全见；两个 LLM 玩家仍按**迷雾**（己方全见、敌方只见白名单）对战。
+        全局视角：双方血量 / 全部技能 / 事件全见；两个 LLM 玩家仍按<strong>迷雾</strong>（己方全见、敌方只见白名单）对战。
       </div>
       <div id="spectate-meta"></div>
       <span id="spectate-weather" class="badge"></span>
@@ -75,12 +88,12 @@
     <!-- ── 战场两栏（全量） ── -->
     <div id="spectate-field">
       <div class="team-panel" id="team-panel-a">
-        <h3>a 方 <small class="muted" id="meta-a"></small></h3>
+        <h3><span class="panel-index">A</span>a 方 <small class="muted" id="meta-a"></small></h3>
         <div class="side-info" id="side-info-a"></div>
         <div id="units-a"></div>
       </div>
       <div class="team-panel" id="team-panel-b">
-        <h3>b 方 <small class="muted" id="meta-b"></small></h3>
+        <h3><span class="panel-index">B</span>b 方 <small class="muted" id="meta-b"></small></h3>
         <div class="side-info" id="side-info-b"></div>
         <div id="units-b"></div>
       </div>

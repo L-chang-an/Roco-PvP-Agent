@@ -7,39 +7,57 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="chat-page">
-  <header>
-    <h1>Roco PVP Agent</h1>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="Roco PVP Agent 首页">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m8 9.5 4 2.5 4-2.5M12 12v5"/></svg></span>
+      <span class="brand-name">ROCO<span class="brand-subtitle">PVP AGENT</span></span>
+    </a>
     <nav class="top-nav" aria-label="页面导航">
-      <a class="top-link active" href="/">💬 聊天</a>
-      <a class="top-link" href="/team">🧩 组队</a>
-      <a class="top-link" href="/battle">⚔️ 对战</a>
-      <a class="top-link" href="/spectate">👀 观战</a>
+      <a class="top-link active" href="/" aria-current="page"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span>聊天</span></a>
+      <a class="top-link" href="/team"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>组队</span></a>
+      <a class="top-link" href="/battle"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 17 17M3 3l1 5 4-4-5-1ZM3 21l6-6m-3 7-4-4M21 3l-1 5-4-4 5-1Zm0 18-6-6m3 7 4-4"/></svg><span>对战</span></a>
+      <a class="top-link" href="/spectate"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span>观战</span></a>
     </nav>
-    <button id="new-session-btn" type="button">新建会话</button>
-    <button id="sessions-toggle" type="button" aria-controls="sessions-sidebar" aria-expanded="false">会话列表</button>
+    <div class="header-actions">
+      <button id="sessions-toggle" type="button" aria-controls="sessions-sidebar" aria-expanded="false">会话列表</button>
+      <button id="new-session-btn" type="button"><span aria-hidden="true">＋</span> 新建会话</button>
+    </div>
   </header>
 
   <aside id="sessions-sidebar" aria-label="会话列表">
-    <h2>会话</h2>
-    <input id="session-search" maxlength="100" placeholder="搜索会话标题" aria-label="搜索会话标题">
-    <label><input id="show-archived" type="checkbox"> 已归档</label>
+    <div class="sidebar-heading"><h2>会话空间</h2><span class="eyebrow">HISTORY</span></div>
+    <div class="search-field"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="session-search" maxlength="100" placeholder="搜索会话标题" aria-label="搜索会话标题"></div>
+    <label class="archive-filter"><input id="show-archived" type="checkbox"> 显示已归档</label>
     <div id="session-list"></div>
     <button id="more-sessions" type="button" hidden>更多会话</button>
     <p id="sessions-error" role="status"></p>
+    <div class="sidebar-note"><span class="sidebar-note-mark" aria-hidden="true">R /</span><p>每一种策略，都有可能。<small>探索 · 构筑 · 进化</small></p></div>
   </aside>
-  <h2 id="session-title">欢迎使用组队顾问</h2>
+  <div class="chat-heading"><div><p class="eyebrow">STRATEGY WORKSPACE</p><h2 id="session-title">欢迎使用组队顾问</h2></div><span class="workspace-label">组队顾问<span class="status-dot" aria-hidden="true"></span></span></div>
 
   <main id="chat" aria-label="聊天记录">
+    <section class="welcome-panel" aria-label="组队顾问介绍">
+      <div class="welcome-symbol" aria-hidden="true"><svg viewBox="0 0 96 96" fill="none"><path class="symbol-orbit" d="M48 4 86 26v44L48 92 10 70V26Z"/><path class="symbol-inner" d="m48 21 24 14v27L48 76 24 62V35Z"/><path class="symbol-core" d="m48 32 14 8v16l-14 8-14-8V40Z"/><path class="symbol-core" d="m34 40 14 8 14-8M48 48v16"/><circle cx="48" cy="4" r="3"/><circle cx="86" cy="70" r="3"/><circle cx="10" cy="70" r="3"/></svg></div>
+      <p class="eyebrow">ROCO INTELLIGENCE</p>
+      <h1>让每一步，<span>更有胜算。</span></h1>
+      <p class="welcome-description">从灵感到阵容，与你一起探索对战的更多可能。<br>查询精灵、优化配招，构筑属于你的队伍。</p>
+      <div class="capability-grid">
+        <div class="capability-card"><span class="capability-number">01 / DISCOVER</span><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4M8 10.5h5M10.5 8v5"/></svg><h3>探索精灵</h3><p>了解属性、特性与技能机制</p></div>
+        <div class="capability-card"><span class="capability-number">02 / REFINE</span><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg><h3>优化配招</h3><p>梳理技能组合与战术思路</p></div>
+        <div class="capability-card"><span class="capability-number">03 / BUILD</span><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><h3>构筑队伍</h3><p>围绕你的想法，完善阵容搭配</p></div>
+      </div>
+    </section>
     <button id="older-messages" type="button" hidden>加载更早记录</button>
   </main>
   <button id="new-messages" type="button" hidden>有新消息 ↓</button>
   <div id="chat-status" role="status" aria-live="polite"></div>
 
   <footer>
-    <textarea id="input" rows="2" maxlength="2000" aria-label="消息" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off"></textarea>
-    <button id="retry-send" type="button" hidden>重试提交</button>
-    <button id="stop-btn" type="button" hidden>停止</button>
-    <button id="send-btn">发送</button>
+    <div class="composer-shell">
+      <textarea id="input" rows="2" maxlength="2000" aria-label="消息" placeholder="聊聊你的组队想法，或从一只喜欢的精灵开始…" autocomplete="off"></textarea>
+      <div class="composer-bottom"><span class="composer-label"><span class="status-dot" aria-hidden="true"></span>ROCO 组队顾问</span><div class="composer-actions"><button id="retry-send" type="button" hidden>重试提交</button><button id="stop-btn" type="button" hidden>停止</button><button id="send-btn">发送 <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></div>
+    </div>
+    <p class="composer-hint">Enter 发送<span>·</span>Shift + Enter 换行</p>
   </footer>
 
   <script src="/static/app.js"></script>
