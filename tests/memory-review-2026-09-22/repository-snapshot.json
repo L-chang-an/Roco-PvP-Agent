@@ -1,0 +1,229 @@
+{
+  "audit_date": "2026-09-22",
+  "commit": "b39a6fe0470d973bf1097a3df0d3390c739fac0c",
+  "data_digest": "d_ae5299258f741c05",
+  "rules_digest": "rules_3a91c1772f06",
+  "memory_stores": {
+    "artifacts/mem/entries.jsonl": {
+      "count": 144,
+      "active": 144,
+      "q_min": 0.0,
+      "q_max": 0.9176,
+      "n_used": 0,
+      "n_adopted": 0,
+      "matching_current_data": 144,
+      "provenance_keys": [
+        "data_digest",
+        "rules_version",
+        "source_type"
+      ]
+    },
+    "artifacts/gm/global_entries.jsonl": {
+      "count": 10,
+      "active": 10,
+      "q_min": 0.0,
+      "q_max": 0.3,
+      "n_used": 4,
+      "n_adopted": 0,
+      "matching_current_data": 10,
+      "provenance_keys": [
+        "data_digest",
+        "root_cause",
+        "rules_digest",
+        "side",
+        "source_battle_ids"
+      ]
+    }
+  },
+  "trajectories": {
+    "battles": [
+      {
+        "file": "battles/battle_20260826_112028_886678.json",
+        "done": true,
+        "winner": "a",
+        "turns": 6,
+        "players": null,
+        "keys": []
+      },
+      {
+        "file": "battles/battle_20260830_151608_606860.json",
+        "done": false,
+        "winner": null,
+        "turns": 10,
+        "players": null,
+        "keys": []
+      },
+      {
+        "file": "battles/battle_20260830_155109_261456.json",
+        "done": false,
+        "winner": null,
+        "turns": 6,
+        "players": null,
+        "keys": []
+      },
+      {
+        "file": "battles/battle_20260830_165352_063982.json",
+        "done": false,
+        "winner": null,
+        "turns": 2,
+        "players": null,
+        "keys": []
+      },
+      {
+        "file": "battles/battle_20260830_165633_110312.json",
+        "done": false,
+        "winner": null,
+        "turns": 0,
+        "players": null,
+        "keys": []
+      },
+      {
+        "file": "battles/battle_20260830_165650_751249.json",
+        "done": false,
+        "winner": null,
+        "turns": 1,
+        "players": null,
+        "keys": []
+      }
+    ],
+    "runs": [
+      {
+        "file": "runs/selfplay-11-1.json",
+        "done": true,
+        "winner": "a",
+        "turns": 20,
+        "players": {
+          "a": "fake_llm",
+          "b": "fake_llm"
+        },
+        "keys": [
+          "players"
+        ]
+      },
+      {
+        "file": "runs/selfplay-7-1.json",
+        "done": true,
+        "winner": "a",
+        "turns": 20,
+        "players": {
+          "a": "fake_llm",
+          "b": "fake_llm"
+        },
+        "keys": [
+          "players"
+        ]
+      }
+    ],
+    "artifacts/gm_run": [
+      {
+        "file": "artifacts/gm_run/gm-10-3.json",
+        "done": true,
+        "winner": "b",
+        "turns": 20,
+        "players": {
+          "a": "llm",
+          "b": "llm"
+        },
+        "keys": [
+          "analysis_a",
+          "analysis_b",
+          "players"
+        ]
+      },
+      {
+        "file": "artifacts/gm_run/gm-11-4.json",
+        "done": true,
+        "winner": "b",
+        "turns": 20,
+        "players": {
+          "a": "llm",
+          "b": "llm"
+        },
+        "keys": [
+          "analysis_a",
+          "analysis_b",
+          "global_mem_a",
+          "global_mem_b",
+          "players"
+        ]
+      },
+      {
+        "file": "artifacts/gm_run/gm-12-5.json",
+        "done": true,
+        "winner": "a",
+        "turns": 13,
+        "players": {
+          "a": "llm",
+          "b": "llm"
+        },
+        "keys": [
+          "analysis_a",
+          "analysis_b",
+          "global_mem_a",
+          "global_mem_b",
+          "players"
+        ]
+      },
+      {
+        "file": "artifacts/gm_run/gm-8-1.json",
+        "done": true,
+        "winner": "a",
+        "turns": 12,
+        "players": {
+          "a": "llm",
+          "b": "llm"
+        },
+        "keys": [
+          "analysis_a",
+          "analysis_b",
+          "players"
+        ]
+      },
+      {
+        "file": "artifacts/gm_run/gm-9-2.json",
+        "done": true,
+        "winner": "b",
+        "turns": 15,
+        "players": {
+          "a": "llm",
+          "b": "llm"
+        },
+        "keys": [
+          "analysis_a",
+          "analysis_b",
+          "players"
+        ]
+      }
+    ],
+    "artifacts/llm_probe": [
+      {
+        "file": "artifacts/llm_probe/steps-8-1.json",
+        "done": true,
+        "winner": "a",
+        "turns": 5,
+        "players": {
+          "a": "llm",
+          "b": "style_status"
+        },
+        "keys": [
+          "analysis_a",
+          "players"
+        ]
+      },
+      {
+        "file": "artifacts/llm_probe/steps-9-2.json",
+        "done": true,
+        "winner": "a",
+        "turns": 4,
+        "players": {
+          "a": "llm",
+          "b": "style_energy_denial"
+        },
+        "keys": [
+          "analysis_a",
+          "players"
+        ]
+      }
+    ]
+  }
+}

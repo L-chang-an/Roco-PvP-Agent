@@ -1,0 +1,99 @@
+{
+  "audit_date": "2026-09-22",
+  "network_calls": 0,
+  "unfinished_evidence": {
+    "source": "actual BattleController.record() immediately after construction",
+    "done": false,
+    "winner": null,
+    "turn_count": 0,
+    "replay_ok": true,
+    "query_result": {
+      "kind": "human",
+      "data_digest": "d_ae5299258f741c05",
+      "rules_digest": "rules_3a91c1772f06",
+      "total_games": 1,
+      "by_team": {
+        "ee1758c06a1879a3": {
+          "games": 1,
+          "wins": 0,
+          "opponents": {
+            "286fa20e18942be1": 1
+          },
+          "evidence_ids": [
+            "human:ae529925:audit-unfinished"
+          ],
+          "win_rate": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.7934567085261071
+        }
+      },
+      "replay_ok_rate": 1.0,
+      "digest_unknown_count": 0,
+      "version_mismatch_count": 0
+    },
+    "finding": "An unfinished zero-turn record counts as one game and zero wins."
+  },
+  "mirror_aggregation": {
+    "source": "completed deterministic random-vs-random mirror match",
+    "seed": 1,
+    "done": true,
+    "winner": "b",
+    "replay_ok": true,
+    "aggregate": {
+      "selfplay": {
+        "total_games": 1,
+        "by_team": {
+          "ee1758c06a1879a3": {
+            "games": 1,
+            "wins": 1,
+            "opponents": {
+              "ee1758c06a1879a3": 1
+            },
+            "evidence_ids": [
+              "selfplay:ae529925:audit-mirror-1"
+            ],
+            "win_rate": 1.0,
+            "ci95_low": 0.20654329147389294,
+            "ci95_high": 1.0
+          }
+        },
+        "replay_ok_rate": 1.0,
+        "digest_unknown_count": 0
+      }
+    },
+    "finding": "A side-b mirror win counts as a side-a team win because keys match."
+  },
+  "terminal_metadata_gate": {
+    "source": "same completed replay with only winner metadata flipped",
+    "original_winner": "b",
+    "declared_winner": "a",
+    "replay_ok": true,
+    "finding": "Changing declared winner does not fail the evidence replay gate."
+  },
+  "human_learning_metadata_serialization": {
+    "source": "fake player with LLM-compatible learning-metadata attributes",
+    "record_keys": [
+      "battle_id",
+      "data_digest",
+      "done",
+      "items_a",
+      "items_b",
+      "opponent",
+      "rules",
+      "rules_digest",
+      "saved_at",
+      "seed",
+      "starters",
+      "team_a",
+      "team_b",
+      "turns",
+      "version",
+      "winner"
+    ],
+    "player_has_turn_log": true,
+    "player_has_loaded_global_mem_id": true,
+    "record_has_analysis_b": false,
+    "record_has_global_mem_b": false,
+    "finding": "Human battle persistence discards learning metadata available on player."
+  }
+}

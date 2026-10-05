@@ -1,0 +1,116 @@
+{
+  "scope": "零付费 API；未修改项目源码；mock 分支仅为接线与边界验证，不可解释为胜率证据。",
+  "nonzero_starter_breaks_learning_replay": {
+    "method": "真实引擎 + 确定性随机玩家，仅首发固定为最后一只",
+    "starters": {
+      "a": 2,
+      "b": 2
+    },
+    "engine_replay_ok": true,
+    "analysis_replay_ok": false,
+    "record_turn_count": 20,
+    "analyzed_turn_count": 1,
+    "critical_turn_error": "ValueError: 轨迹重放失配（replay_ok=False）：不可信，拒绝产出关键回合卡片。检查轨迹完整性后重试。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/analysis.py:169",
+      "src/roco_pvp_agent/battle/evolution/credit.py:178",
+      "src/environment/replay.py:42"
+    ]
+  },
+  "memory_absent_from_evaluation_calls": {
+    "method": "真实 run_steps/gate/pool 编排，mock 评分/反思/rollout；只验证参数接线",
+    "calls": [
+      {
+        "call": "score_strategy",
+        "playbook": "pb_v000",
+        "memory_retriever_provided": false
+      },
+      {
+        "call": "score_pair",
+        "playbook": "pb_v000",
+        "memory_retriever_provided": false
+      },
+      {
+        "call": "training_rollout",
+        "memory_retriever_provided": true
+      },
+      {
+        "call": "score_pair",
+        "playbook": "pb_v1",
+        "memory_retriever_provided": false
+      },
+      {
+        "call": "score_strategy",
+        "playbook": "pb_v1",
+        "memory_retriever_provided": false
+      },
+      {
+        "call": "score_pair",
+        "playbook": "pb_v000-exploiter",
+        "memory_retriever_provided": false
+      }
+    ],
+    "candidate_entered": false,
+    "interpretation": "训练 rollout 获得记忆检索器，全部评分调用未获得；不是实力实验。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/run.py:452",
+      "src/roco_pvp_agent/battle/evolution/run.py:463",
+      "src/roco_pvp_agent/battle/evolution/run.py:489",
+      "src/roco_pvp_agent/battle/evolution/run.py:236"
+    ]
+  },
+  "historical_opponent_is_random_proxy": {
+    "method": "仅构造对象，LLMPlayer 替换为无调用 stub；同一本手册用于双方",
+    "subject_type": "OfflineLLMStub",
+    "historical_opponent_type": "PlaybookPlayer",
+    "historical_opponent_policy_delegate": "RandomPlayer",
+    "interpretation": "llm=True 的历史对手仍是手册 hash 决定随机流，不执行历史手册语义。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/run.py:131",
+      "src/roco_pvp_agent/battle/evolution/run.py:142",
+      "src/roco_pvp_agent/battle/player.py:106"
+    ]
+  },
+  "valuefn_battlestate_interface_error": {
+    "error": "AttributeError: 'BattleState' object has no attribute 'view'",
+    "interpretation": "analyze_record 给价值函数的参数正是 BattleState。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/analysis.py:178",
+      "src/roco_pvp_agent/battle/evolution/valuefn.py:113"
+    ]
+  },
+  "slow_update_subset_cannot_fill_pool": {
+    "method": "真实 epoch 慢更新编排，mock 对战评分与 fast step；模拟两轮稳定手册",
+    "pool_instance_count": 60,
+    "slow_evaluation_instance_count": 20,
+    "error": "ValueError: 分数向量缺实例（40 个）。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/run.py:673",
+      "src/roco_pvp_agent/battle/evolution/run.py:708",
+      "src/roco_pvp_agent/battle/evolution/pool.py:371"
+    ]
+  },
+  "resume_accepts_changed_seed_manifest": {
+    "method": "真实续跑检查，n=0 避免对战；已有池仍保留原评测分数",
+    "original_seeds": [
+      1000,
+      1001,
+      1002,
+      1003,
+      1004,
+      1005,
+      1006,
+      1007
+    ],
+    "changed_seeds": [
+      987654321
+    ],
+    "resume_accepted": true,
+    "stored_score_preserved": 0.5,
+    "interpretation": "续跑只校验实例名，无法发现同名实例 seed/阵容或模型、规则变化。",
+    "evidence": [
+      "src/roco_pvp_agent/battle/evolution/run.py:428",
+      "src/roco_pvp_agent/battle/evolution/pool.py:457"
+    ]
+  }
+}

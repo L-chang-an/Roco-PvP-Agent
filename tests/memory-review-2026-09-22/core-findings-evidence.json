@@ -1,0 +1,50 @@
+{
+  "mode": "offline; no real LLM/API calls",
+  "findings": {
+    "self_supersede_deactivates_memory": {
+      "operation_result": {
+        "ok": true,
+        "entry_id": "gm_dae9a292fc3bf891",
+        "reason": "exists"
+      },
+      "active_count": 0,
+      "superseded_by": "gm_dae9a292fc3bf891",
+      "expected_active_count": 1
+    },
+    "empty_store_first_game_has_impossible_adoptions": {
+      "adoption": {
+        "checked": 112,
+        "adopted": 38,
+        "updated": 38
+      },
+      "entry_count": 39,
+      "nonzero_q_entries": 13,
+      "n_used_total": 0,
+      "n_adopted_total": 0,
+      "expected_adopted": 0
+    },
+    "different_active_pets_have_identical_similarity": {
+      "query": "my2/foe2/甲/乙/high/high/0/early/2/2",
+      "entry_key": "my2/foe2/丙/丁/high/high/0/early/2/2",
+      "similarity": 1.0
+    },
+    "missing_digest_passes_local_version_filter": {
+      "hard_match": true,
+      "expected_hard_match": false
+    },
+    "global_q_candidates_span_matchup_keys": {
+      "query_matchup": "3v2|my:types:火3/spd:mid/k:a6|foe:types:水3",
+      "returned_matchup_keys": [
+        "3v2|my:types:草3/spd:mid/k:a6|foe:types:水3"
+      ],
+      "note": "Current hard filter checks scale, not exact matchup bucket."
+    },
+    "duplicate_credit_is_not_idempotent": {
+      "q_after_first": 0.3,
+      "q_after_same_record_again": 0.51,
+      "expected_second_q": 0.3,
+      "n_used": 0,
+      "n_adopted": 0
+    }
+  }
+}
